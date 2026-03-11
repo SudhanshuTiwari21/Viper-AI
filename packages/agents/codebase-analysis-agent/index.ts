@@ -1,6 +1,16 @@
-import { fetchRepo } from "./modules/Repo-Scanner";
+import { runRepoScanner } from "./modules/repo-scanner";
 
-fetchRepo("https://github.com/SudhanshuTiwari21/CT-Graded-Lab.git");
-// export default {
-//     fetchRepo,
-// }
+export { runRepoScanner };
+export type {
+  RepoFetchResult,
+  RepoScanResult,
+  RepoScanPipelineResult,
+  ScannedFileEntry,
+  ParseJob,
+  PersistMetadataAdapter,
+  RunRepoScannerOptions,
+} from "./modules/repo-scanner";
+
+export default {
+  runRepoScanner,
+};

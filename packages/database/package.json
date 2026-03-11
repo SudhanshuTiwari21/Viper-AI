@@ -1,0 +1,25 @@
+{
+  "name": "@repo/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./database.service": "./src/database.service.ts",
+    "./repository.repository": "./src/repository.repository.ts",
+    "./repository-files.repository": "./src/repository-files.repository.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "@types/pg": "^8.11.10",
+    "typescript": "5.9.2"
+  }
+}

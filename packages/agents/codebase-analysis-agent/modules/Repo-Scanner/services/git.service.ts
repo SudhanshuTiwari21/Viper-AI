@@ -11,7 +11,8 @@ export class GitService {
 
   async cloneOrUpdateRepo(repoUrl: string) {
 
-    const repoName = repoUrl.split("/").pop()?.replace(".git", "")!
+    const last = repoUrl.split("/").pop();
+    const repoName = (last ?? "repo").replace(/\.git$/, "") || "repo";
     const repoPath = path.join(this.reposDir, repoName)
 
     if (!fs.existsSync(repoPath)) {
