@@ -3,8 +3,13 @@ import type { RelationshipEdge } from "../types/metadata.types";
 
 export const DEPENDENCY_GRAPH_BUILD_CHANNEL = "dependency_graph.build";
 
+/**
+ * Event payload includes file and module so the graph builder can update incrementally.
+ */
 export interface DependencyGraphBuildEvent {
   repo_id: string;
+  file: string;
+  module: string;
   edges: RelationshipEdge[];
 }
 
@@ -16,7 +21,7 @@ export interface EventPublisherOptions {
 
 /**
  * Publish events for downstream (e.g. Dependency Graph Builder).
- * MVP: Redis pub/sub. Publish dependency_graph.build with repo_id and edges.
+ * MVP: Redis pub/sub. Payload includes file and module for incremental updates.
  */
 export class EventPublisherService {
   private redis: Redis | null = null;

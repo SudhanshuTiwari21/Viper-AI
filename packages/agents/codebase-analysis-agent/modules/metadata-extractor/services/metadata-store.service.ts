@@ -13,21 +13,28 @@ export interface ModuleRecord {
 
 /**
  * Adapter for persisting extracted metadata (e.g. PostgreSQL).
- * Implement with a real client; this interface allows batched inserts.
+ * All methods are batch-oriented: implementors must perform batched inserts
+ * (e.g. INSERT ... VALUES (...), (...), (...) or bulkWrite) to avoid
+ * thousands of single-row queries on large repositories.
  */
 export interface MetadataStoreAdapter {
-  saveFunctions(records: FunctionMetadata[]): Promise<void>;
-  saveClasses(records: ClassMetadata[]): Promise<void>;
-  saveImports(records: ImportMetadata[]): Promise<void>;
-  saveRelationships(edges: RelationshipEdge[]): Promise<void>;
-  saveModules(records: ModuleRecord[]): Promise<void>;
+  /** Insert functions in one batch. */
+  insertFunctionsBatch(records: FunctionMetadata[]): Promise<void>;
+  /** Insert classes in one batch. */
+  insertClassesBatch(records: ClassMetadata[]): Promise<void>;
+  /** Insert import records in one batch. */
+  insertImportsBatch(records: ImportMetadata[]): Promise<void>;
+  /** Insert relationship edges in one batch. */
+  insertRelationshipsBatch(edges: RelationshipEdge[]): Promise<void>;
+  /** Insert module records in one batch. */
+  insertModulesBatch(records: ModuleRecord[]): Promise<void>;
 }
 
 /**
- * In-memory / no-op store for MVP when no database is configured.
- * Replace with a PostgreSQL implementation for production.
+ * Service that delegates to an adapter. Enforces batch semantics: no per-row calls.
+ * When no adapter is set, operations are no-ops (MVP).
  */
-export class MetadataStoreService implements MetadataStoreAdapter {
+export class MetadataStoreService {
   private adapter: MetadataStoreAdapter | null = null;
 
   setAdapter(adapter: MetadataStoreAdapter): void {
@@ -36,26 +43,26 @@ export class MetadataStoreService implements MetadataStoreAdapter {
 
   async saveFunctions(records: FunctionMetadata[]): Promise<void> {
     if (records.length === 0) return;
-    if (this.adapter) await this.adapter.saveFunctions(records);
+    if (this.adapter) await this.adapter.insertFunctionsBatch(records);
   }
 
   async saveClasses(records: ClassMetadata[]): Promise<void> {
     if (records.length === 0) return;
-    if (this.adapter) await this.adapter.saveClasses(records);
+    if (this.adapter) await this.adapter.insertClassesBatch(records);
   }
 
   async saveImports(records: ImportMetadata[]): Promise<void> {
     if (records.length === 0) return;
-    if (this.adapter) await this.adapter.saveImports(records);
+    if (this.adapter) await this.adapter.insertImportsBatch(records);
   }
 
   async saveRelationships(edges: RelationshipEdge[]): Promise<void> {
     if (edges.length === 0) return;
-    if (this.adapter) await this.adapter.saveRelationships(edges);
+    if (this.adapter) await this.adapter.insertRelationshipsBatch(edges);
   }
 
   async saveModules(records: ModuleRecord[]): Promise<void> {
     if (records.length === 0) return;
-    if (this.adapter) await this.adapter.saveModules(records);
+    if (this.adapter) await this.adapter.insertModulesBatch(records);
   }
 }

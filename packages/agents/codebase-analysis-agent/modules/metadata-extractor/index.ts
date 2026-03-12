@@ -7,12 +7,15 @@ export type { MetadataJob, SerializedASTNode } from "./types/metadata-job.types"
 export type {
   NormalizedNode,
   NormalizedNodeType,
+  RelationshipType,
   FunctionMetadata,
   ClassMetadata,
   ImportMetadata,
   RelationshipEdge,
   ResolvedSymbol,
 } from "./types/metadata.types";
+export { toCanonicalId } from "./types/metadata.types";
+export type { DependencyGraphBuildEvent } from "./services/event-publisher.service";
 export { MetadataRedisConsumerService } from "./services/redis-consumer.service";
 export { MetadataStoreService } from "./services/metadata-store.service";
 export { EventPublisherService } from "./services/event-publisher.service";

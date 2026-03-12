@@ -21,7 +21,7 @@ export interface MetadataExtractionPipelineOptions {
 
 /**
  * Run the full pipeline for one job:
- * Validator → Normalizer → Module Mapper → Symbol Resolver → Relationship Extractor → Store → Publish.
+ * Validator → Normalizer → Module Mapper → Symbol Resolver (index) → Relationship Extractor → Store → Publish.
  */
 export async function runMetadataPipeline(
   job: MetadataJob,
@@ -44,12 +44,21 @@ export async function runMetadataPipeline(
   for (const n of normalized) {
     if (n.type === "import" && n.name) fileImports.push(n.name);
   }
-  const context = buildResolverContext(normalized, fileImports, []);
+  const resolverContext = buildResolverContext(
+    normalized,
+    file,
+    module,
+    job.repo_id,
+    fileImports,
+    []
+  );
+
   const edges: RelationshipEdge[] = extractRelationships(
     normalized,
     file,
     module,
-    job.repo_id
+    job.repo_id,
+    resolverContext
   );
 
   const functions: FunctionMetadata[] = [];
@@ -91,6 +100,8 @@ export async function runMetadataPipeline(
   if (edges.length > 0) {
     await eventPublisher.publishDependencyGraphBuild({
       repo_id: job.repo_id,
+      file,
+      module,
       edges,
     });
   }
