@@ -17,3 +17,6 @@ export { GraphEventPublisherService } from "./services/event-publisher.service";
 export { SymbolIndexService } from "./services/symbol-index.service";
 export { DEPENDENCY_GRAPH_BUILD_CHANNEL } from "./services/redis-consumer.service";
 export { GRAPH_UPDATED_CHANNEL } from "./services/event-publisher.service";
+export { PostgresGraphStoreAdapter } from "./adapters/postgres-graph-store.adapter";
+export type { PgQueryClient } from "./adapters/postgres-graph-store.adapter";
+export type { GraphStoreAdapter } from "./services/graph-store.service";

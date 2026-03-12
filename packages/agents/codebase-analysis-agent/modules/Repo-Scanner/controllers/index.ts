@@ -6,7 +6,7 @@ import {
   fileClassifierService,
 } from "../services";
 import type {
-  RepoFetchResult,
+  RepoScanWorkspaceResult,
   RepoScanResult,
   RepoScanWithLanguagesResult,
   RepoScanWithModulesResult,
@@ -18,62 +18,57 @@ import type { FileWithModule, ModuleDetectorOptions } from "../types/module-dete
 import type { FileWithType } from "../types/file-classification.types";
 import { FileType } from "../types/file-classification.types";
 
-export async function fetchRepo(
-  repoUrl: string,
-  branch = "main"
-): Promise<RepoFetchResult> {
-  try {
-    return await repoScannerService.fetchRepo(repoUrl, branch);
-  } catch (error) {
-    throw new Error(`Failed to fetch repository: ${error}`);
-  }
-}
-
+/**
+ * Scan an existing workspace (no git clone). Use Git Tool for clone/pull/checkout.
+ */
 export async function scanRepo(
-  repoUrl: string,
-  branch = "main"
+  workspacePath: string,
+  repo_id: string,
+  branch?: string
 ): Promise<RepoScanResult> {
   try {
-    return await repoScannerService.scanRepo(repoUrl, branch);
+    return await repoScannerService.scanRepo(workspacePath, repo_id, branch);
   } catch (error) {
-    throw new Error(`Failed to scan repository: ${error}`);
+    throw new Error(`Failed to scan workspace: ${error}`);
   }
 }
 
 export async function scanRepoWithLanguages(
-  repoUrl: string,
-  branch = "main"
+  workspacePath: string,
+  repo_id: string,
+  branch?: string
 ): Promise<RepoScanWithLanguagesResult> {
   try {
-    return await repoScannerService.scanRepoWithLanguages(repoUrl, branch);
+    return await repoScannerService.scanRepoWithLanguages(workspacePath, repo_id, branch);
   } catch (error) {
-    throw new Error(`Failed to scan repository with languages: ${error}`);
+    throw new Error(`Failed to scan workspace with languages: ${error}`);
   }
 }
 
 export async function walkRepo(
-  repoPath: string,
+  workspacePath: string,
   options?: WalkOptions
 ): Promise<FileWalkerResult> {
-  return fileSysWalkerService.walk(repoPath, options);
+  return fileSysWalkerService.walk(workspacePath, options);
 }
 
 export async function detectLanguages(
-  repoPath: string,
+  workspacePath: string,
   files: string[],
   options?: LanguageDetectorOptions
 ): Promise<FileWithLanguage[]> {
-  return languageDetectorService.detectAll(repoPath, files, options);
+  return languageDetectorService.detectAll(workspacePath, files, options);
 }
 
 export async function scanRepoWithModules(
-  repoUrl: string,
-  branch = "main"
+  workspacePath: string,
+  repo_id: string,
+  branch?: string
 ): Promise<RepoScanWithModulesResult> {
   try {
-    return await repoScannerService.scanRepoWithModules(repoUrl, branch);
+    return await repoScannerService.scanRepoWithModules(workspacePath, repo_id, branch);
   } catch (error) {
-    throw new Error(`Failed to scan repository with modules: ${error}`);
+    throw new Error(`Failed to scan workspace with modules: ${error}`);
   }
 }
 
@@ -85,13 +80,14 @@ export function detectModules(
 }
 
 export async function scanRepoWithClassification(
-  repoUrl: string,
-  branch = "main"
+  workspacePath: string,
+  repo_id: string,
+  branch?: string
 ): Promise<RepoScanWithClassificationResult> {
   try {
-    return await repoScannerService.scanRepoWithClassification(repoUrl, branch);
+    return await repoScannerService.scanRepoWithClassification(workspacePath, repo_id, branch);
   } catch (error) {
-    throw new Error(`Failed to scan repository with classification: ${error}`);
+    throw new Error(`Failed to scan workspace with classification: ${error}`);
   }
 }
 

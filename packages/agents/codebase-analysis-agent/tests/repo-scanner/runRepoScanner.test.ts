@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runRepoScanner } from "../../modules/repo-scanner/pipeline/scan-repo.pipeline";
 import { FileType } from "../../modules/repo-scanner/types/file-classification.types";
 import type { ScannedFileEntry, ParseJob } from "../../modules/repo-scanner/types/repo-scanner.types";
+import { WorkspaceNotFoundError } from "../../modules/repo-scanner/types/workspace.types";
 
-const MOCK_REPO_URL = "https://github.com/org/backend-service";
+const MOCK_REPO_ID = "backend-service";
 const MOCK_BRANCH = "main";
-const MOCK_REPO_PATH = "/tmp/repos/backend-service";
+const MOCK_WORKSPACE_PATH = "/tmp/repos/backend-service";
 
-const mockFetchRepo = vi.fn();
+const mockResolveWorkspace = vi.fn();
 const mockWalk = vi.fn();
 const mockDetectAllLanguages = vi.fn();
 const mockDetectAllModules = vi.fn();
@@ -16,9 +17,6 @@ const mockFilterByType = vi.fn();
 const mockGenerateJobs = vi.fn();
 
 vi.mock("../../modules/repo-scanner/services", () => ({
-  repoScannerService: {
-    fetchRepo: (...args: unknown[]) => mockFetchRepo(...args),
-  },
   fileSysWalkerService: {
     walk: (...args: unknown[]) => mockWalk(...args),
   },
@@ -37,6 +35,10 @@ vi.mock("../../modules/repo-scanner/services", () => ({
   },
 }));
 
+vi.mock("../../modules/repo-scanner/services/workspace-resolver.service", () => ({
+  resolveWorkspace: (...args: unknown[]) => mockResolveWorkspace(...args),
+}));
+
 function makeFilesWithLanguage(files: string[], lang = "TypeScript") {
   return files.map((file) => ({ file, language: lang }));
 }
@@ -49,9 +51,16 @@ function makeClassified(files: string[], type: FileType) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockFetchRepo.mockResolvedValue({ repoPath: MOCK_REPO_PATH, branch: MOCK_BRANCH });
-  mockWalk.mockResolvedValue({ files: ["src/auth/login.ts", "src/auth/session.ts", "README.md"], directories: [] });
-  mockDetectAllLanguages.mockImplementation((_repoPath: string, files: string[]) =>
+  mockResolveWorkspace.mockResolvedValue({
+    workspacePath: MOCK_WORKSPACE_PATH,
+    repo_id: MOCK_REPO_ID,
+    branch: MOCK_BRANCH,
+  });
+  mockWalk.mockResolvedValue({
+    files: ["src/auth/login.ts", "src/auth/session.ts", "README.md"],
+    directories: [],
+  });
+  mockDetectAllLanguages.mockImplementation((_workspacePath: string, files: string[]) =>
     Promise.resolve(makeFilesWithLanguage(files))
   );
   mockDetectAllModules.mockImplementation((files: string[]) => makeFilesWithModule(files));
@@ -67,9 +76,9 @@ beforeEach(() => {
       classified.filter((c) => c.type === type)
   );
   mockGenerateJobs.mockImplementation(
-    (_repoName: string, sourceFiles: Array<{ file: string; language: string; module: string }>) =>
+    (_repoId: string, sourceFiles: Array<{ file: string; language: string; module: string }>) =>
       sourceFiles.map((f) => ({
-        repo: "backend-service",
+        repo: MOCK_REPO_ID,
         file: f.file,
         language: f.language.toLowerCase(),
         module: f.module,
@@ -79,10 +88,15 @@ beforeEach(() => {
 
 describe("runRepoScanner", () => {
   it("1. pipeline executes all stages and returns correct output structure", async () => {
-    const result = await runRepoScanner(MOCK_REPO_URL, MOCK_BRANCH);
+    const result = await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+      branch: MOCK_BRANCH,
+    });
 
     expect(result).toMatchObject({
-      repoPath: MOCK_REPO_PATH,
+      workspacePath: MOCK_WORKSPACE_PATH,
+      repo_id: MOCK_REPO_ID,
       branch: MOCK_BRANCH,
     });
     expect(Array.isArray(result.files)).toBe(true);
@@ -92,13 +106,17 @@ describe("runRepoScanner", () => {
     expect(result.sourceFiles.length).toBe(2);
     expect(result.jobs.length).toBe(2);
 
-    expect(mockFetchRepo).toHaveBeenCalledWith(MOCK_REPO_URL, MOCK_BRANCH);
-    expect(mockWalk).toHaveBeenCalledWith(MOCK_REPO_PATH);
-    expect(mockDetectAllLanguages).toHaveBeenCalledWith(MOCK_REPO_PATH, expect.any(Array));
+    expect(mockResolveWorkspace).toHaveBeenCalledWith({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+      branch: MOCK_BRANCH,
+    });
+    expect(mockWalk).toHaveBeenCalledWith(MOCK_WORKSPACE_PATH);
+    expect(mockDetectAllLanguages).toHaveBeenCalledWith(MOCK_WORKSPACE_PATH, expect.any(Array));
     expect(mockDetectAllModules).toHaveBeenCalledWith(expect.any(Array));
     expect(mockClassifyAll).toHaveBeenCalledWith(expect.any(Array));
     expect(mockFilterByType).toHaveBeenCalled();
-    expect(mockGenerateJobs).toHaveBeenCalledWith("backend-service", expect.any(Array));
+    expect(mockGenerateJobs).toHaveBeenCalledWith(MOCK_REPO_ID, expect.any(Array));
   });
 
   it("2. file metadata (language, module, type) is aggregated correctly into filesList", async () => {
@@ -124,7 +142,10 @@ describe("runRepoScanner", () => {
         classified.filter((c) => c.type === type)
     );
 
-    const result = await runRepoScanner(MOCK_REPO_URL);
+    const result = await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
     expect(result.files).toHaveLength(3);
     const filesList = result.files as ScannedFileEntry[];
@@ -156,30 +177,41 @@ describe("runRepoScanner", () => {
     );
     mockGenerateJobs.mockImplementation(
       (_: string, sourceFiles: Array<{ file: string; language: string; module: string }>) =>
-        sourceFiles.map((f) => ({ repo: "backend-service", file: f.file, language: "typescript", module: "root" }))
+        sourceFiles.map((f) => ({
+          repo: MOCK_REPO_ID,
+          file: f.file,
+          language: "typescript",
+          module: "root",
+        }))
     );
 
-    const result = await runRepoScanner(MOCK_REPO_URL);
+    const result = await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
     expect(result.files.length).toBe(3);
     expect(result.sourceFiles.length).toBe(1);
-    expect(result.sourceFiles[0].file).toBe("src/login.ts");
+    expect(result.sourceFiles[0]).toBeDefined();
+    expect(result.sourceFiles[0]!.file).toBe("src/login.ts");
     expect(result.jobs.length).toBe(1);
-    expect((result.jobs as ParseJob[])[0].file).toBe("src/login.ts");
+    expect((result.jobs as ParseJob[])[0]).toBeDefined();
+    expect((result.jobs as ParseJob[])[0]!.file).toBe("src/login.ts");
   });
 
   it("4. metadata persistence runs when persistMetadata is provided", async () => {
     const saveRepository = vi.fn().mockResolvedValue("repo-uuid-123");
     const insertRepositoryFiles = vi.fn().mockResolvedValue(undefined);
 
-    const result = await runRepoScanner(MOCK_REPO_URL, MOCK_BRANCH, {
-      persistMetadata: { saveRepository, insertRepositoryFiles },
-    });
+    const result = await runRepoScanner(
+      { repo_id: MOCK_REPO_ID, workspacePath: MOCK_WORKSPACE_PATH, branch: MOCK_BRANCH },
+      { persistMetadata: { saveRepository, insertRepositoryFiles } }
+    );
 
     expect(saveRepository).toHaveBeenCalledTimes(1);
     expect(saveRepository).toHaveBeenCalledWith({
-      repoUrl: MOCK_REPO_URL,
-      repoPath: MOCK_REPO_PATH,
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
       branch: MOCK_BRANCH,
     });
     expect(insertRepositoryFiles).toHaveBeenCalledTimes(1);
@@ -192,7 +224,10 @@ describe("runRepoScanner", () => {
     const saveRepository = vi.fn();
     const insertRepositoryFiles = vi.fn();
 
-    await runRepoScanner(MOCK_REPO_URL);
+    await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
     expect(saveRepository).not.toHaveBeenCalled();
     expect(insertRepositoryFiles).not.toHaveBeenCalled();
@@ -210,10 +245,13 @@ describe("runRepoScanner", () => {
     );
     mockGenerateJobs.mockClear();
 
-    await runRepoScanner(MOCK_REPO_URL);
+    await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
     expect(mockGenerateJobs).toHaveBeenCalledWith(
-      "backend-service",
+      MOCK_REPO_ID,
       expect.arrayContaining([
         expect.objectContaining({ file: "src/a.ts", language: "TypeScript", module: "root" }),
         expect.objectContaining({ file: "src/b.ts", language: "TypeScript", module: "root" }),
@@ -229,41 +267,65 @@ describe("runRepoScanner", () => {
     mockFilterByType.mockReturnValue([]);
     mockGenerateJobs.mockReturnValue([]);
 
-    const result = await runRepoScanner(MOCK_REPO_URL);
+    const result = await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
     expect(result.files).toEqual([]);
     expect(result.sourceFiles).toEqual([]);
     expect(result.jobs).toEqual([]);
-    expect(result.repoPath).toBe(MOCK_REPO_PATH);
+    expect(result.workspacePath).toBe(MOCK_WORKSPACE_PATH);
+    expect(result.repo_id).toBe(MOCK_REPO_ID);
     expect(result.branch).toBe(MOCK_BRANCH);
-    expect(mockGenerateJobs).toHaveBeenCalledWith("backend-service", []);
+    expect(mockGenerateJobs).toHaveBeenCalledWith(MOCK_REPO_ID, []);
   });
 
   it("8. pipeline handles unknown languages gracefully", async () => {
     mockWalk.mockResolvedValue({ files: ["src/unknown.xyz"], directories: [] });
-    mockDetectAllLanguages.mockResolvedValue([{ file: "src/unknown.xyz", language: "Unknown" }]);
+    mockDetectAllLanguages.mockResolvedValue([
+      { file: "src/unknown.xyz", language: "Unknown" },
+    ]);
     mockDetectAllModules.mockReturnValue([{ file: "src/unknown.xyz", module: "root" }]);
     mockClassifyAll.mockReturnValue([{ file: "src/unknown.xyz", type: FileType.OTHER }]);
     mockFilterByType.mockReturnValue([]);
     mockGenerateJobs.mockReturnValue([]);
 
-    const result = await runRepoScanner(MOCK_REPO_URL);
+    const result = await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
     expect(result.files).toHaveLength(1);
-    expect(result.files[0]).toMatchObject({ file: "src/unknown.xyz", language: "Unknown", module: "root" });
+    expect(result.files[0]).toMatchObject({
+      file: "src/unknown.xyz",
+      language: "Unknown",
+      module: "root",
+    });
     expect(result.sourceFiles).toHaveLength(0);
     expect(result.jobs).toHaveLength(0);
   });
 
   it("9. pipeline returns deterministic output structure (shape)", async () => {
-    const result = await runRepoScanner(MOCK_REPO_URL);
+    const result = await runRepoScanner({
+      repo_id: MOCK_REPO_ID,
+      workspacePath: MOCK_WORKSPACE_PATH,
+    });
 
-    expect(result).toHaveProperty("repoPath");
+    expect(result).toHaveProperty("workspacePath");
+    expect(result).toHaveProperty("repo_id");
     expect(result).toHaveProperty("branch");
     expect(result).toHaveProperty("files");
     expect(result).toHaveProperty("sourceFiles");
     expect(result).toHaveProperty("jobs");
-    expect(Object.keys(result).sort()).toEqual(["branch", "files", "jobs", "repoPath", "sourceFiles"]);
+    expect(Object.keys(result).sort()).toEqual([
+      "branch",
+      "files",
+      "jobs",
+      "repo_id",
+      "sourceFiles",
+      "workspacePath",
+    ]);
 
     for (const entry of result.files) {
       expect(entry).toHaveProperty("file");
@@ -282,5 +344,17 @@ describe("runRepoScanner", () => {
       expect(job).toHaveProperty("language");
       expect(job).toHaveProperty("module");
     }
+  });
+
+  it("10. throws WorkspaceNotFoundError when workspace path does not exist", async () => {
+    mockResolveWorkspace.mockRejectedValue(
+      new WorkspaceNotFoundError("/nonexistent/workspace")
+    );
+
+    await expect(
+      runRepoScanner({ repo_id: MOCK_REPO_ID, workspacePath: "/nonexistent/workspace" })
+    ).rejects.toThrow(WorkspaceNotFoundError);
+
+    expect(mockWalk).not.toHaveBeenCalled();
   });
 });

@@ -1,68 +1,67 @@
-import { GitService } from "./git.service";
 import { FileSysWalkerService } from "./filesyswalker.service";
 import { LanguageDetectorService } from "./language-detector.service";
 import { ModuleDetectorService } from "./module-detector.service";
 import { FileClassifierService } from "./file-classifier.service";
 import type {
-  RepoFetchResult,
+  RepoScanWorkspaceResult,
   RepoScanResult,
   RepoScanWithLanguagesResult,
   RepoScanWithModulesResult,
   RepoScanWithClassificationResult,
 } from "../types/repo-scanner.types";
 
+/**
+ * Repo Scanner service. Operates only on an existing workspace path.
+ * No git operations; cloning is done by the Git Tool (Intent Agent).
+ */
 export class RepoScannerService {
   constructor(
-    private gitService = new GitService(),
     private fileWalker = new FileSysWalkerService(),
     private languageDetector = new LanguageDetectorService(),
     private moduleDetector = new ModuleDetectorService(),
     private fileClassifier = new FileClassifierService()
   ) {}
 
-  async fetchRepo(repoUrl: string, branch = "main"): Promise<RepoFetchResult> {
-    const repoPath = await this.gitService.cloneOrUpdateRepo(repoUrl);
-    await this.gitService.checkoutBranch(repoPath, branch);
-    return { repoPath, branch };
+  /** Walk workspace and return file paths. */
+  async scanRepo(
+    workspacePath: string,
+    repo_id: string,
+    branch?: string
+  ): Promise<RepoScanResult> {
+    const files = await this.fileWalker.walkFiles(workspacePath);
+    return { workspacePath, repo_id, branch, files };
   }
 
-  /** Clone/fetch repo, then run File System Walker to get all file paths. */
-  async scanRepo(repoUrl: string, branch = "main"): Promise<RepoScanResult> {
-    const { repoPath, branch: resolvedBranch } = await this.fetchRepo(repoUrl, branch);
-    const files = await this.fileWalker.walkFiles(repoPath);
-    return { repoPath, branch: resolvedBranch, files };
-  }
-
-  /** Clone/fetch → walk files → detect language per file (for File Classification pipeline). */
+  /** Walk workspace → detect language per file. */
   async scanRepoWithLanguages(
-    repoUrl: string,
-    branch = "main"
+    workspacePath: string,
+    repo_id: string,
+    branch?: string
   ): Promise<RepoScanWithLanguagesResult> {
-    const { repoPath, branch: resolvedBranch } = await this.fetchRepo(repoUrl, branch);
-    const files = await this.fileWalker.walkFiles(repoPath);
-    const filesWithLanguage = await this.languageDetector.detectAll(repoPath, files);
-    return { repoPath, branch: resolvedBranch, filesWithLanguage };
+    const files = await this.fileWalker.walkFiles(workspacePath);
+    const filesWithLanguage = await this.languageDetector.detectAll(workspacePath, files);
+    return { workspacePath, repo_id, branch, filesWithLanguage };
   }
 
-  /** Clone/fetch → walk files → detect logical module per file (Module/Service Detector). */
+  /** Walk workspace → detect logical module per file. */
   async scanRepoWithModules(
-    repoUrl: string,
-    branch = "main"
+    workspacePath: string,
+    repo_id: string,
+    branch?: string
   ): Promise<RepoScanWithModulesResult> {
-    const { repoPath, branch: resolvedBranch } = await this.fetchRepo(repoUrl, branch);
-    const files = await this.fileWalker.walkFiles(repoPath);
+    const files = await this.fileWalker.walkFiles(workspacePath);
     const filesWithModule = this.moduleDetector.detectAll(files);
-    return { repoPath, branch: resolvedBranch, filesWithModule };
+    return { workspacePath, repo_id, branch, filesWithModule };
   }
 
-  /** Clone/fetch → walk files → classify each file (source, test, config, documentation, generated). */
+  /** Walk workspace → classify each file (source, test, config, etc.). */
   async scanRepoWithClassification(
-    repoUrl: string,
-    branch = "main"
+    workspacePath: string,
+    repo_id: string,
+    branch?: string
   ): Promise<RepoScanWithClassificationResult> {
-    const { repoPath, branch: resolvedBranch } = await this.fetchRepo(repoUrl, branch);
-    const files = await this.fileWalker.walkFiles(repoPath);
+    const files = await this.fileWalker.walkFiles(workspacePath);
     const filesWithType = this.fileClassifier.classifyAll(files);
-    return { repoPath, branch: resolvedBranch, filesWithType };
+    return { workspacePath, repo_id, branch, filesWithType };
   }
 }

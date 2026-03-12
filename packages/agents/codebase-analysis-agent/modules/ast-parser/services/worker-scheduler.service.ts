@@ -3,6 +3,7 @@ import type { SerializedAST } from "../types/ast-parser.types";
 import { RedisConsumerService } from "./redis-consumer.service";
 import { ASTWorker } from "../workers/ast-worker";
 import type { MetadataPublisherService } from "./metadata-publisher.service";
+import type { AstStoreService } from "./ast-store.service";
 
 export interface WorkerSchedulerOptions {
   redisConsumer: RedisConsumerService;
@@ -16,6 +17,8 @@ export interface WorkerSchedulerOptions {
   getRepoRoot?: (repo: string) => string;
   /** If set, worker publishes extracted metadata + serialized AST to next stage. */
   metadataPublisher?: MetadataPublisherService;
+  /** If set, worker stores serialized AST (file_asts). */
+  astStore?: AstStoreService;
 }
 
 /**
@@ -42,6 +45,7 @@ export class WorkerScheduler {
     this.worker = new ASTWorker({
       getRepoRoot: this.getRepoRoot,
       metadataPublisher: options.metadataPublisher,
+      astStore: options.astStore,
     });
   }
 

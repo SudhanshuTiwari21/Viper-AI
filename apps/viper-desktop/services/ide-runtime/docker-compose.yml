@@ -1,0 +1,20 @@
+# code-server (VSCode in browser) for Viper Desktop IDE
+# Run: docker compose up -d
+# Editor: http://localhost:8080 (no password when using --auth none)
+# Workspace: ~/.viper/workspaces (mounted into container)
+
+services:
+  vscode:
+    image: codercom/code-server
+    container_name: viper-vscode
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/.viper/workspaces:/home/coder/workspace
+      - ./code-server-user/User:/home/coder/.local/share/code-server/User
+    command:
+      - "--bind-addr"
+      - "0.0.0.0:8080"
+      - "--auth"
+      - "none"
+    restart: unless-stopped

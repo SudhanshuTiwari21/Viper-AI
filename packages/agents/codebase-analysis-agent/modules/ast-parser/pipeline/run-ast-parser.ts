@@ -1,6 +1,7 @@
 import { RedisConsumerService } from "../services/redis-consumer.service";
 import { WorkerScheduler } from "../services/worker-scheduler.service";
 import { MetadataPublisherService } from "../services/metadata-publisher.service";
+import type { AstStoreService } from "../services/ast-store.service";
 
 export interface StartASTParserWorkersOptions {
   /** Redis connection. */
@@ -19,6 +20,8 @@ export interface StartASTParserWorkersOptions {
   metadataPublish?:
     | { url?: string; host?: string; port?: number; queueName?: string }
     | MetadataPublisherService;
+  /** If set, workers store serialized AST (file_asts). Storage happens inside AST module. */
+  astStore?: AstStoreService;
 }
 
 /**
@@ -55,6 +58,7 @@ export function startASTParserWorkers(
     retryAttempts: options.retryAttempts ?? 3,
     getRepoRoot: options.getRepoRoot,
     metadataPublisher,
+    astStore: options.astStore,
   });
 
   scheduler.start();

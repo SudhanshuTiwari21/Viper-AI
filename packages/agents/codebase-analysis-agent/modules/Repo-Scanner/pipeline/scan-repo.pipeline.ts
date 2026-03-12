@@ -1,25 +1,26 @@
 import path from "path";
 import {
-  repoScannerService,
   fileSysWalkerService,
   languageDetectorService,
   moduleDetectorService,
   fileClassifierService,
   jobGeneratorService,
 } from "../services";
+import { resolveWorkspace } from "../services/workspace-resolver.service";
 import { FileType, type FileWithType } from "../types/file-classification.types";
 import type {
   RepoScanPipelineResult,
   ScannedFileEntry,
   ParseJob,
+  RunRepoScannerInput,
   RunRepoScannerOptions,
 } from "../types/repo-scanner.types";
 
 /** Single data object passed through the pipeline. Each step only modifies state. */
 interface PipelineState {
-  repoUrl: string;
-  repoPath: string;
-  branch: string;
+  workspacePath: string;
+  repo_id: string;
+  branch?: string;
   files: string[];
   filesWithLanguage: Array<{ file: string; language: string }>;
   filesWithModule: Array<{ file: string; module: string }>;
@@ -29,32 +30,16 @@ interface PipelineState {
   jobs: ParseJob[];
 }
 
-async function stepFetch(repoUrl: string, branch: string): Promise<PipelineState> {
-  const fetched = await repoScannerService.fetchRepo(repoUrl, branch);
-  return {
-    repoUrl,
-    repoPath: fetched.repoPath,
-    branch: fetched.branch,
-    files: [],
-    filesWithLanguage: [],
-    filesWithModule: [],
-    classified: [],
-    sourceFiles: [],
-    filesList: [],
-    jobs: [],
-  };
-}
-
-async function stepWalk(repoPath: string): Promise<string[]> {
-  const walked = await fileSysWalkerService.walk(repoPath);
+async function stepWalk(workspacePath: string): Promise<string[]> {
+  const walked = await fileSysWalkerService.walk(workspacePath);
   return walked.files;
 }
 
 async function stepDetectLanguages(
-  repoPath: string,
+  workspacePath: string,
   files: string[]
 ): Promise<Array<{ file: string; language: string }>> {
-  return languageDetectorService.detectAll(repoPath, files);
+  return languageDetectorService.detectAll(workspacePath, files);
 }
 
 function stepDetectModules(files: string[]): Array<{ file: string; module: string }> {
@@ -94,27 +79,37 @@ function stepFilterSource(
 }
 
 function stepGenerateJobs(
-  repoPath: string,
+  repo_id: string,
   sourceFiles: Array<{ file: string; language: string; module: string }>
 ): ParseJob[] {
-  const repoName = path.basename(repoPath);
-  return jobGeneratorService.generateJobs(repoName, sourceFiles);
+  return jobGeneratorService.generateJobs(repo_id, sourceFiles);
 }
 
 /**
- * Pipeline: fetch → walk → detectLanguages → detectModules → classify → filterSource → generateJobs.
- * Each step only modifies pipeline state. Returns jobs; orchestrator pushes to Redis if needed.
+ * Pipeline: resolveWorkspace → walkWorkspace → detectLanguages → detectModules → classify → filterSource → generateJobs.
+ * No git operations; workspace must already exist (e.g. cloned by Git Tool).
  */
 export async function runRepoScanner(
-  repoUrl: string,
-  branch = "main",
+  input: RunRepoScannerInput,
   options: RunRepoScannerOptions = {}
 ): Promise<RepoScanPipelineResult> {
-  const state = await stepFetch(repoUrl, branch);
+  const resolved = await resolveWorkspace(input);
+  const state: PipelineState = {
+    workspacePath: resolved.workspacePath,
+    repo_id: resolved.repo_id,
+    branch: resolved.branch,
+    files: [],
+    filesWithLanguage: [],
+    filesWithModule: [],
+    classified: [],
+    sourceFiles: [],
+    filesList: [],
+    jobs: [],
+  };
 
-  state.files = await stepWalk(state.repoPath);
+  state.files = await stepWalk(state.workspacePath);
 
-  state.filesWithLanguage = await stepDetectLanguages(state.repoPath, state.files);
+  state.filesWithLanguage = await stepDetectLanguages(state.workspacePath, state.files);
 
   state.filesWithModule = stepDetectModules(state.files);
 
@@ -131,17 +126,18 @@ export async function runRepoScanner(
 
   if (options?.persistMetadata) {
     const repoId = await options.persistMetadata.saveRepository({
-      repoUrl: state.repoUrl,
-      repoPath: state.repoPath,
+      repo_id: state.repo_id,
+      workspacePath: state.workspacePath,
       branch: state.branch,
     });
     await options.persistMetadata.insertRepositoryFiles(repoId, state.filesList);
   }
 
-  state.jobs = stepGenerateJobs(state.repoPath, state.sourceFiles);
+  state.jobs = stepGenerateJobs(state.repo_id, state.sourceFiles);
 
   return {
-    repoPath: state.repoPath,
+    workspacePath: state.workspacePath,
+    repo_id: state.repo_id,
     branch: state.branch,
     files: state.filesList,
     sourceFiles: state.sourceFiles,

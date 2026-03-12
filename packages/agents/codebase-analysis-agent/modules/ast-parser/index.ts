@@ -3,6 +3,7 @@ export type { StartASTParserWorkersOptions } from "./pipeline/run-ast-parser";
 export { WorkerScheduler } from "./services/worker-scheduler.service";
 export { RedisConsumerService } from "./services/redis-consumer.service";
 export { MetadataPublisherService } from "./services/metadata-publisher.service";
+export { AstStoreService } from "./services/ast-store.service";
 export type { ASTParseJob } from "./types/ast-job.types";
 export type {
   ASTNode,

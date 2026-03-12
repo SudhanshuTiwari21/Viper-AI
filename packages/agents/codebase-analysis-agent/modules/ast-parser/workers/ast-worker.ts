@@ -5,11 +5,14 @@ import { validateAST } from "../validators/ast-validator";
 import { serializeAST } from "../serializers/ast-serializer";
 import { extractStructure } from "../extractors/structure-extractor";
 import type { MetadataPublisherService } from "../services/metadata-publisher.service";
+import type { AstStoreService } from "../services/ast-store.service";
 
 export interface ASTWorkerOptions {
   getRepoRoot: (repo: string) => string;
   /** If set, publish extracted metadata + serialized AST to next stage (metadata.extract.request). */
   metadataPublisher?: MetadataPublisherService;
+  /** If set, store serialized AST (file_asts). Storage happens inside AST module. */
+  astStore?: AstStoreService;
 }
 
 /**
@@ -18,12 +21,14 @@ export interface ASTWorkerOptions {
 export class ASTWorker {
   private readonly parserEngine: ParserEngine;
   private readonly metadataPublisher?: MetadataPublisherService;
+  private readonly astStore?: AstStoreService;
 
   constructor(options: ASTWorkerOptions) {
     this.parserEngine = new ParserEngine({
       getRepoRoot: options.getRepoRoot,
     });
     this.metadataPublisher = options.metadataPublisher;
+    this.astStore = options.astStore;
   }
 
   async run(job: ASTParseJob): Promise<SerializedAST | SerializedAST[]> {
@@ -48,6 +53,10 @@ export class ASTWorker {
     });
 
     const serialized = serializeAST(ast);
+
+    if (this.astStore) {
+      await this.astStore.saveAST({ repo_id: job.repo, file: job.file, ast: serialized });
+    }
 
     if (this.metadataPublisher) {
       await this.metadataPublisher.publish({

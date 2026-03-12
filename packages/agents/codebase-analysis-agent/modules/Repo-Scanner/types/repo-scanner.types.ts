@@ -1,24 +1,26 @@
-export interface RepoFetchResult {
-  repoPath: string;
-  branch: string;
+/** Result shape for pipeline output (workspace-based; no git). */
+export interface RepoScanWorkspaceResult {
+  workspacePath: string;
+  branch?: string;
+  repo_id: string;
 }
 
-export interface RepoScanResult extends RepoFetchResult {
+export interface RepoScanResult extends RepoScanWorkspaceResult {
   /** Relative file paths from repo root (File System Walker output) */
   files: string[];
 }
 
-export interface RepoScanWithLanguagesResult extends RepoFetchResult {
+export interface RepoScanWithLanguagesResult extends RepoScanWorkspaceResult {
   /** File paths with detected language (Language Detector output) */
   filesWithLanguage: Array<{ file: string; language: string }>;
 }
 
-export interface RepoScanWithModulesResult extends RepoFetchResult {
+export interface RepoScanWithModulesResult extends RepoScanWorkspaceResult {
   /** File paths with detected logical module (Module/Service Detector output) */
   filesWithModule: Array<{ file: string; module: string }>;
 }
 
-export interface RepoScanWithClassificationResult extends RepoFetchResult {
+export interface RepoScanWithClassificationResult extends RepoScanWorkspaceResult {
   /** File paths with classification type (File Classification output; source → AST, generated → ignore) */
   filesWithType: Array<{ file: string; type: string }>;
 }
@@ -32,7 +34,7 @@ export interface ScannedFileEntry {
 }
 
 /** Result of runRepoScanner: full pipeline output. Orchestrator pushes jobs to Redis if needed. */
-export interface RepoScanPipelineResult extends RepoFetchResult {
+export interface RepoScanPipelineResult extends RepoScanWorkspaceResult {
   /** All scanned files with language, module, and classification. */
   files: ScannedFileEntry[];
   /** Source files only, ready for AST parsing. */
@@ -52,11 +54,17 @@ export interface ParseJob {
 /** Optional metadata persistence. Pipeline calls this after filterSource, before generateJobs. */
 export interface PersistMetadataAdapter {
   saveRepository(params: {
-    repoUrl: string;
-    repoPath: string;
-    branch: string;
+    repo_id: string;
+    workspacePath: string;
+    branch?: string;
   }): Promise<string>;
   insertRepositoryFiles(repoId: string, filesList: ScannedFileEntry[]): Promise<void>;
+}
+
+export interface RunRepoScannerInput {
+  repo_id: string;
+  workspacePath: string;
+  branch?: string;
 }
 
 export interface RunRepoScannerOptions {
