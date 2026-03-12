@@ -8,6 +8,8 @@
     "scripts": {
         "lint": "eslint . --max-warnings 0",
         "check-types": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "dev": "ts-node index.ts",
         "build": "tsc"
     },
@@ -19,6 +21,7 @@
         "@repo/typescript-config": "*",
         "@types/node": "^22.15.3",
         "eslint": "^9.39.1",
-        "typescript": "5.9.2"
+        "typescript": "5.9.2",
+        "vitest": "^2.1.6"
     }
 }
