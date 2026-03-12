@@ -32,9 +32,13 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.setupTerminalService = setupTerminalService;
 const electron_1 = require("electron");
+const path_1 = __importDefault(require("path"));
 const ptyMap = new Map();
 function getPty(webContentsId) {
     return ptyMap.get(webContentsId)?.pty;
@@ -52,26 +56,40 @@ function setupTerminalService() {
             }
             ptyMap.delete(id);
         }
-        const shell = process.platform === "win32"
-            ? process.env.COMSPEC ?? "cmd.exe"
-            : process.env.SHELL ?? "/bin/bash";
         const nodePty = await Promise.resolve().then(() => __importStar(require("node-pty")));
         const fallbackCwd = process.env.HOME ?? process.env.USERPROFILE ?? process.cwd();
         const cwd = (workspaceRoot && workspaceRoot.trim() !== "") ? workspaceRoot : fallbackCwd;
-        const pty = nodePty.spawn(shell, [], {
-            cwd,
-            env: process.env,
-            cols: 80,
-            rows: 24,
-        });
-        pty.onData((data) => {
-            event.sender.send("terminal:data", { data });
-        });
-        pty.onExit(() => {
-            ptyMap.delete(id);
-        });
-        ptyMap.set(id, { pty });
-        return { ok: true };
+        const shells = process.platform === "win32"
+            ? [process.env.COMSPEC ?? "cmd.exe"]
+            : [
+                process.env.SHELL && path_1.default.isAbsolute(process.env.SHELL) ? process.env.SHELL : "",
+                "/bin/zsh",
+                "/bin/bash",
+                "/bin/sh",
+            ].filter(Boolean);
+        for (const shell of shells) {
+            try {
+                const pty = nodePty.spawn(shell, [], {
+                    cwd,
+                    env: process.env,
+                    cols: 80,
+                    rows: 24,
+                });
+                pty.onData((data) => {
+                    event.sender.send("terminal:data", { data });
+                });
+                pty.onExit(() => {
+                    ptyMap.delete(id);
+                });
+                ptyMap.set(id, { pty });
+                return { ok: true, shell };
+            }
+            catch (err) {
+                console.error("terminal:create failed for shell", shell, err);
+            }
+        }
+        console.error("terminal:create: all shell candidates failed");
+        return { ok: false };
     });
     electron_1.ipcMain.handle("terminal:write", (event, data) => {
         const pty = getPty(event.sender.id);

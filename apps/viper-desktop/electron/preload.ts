@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("viper", {
       ipcRenderer.invoke("file:write", root, rel, content) as Promise<void>,
     createFile: (root: string, rel: string) =>
       ipcRenderer.invoke("file:create", root, rel) as Promise<void>,
+    createFolder: (root: string, rel: string) =>
+      ipcRenderer.invoke("file:createFolder", root, rel) as Promise<void>,
     deletePath: (root: string, rel: string) =>
       ipcRenderer.invoke("file:delete", root, rel) as Promise<void>,
     renamePath: (root: string, oldRel: string, newRel: string) =>
@@ -35,5 +37,10 @@ contextBridge.exposeInMainWorld("viper", {
     onData: (cb: (data: string) => void) => {
       ipcRenderer.on("terminal:data", (_e, payload: { data: string }) => cb(payload.data));
     },
+  },
+  git: {
+    branch: (root: string) => ipcRenderer.invoke("git:branch", root) as Promise<string>,
+    log: (root: string, relPath: string) =>
+      ipcRenderer.invoke("git:log", root, relPath) as Promise<string[]>,
   },
 });

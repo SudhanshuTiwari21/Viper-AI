@@ -17,6 +17,7 @@ declare global {
         readFile: (root: string, rel: string) => Promise<string>;
         writeFile: (root: string, rel: string, content: string) => Promise<void>;
         createFile: (root: string, rel: string) => Promise<void>;
+        createFolder: (root: string, rel: string) => Promise<void>;
         deletePath: (root: string, rel: string) => Promise<void>;
         renamePath: (root: string, oldRel: string, newRel: string) => Promise<void>;
         onFileChanged: (cb: (payload: { path: string }) => void) => void;
@@ -27,6 +28,10 @@ declare global {
         resize: (cols: number, rows: number) => Promise<void>;
         destroy: () => Promise<void>;
         onData: (cb: (data: string) => void) => void;
+      };
+      git: {
+        branch: (root: string) => Promise<string>;
+        log: (root: string, relPath: string) => Promise<string[]>;
       };
     };
   }
@@ -49,6 +54,7 @@ export const fsApi = {
   writeFile: (root: string, rel: string, content: string) =>
     window.viper.fs.writeFile(root, rel, content),
   createFile: (root: string, rel: string) => window.viper.fs.createFile(root, rel),
+  createFolder: (root: string, rel: string) => window.viper.fs.createFolder(root, rel),
   deletePath: (root: string, rel: string) => window.viper.fs.deletePath(root, rel),
   renamePath: (root: string, oldRel: string, newRel: string) =>
     window.viper.fs.renamePath(root, oldRel, newRel),

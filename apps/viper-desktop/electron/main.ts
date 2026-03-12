@@ -3,6 +3,7 @@ import { createMainWindow } from "./window";
 import { setupWorkspaceService } from "../backend/workspace-service";
 import { setupFileService } from "../backend/file-service";
 import { setupTerminalService } from "../backend/terminal-service";
+import { setupGitService } from "../backend/git-service";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -13,6 +14,7 @@ function init(): void {
   setupWorkspaceService();
   setupFileService();
   setupTerminalService();
+  setupGitService();
 
   mainWindow = createMainWindow(isDev);
 

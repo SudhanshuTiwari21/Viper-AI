@@ -1,6 +1,10 @@
 import React, { Component, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { WorkspaceProvider } from "./contexts/workspace-context";
+import { CurrentFileProvider } from "./contexts/current-file-context";
+import { OutputProvider } from "./contexts/output-context";
+import { StatusBarProvider } from "./contexts/status-bar-context";
+import { ChatProvider } from "./contexts/chat-context";
 import { Layout } from "./app/layout";
 import { Page } from "./app/page";
 import "./styles/globals.css";
@@ -50,9 +54,17 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 function App() {
   return (
     <WorkspaceProvider>
-      <Layout>
-        <Page />
-      </Layout>
+      <CurrentFileProvider>
+        <OutputProvider>
+          <StatusBarProvider>
+            <ChatProvider>
+              <Layout>
+                <Page />
+              </Layout>
+            </ChatProvider>
+          </StatusBarProvider>
+        </OutputProvider>
+      </CurrentFileProvider>
     </WorkspaceProvider>
   );
 }

@@ -33,6 +33,11 @@ export function setupFileService() {
     await fs.writeFile(full, "", "utf8");
   });
 
+  ipcMain.handle("file:createFolder", async (_e, root: string, rel: string) => {
+    const full = resolvePath(root, rel);
+    await fs.mkdir(full, { recursive: true });
+  });
+
   ipcMain.handle("file:delete", async (_e, root: string, rel: string) => {
     const full = resolvePath(root, rel);
     await fs.rm(full, { recursive: true, force: true });
@@ -54,10 +59,29 @@ export function setupFileService() {
     currentWatcher = chokidar.watch(root, {
       ignoreInitial: true,
       persistent: true,
-      ignored: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.viper/**"],
+      ignored: [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.viper/**",
+        "**/.next/**",
+        "**/.cache/**",
+        "**/.turbo/**",
+        "**/out/**",
+        "**/.vite/**",
+      ],
     });
-    currentWatcher.on("change", (filePath) => {
+
+    const notify = (filePath: string) => {
       sendToAll("file:changed", { path: filePath });
-    });
+    };
+
+    currentWatcher
+      .on("change", notify)
+      .on("add", notify)
+      .on("addDir", notify)
+      .on("unlink", notify)
+      .on("unlinkDir", notify);
   });
 }

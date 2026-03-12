@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 interface PromptInputProps {
   onSend: (prompt: string) => void;
@@ -25,8 +25,20 @@ export function PromptInput({ onSend, disabled }: PromptInputProps) {
     }
   };
 
+  useEffect(() => {
+    const onFocus = () => textareaRef.current?.focus();
+    window.addEventListener("viper:focus-chat", onFocus);
+    return () => window.removeEventListener("viper:focus-chat", onFocus);
+  }, []);
+
   return (
-    <div className="flex gap-2 items-end rounded-xl border border-zinc-700/60 bg-zinc-900/60 focus-within:border-zinc-600 focus-within:ring-1 focus-within:ring-zinc-600 transition-colors">
+    <div
+      className="flex gap-2 items-end rounded-xl border focus-within:ring-1 transition-colors"
+      style={{
+        borderColor: "var(--viper-border)",
+        background: "var(--viper-bg)",
+      }}
+    >
       <textarea
         ref={textareaRef}
         value={value}
@@ -35,14 +47,15 @@ export function PromptInput({ onSend, disabled }: PromptInputProps) {
         placeholder="Ask Viper AI..."
         disabled={disabled}
         rows={1}
-        className="flex-1 min-h-[44px] max-h-[120px] resize-none bg-transparent px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 outline-none disabled:opacity-50"
+        className="flex-1 min-h-[44px] max-h-[120px] resize-none bg-transparent px-4 py-3 text-sm text-[#e5e7eb] placeholder-[#6b7280] outline-none disabled:opacity-50"
         style={{ fieldSizing: "content" }}
       />
       <button
         type="button"
         onClick={handleSubmit}
         disabled={disabled || !value.trim()}
-        className="flex-shrink-0 m-2 p-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none text-white transition-colors"
+        className="flex-shrink-0 m-2 p-2 rounded-lg disabled:opacity-40 disabled:pointer-events-none text-[#0b0f17] font-medium transition-all hover:shadow-[0_0_12px_rgba(34,197,94,0.3)]"
+        style={{ background: "var(--viper-accent)" }}
         aria-label="Send"
       >
         <svg

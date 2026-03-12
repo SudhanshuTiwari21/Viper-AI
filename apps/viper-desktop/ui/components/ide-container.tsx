@@ -1,35 +1,192 @@
-import { FileExplorer } from "./file-explorer";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { MessageSquare } from "lucide-react";
+import { ActivityBar } from "./activity-bar";
+import type { SidebarView } from "./activity-bar";
+import { WorkbenchSidebar } from "./workbench-sidebar";
 import { EditorContainer } from "./editor-container";
 import { ChatPanel } from "./chat-panel";
-import { Terminal } from "./terminal";
+import { PanelContainer } from "./panel-container";
+import { StatusBar } from "./status-bar";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+
+const MIN_LEFT_SIDEBAR_WIDTH = 200;
+const MAX_LEFT_SIDEBAR_WIDTH = 400;
+const DEFAULT_LEFT_SIDEBAR_WIDTH = 256;
+
+const MIN_CHAT_WIDTH = 280;
+const MAX_CHAT_WIDTH = 800;
+const DEFAULT_CHAT_WIDTH = 420;
+const CHAT_COLLAPSE_THRESHOLD = 80;
 
 export function IDEContainer() {
   const { workspace } = useWorkspaceContext();
+  const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH);
+  const [chatPanelVisible, setChatPanelVisible] = useState(true);
+  const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_WIDTH);
+  const chatWidthBeforeCollapse = useRef(DEFAULT_CHAT_WIDTH);
+
+  // Cmd+B / Ctrl+B: toggle left explorer sidebar
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setLeftSidebarOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Cmd+L / Ctrl+L: open chat panel only (do not close); restore width if was collapsed
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        setChatPanelWidth(chatWidthBeforeCollapse.current);
+        setChatPanelVisible(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Clicking activity bar icon when sidebar is closed opens it
+  const handleViewChange = useCallback((view: SidebarView) => {
+    setSidebarView(view);
+    setLeftSidebarOpen(true);
+  }, []);
+
+  const startLeftSidebarResize = useCallback(() => {
+    const move = (ev: MouseEvent) => {
+      const w = Math.max(MIN_LEFT_SIDEBAR_WIDTH, Math.min(MAX_LEFT_SIDEBAR_WIDTH, ev.clientX - 48));
+      setLeftSidebarWidth(w);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }, []);
+
+  const startChatResize = useCallback(() => {
+    let up: () => void;
+    const move = (ev: MouseEvent) => {
+      const w = window.innerWidth - ev.clientX;
+      if (w < CHAT_COLLAPSE_THRESHOLD) {
+        chatWidthBeforeCollapse.current = chatPanelWidth;
+        setChatPanelVisible(false);
+        setChatPanelWidth(DEFAULT_CHAT_WIDTH);
+        up();
+        return;
+      }
+      const clamped = Math.max(MIN_CHAT_WIDTH, Math.min(MAX_CHAT_WIDTH, w));
+      setChatPanelWidth(clamped);
+    };
+    up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }, [chatPanelWidth]);
+
+  useEffect(() => {
+    if (chatPanelVisible && chatPanelWidth !== chatWidthBeforeCollapse.current) {
+      chatWidthBeforeCollapse.current = chatPanelWidth;
+    }
+  }, [chatPanelVisible, chatPanelWidth]);
+
+  useEffect(() => {
+    const onFocusSearch = () => setSidebarView("search");
+    window.addEventListener("viper:focus-search", onFocusSearch);
+    return () => window.removeEventListener("viper:focus-search", onFocusSearch);
+  }, []);
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-[#0b0b0b]">
+    <div className="flex-1 flex flex-col min-w-0" style={{ background: "var(--viper-bg)" }}>
       <div className="flex flex-1 min-h-0">
-        {/* Left: File explorer */}
-        <aside className="w-64 flex-shrink-0 border-r border-zinc-800/80 bg-[#0f0f10]">
-          <FileExplorer />
-        </aside>
+        {/* Left: Activity bar (always visible) + optional resizable sidebar */}
+        <ActivityBar activeView={sidebarView} onViewChange={handleViewChange} />
+        {leftSidebarOpen && (
+          <>
+            <div
+              className="flex-shrink-0 flex flex-col min-h-0"
+              style={{ width: leftSidebarWidth }}
+            >
+              <WorkbenchSidebar activeView={sidebarView} />
+            </div>
+            <div
+              className="flex-shrink-0 w-1 cursor-col-resize hover:bg-[var(--viper-accent)] hover:opacity-30 transition-colors"
+              style={{ background: "var(--viper-border)", minWidth: 4 }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                startLeftSidebarResize();
+              }}
+              role="separator"
+              aria-label="Resize sidebar"
+            />
+          </>
+        )}
 
-        {/* Center: Editor tabs + Monaco */}
-        <section className="flex-1 min-w-0 border-r border-zinc-800/80 bg-[#050507]">
+        {/* Center: Editor */}
+        <section
+          className="flex-1 min-w-0 flex flex-col border-r"
+          style={{
+            borderColor: "var(--viper-border)",
+            background: "var(--viper-bg)",
+            minWidth: 0,
+          }}
+        >
           <EditorContainer />
         </section>
 
-        {/* Right: AI Chat panel */}
-        <aside className="w-[420px] flex-shrink-0 border-l border-zinc-800/80 bg-[#0d0d0d]">
-          <ChatPanel />
-        </aside>
+        {/* Right: Resizable chat panel (collapse only by dragging left); when collapsed, show thin tab to reopen */}
+        {chatPanelVisible ? (
+          <>
+            <div
+              className="flex-shrink-0 w-1 cursor-col-resize hover:bg-[var(--viper-accent)] hover:opacity-30 transition-colors"
+              style={{ background: "var(--viper-border)", minWidth: 4 }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                startChatResize();
+              }}
+              role="separator"
+              aria-label="Resize chat panel"
+            />
+            <aside
+              className="flex-shrink-0 flex flex-col min-h-0 border-l"
+              style={{
+                width: chatPanelWidth,
+                borderColor: "var(--viper-border)",
+                background: "var(--viper-sidebar)",
+              }}
+            >
+              <ChatPanel />
+            </aside>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="flex-shrink-0 w-8 flex flex-col items-center justify-center border-l py-4 gap-1 hover:bg-white/5 transition-colors"
+            style={{ borderColor: "var(--viper-border)", background: "var(--viper-sidebar)" }}
+            onClick={() => {
+              setChatPanelWidth(chatWidthBeforeCollapse.current);
+              setChatPanelVisible(true);
+            }}
+            title="Open Chat (⌘L / Ctrl+L)"
+          >
+            <MessageSquare size={18} className="text-[#9ca3af]" />
+            <span className="text-[10px] text-[#6b7280] rotate-90 whitespace-nowrap">Chat</span>
+          </button>
+        )}
       </div>
 
-      {/* Bottom terminal: real shell via node-pty */}
-      <div className="h-40 border-t border-zinc-800/80 bg-black/90">
-        <Terminal workspaceRoot={workspace?.root ?? null} />
-      </div>
+      <PanelContainer />
+
+      <StatusBar />
     </div>
   );
 }

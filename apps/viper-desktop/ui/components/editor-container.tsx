@@ -1,24 +1,33 @@
 import { useEffect, useState, useCallback } from "react";
 import { MonacoEditor } from "./monaco-editor";
+import { EditorWelcome } from "./editor-welcome";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+import { useCurrentFile } from "../contexts/current-file-context";
+import { useStatusBar } from "../contexts/status-bar-context";
 import { fsApi } from "../services/filesystem";
 import { useEditorTabs } from "../hooks/useEditor";
+import type { CodePatch } from "../lib/patch-types";
+import {
+  applyPatchToContent,
+  validatePatchAgainstContent,
+} from "../lib/patch-engine";
 
 export function EditorContainer() {
   const { workspace } = useWorkspaceContext();
-  const { tabs, activeId, openTab, closeTab, setActiveId, updateContent } =
+  const { setCurrentFile } = useCurrentFile();
+  const { setStatus } = useStatusBar();
+  const { tabs, activeId, openTab, closeTab, setActiveId, updateContent, markSaved } =
     useEditorTabs();
   const [saving, setSaving] = useState(false);
 
-  // Listen for file open events from FileExplorer.
   useEffect(() => {
-    const handler = async (e: Event) => {
-      if (!workspace) return;
+    const handler = (e: Event) => {
       const detail = (e as CustomEvent<{
         root: string;
         path: string;
         content: string;
       }>).detail;
+      if (!detail?.path) return;
       const ext = detail.path.split(".").pop() ?? "";
       const id = `${detail.root}:${detail.path}`;
       openTab({
@@ -26,25 +35,105 @@ export function EditorContainer() {
         path: detail.path,
         title: detail.path.split("/").pop() ?? detail.path,
         language: ext,
-        content: detail.content,
+        content: typeof detail.content === "string" ? detail.content : "",
       });
     };
     window.addEventListener("viper:open-file", handler as EventListener);
     return () =>
       window.removeEventListener("viper:open-file", handler as EventListener);
-  }, [workspace, openTab]);
+  }, [openTab]);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
+
+  useEffect(() => {
+    if (activeTab) {
+      setCurrentFile(activeTab.path, activeTab.content);
+      setStatus({
+        language: activeTab.language,
+        cursorLine: 0,
+        cursorCol: 0,
+      });
+    } else {
+      setCurrentFile(null, null);
+      setStatus({ language: "", cursorLine: 0, cursorCol: 0 });
+    }
+  }, [activeTab?.id, activeTab?.path, activeTab?.content, activeTab?.language, setCurrentFile, setStatus]);
+
+  const handleCursorChange = useCallback(
+    (line: number, col: number) => {
+      setStatus({ cursorLine: line, cursorCol: col });
+    },
+    [setStatus]
+  );
 
   const handleSave = useCallback(async () => {
     if (!workspace || !activeTab) return;
     setSaving(true);
     try {
       await fsApi.writeFile(workspace.root, activeTab.path, activeTab.content);
+      markSaved(activeTab.id);
     } finally {
       setSaving(false);
     }
-  }, [workspace, activeTab]);
+  }, [workspace, activeTab, markSaved]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ patches?: CodePatch[] | null }>).detail;
+      const patches = detail?.patches;
+      if (!patches || patches.length === 0) return;
+
+      // Build quick lookup for open tabs by path.
+      const tabByPath = new Map(tabs.map((t) => [t.path, t]));
+
+      patches.forEach((patch) => {
+        const tab = tabByPath.get(patch.file);
+        if (!tab) {
+          // For now we only apply to open tabs. In the future we can
+          // auto-open files and apply patches to them.
+          console.warn(
+            "[viper] Skipping patch for unopened file:",
+            patch.file
+          );
+          return;
+        }
+
+        const validation = validatePatchAgainstContent(
+          patch.file,
+          tab.content,
+          patch
+        );
+        if (!validation.ok) {
+          console.warn(
+            "[viper] Patch validation failed for",
+            patch.file,
+            validation.errors
+          );
+          return;
+        }
+
+        const nextContent = applyPatchToContent(tab.content, patch);
+        updateContent(tab.id, nextContent);
+      });
+    };
+
+    window.addEventListener("viper:apply-patch", handler as EventListener);
+    return () =>
+      window.removeEventListener("viper:apply-patch", handler as EventListener);
+  }, [tabs, updateContent]);
+
+  // Save all dirty tabs (used for auto-save on blur/close)
+  const saveAllDirty = useCallback(async () => {
+    if (!workspace) return;
+    const dirtyTabs = tabs.filter((t) => t.dirty);
+    if (dirtyTabs.length === 0) return;
+    await Promise.all(
+      dirtyTabs.map(async (t) => {
+        await fsApi.writeFile(workspace.root, t.path, t.content);
+        markSaved(t.id);
+      })
+    );
+  }, [workspace, tabs, markSaved]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -57,35 +146,72 @@ export function EditorContainer() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleSave]);
 
+  // Auto-save on window blur / beforeunload (VS Code-style "on window change")
+  useEffect(() => {
+    const onBlur = () => {
+      void saveAllDirty();
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("beforeunload", onBlur);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("beforeunload", onBlur);
+    };
+  }, [saveAllDirty]);
+
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs bar */} 
-      <div className="flex items-center h-8 border-b border-zinc-800/80 bg-[#08080a] text-xs">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={`px-3 py-1 flex items-center gap-1 border-r border-zinc-800/60 ${
-              tab.id === activeId
-                ? "bg-zinc-800 text-zinc-100"
-                : "bg-transparent text-zinc-400 hover:bg-zinc-900"
-            }`}
-            onClick={() => setActiveId(tab.id)}
-          >
-            <span className="truncate max-w-[140px]">{tab.title}</span>
-            <span
-              className="text-zinc-500 hover:text-zinc-300 ml-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(tab.id);
+      {/* Editor tabs: horizontal scroll, close, active highlight */}
+      <div
+        className="flex items-center flex-shrink-0 border-b overflow-x-auto"
+        style={{
+          height: 36,
+          borderColor: "var(--viper-border)",
+          background: "var(--viper-bg)",
+        }}
+      >
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeId;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={`flex items-center gap-[var(--viper-space-1)] px-[var(--viper-space-2)] py-[var(--viper-space-1)] min-w-0 max-w-[180px] border-r text-xs transition-colors flex-shrink-0 ${
+                isActive
+                  ? "text-[#e5e7eb] border-[var(--viper-accent)] border-b-0 -mb-px"
+                  : "text-[#9ca3af] hover:text-[#e5e7eb] hover:bg-white/5"
+              }`}
+              style={{
+                borderRightColor: "var(--viper-border)",
+                background: isActive ? "var(--viper-sidebar)" : "transparent",
               }}
+              onClick={() => setActiveId(tab.id)}
             >
-              ×
-            </span>
-          </button>
-        ))}
-        <div className="flex-1" />
+              <span className="truncate flex items-center gap-1">
+                {tab.title}
+                {tab.dirty && (
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
+                )}
+              </span>
+              <span
+                className="flex-shrink-0 w-4 h-4 flex items-center justify-center rounded text-[#6b7280] hover:text-[#e5e7eb] hover:bg-white/10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(tab.id);
+                }}
+              >
+                ×
+              </span>
+            </button>
+          );
+        })}
+        <div className="flex-1 min-w-0" />
         <button
-          className="text-[10px] px-2 py-0.5 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
+          className="flex-shrink-0 mx-[var(--viper-space-1)] px-[var(--viper-space-2)] py-1 rounded text-[11px] font-medium transition-all hover:shadow-[0_0_8px_rgba(34,197,94,0.2)] disabled:opacity-50"
+          style={{
+            background: "var(--viper-accent)",
+            color: "#0b0f17",
+          }}
           onClick={handleSave}
           disabled={!activeTab || saving}
         >
@@ -93,22 +219,19 @@ export function EditorContainer() {
         </button>
       </div>
 
-      {/* Editor body */} 
-      <div className="flex-1 min-h-0">
-        {!activeTab && (
-          <div className="h-full flex items-center justify-center text-sm text-zinc-500">
-            Open a file from the explorer to start editing.
-          </div>
-        )}
+      {/* Editor body or welcome */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {!activeTab && <EditorWelcome />}
         {activeTab && (
           <MonacoEditor
+            key={activeTab.id}
             language={activeTab.language}
             value={activeTab.content}
             onChange={(val) => updateContent(activeTab.id, val)}
+            onCursorChange={handleCursorChange}
           />
         )}
       </div>
     </div>
   );
 }
-

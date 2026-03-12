@@ -5,18 +5,27 @@ interface LayoutProps {
   children: ReactNode;
 }
 
+function getWorkspaceName(root: string | undefined): string {
+  if (!root) return "Viper AI";
+  const normalized = root.replace(/\/$/, "");
+  const name = normalized.split("/").pop() ?? "Workspace";
+  return `${name} — Viper AI`;
+}
+
 export function Layout({ children }: LayoutProps) {
   const { workspace } = useWorkspaceContext();
+  const title = getWorkspaceName(workspace?.root);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#0d0d0d] text-zinc-200 overflow-hidden">
-      <header className="flex-shrink-0 h-10 px-4 flex items-center border-b border-zinc-800/80 bg-zinc-900/50">
-        <span className="font-semibold text-sm text-zinc-300 tracking-tight">
-          Viper AI
+    <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ background: "var(--viper-bg)" }}>
+      <header
+        className="flex-shrink-0 h-10 flex items-center px-[var(--viper-space-2)] border-b"
+        style={{ borderColor: "var(--viper-border)", background: "var(--viper-sidebar)" }}
+      >
+        <span className="font-semibold text-sm tracking-tight text-[#e5e7eb]">
+          {title}
         </span>
-        <span className="ml-3 text-xs text-zinc-500 truncate max-w-[50vw]" title={workspace?.root ?? ""}>
-          {workspace ? workspace.root : "No folder opened"}
-        </span>
+        <div className="flex-1 min-w-0" />
       </header>
       <main className="flex-1 flex min-h-0">
         {children}

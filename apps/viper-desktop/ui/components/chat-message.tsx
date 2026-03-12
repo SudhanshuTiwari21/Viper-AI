@@ -1,7 +1,8 @@
-import type { Message } from "./chat-panel";
+import type { ChatMessage as ChatMessageType } from "../contexts/chat-context";
+import { PatchDiffView } from "./patch-diff-view";
 
 interface ChatMessageProps {
-  message: Message;
+  message: ChatMessageType;
 }
 
 export function ChatMessage({ message }: ChatMessageProps) {
@@ -26,6 +27,32 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <span className="inline-block w-2 h-4 ml-0.5 bg-zinc-400 animate-pulse" />
           )}
         </div>
+        {!isUser && message.patches && message.patches.length > 0 && (
+          <>
+            <PatchDiffView patches={message.patches} />
+            <div className="mt-3 flex gap-2 justify-end">
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-xs font-medium bg-emerald-500 text-black hover:bg-emerald-400 transition-colors"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("viper:apply-patch", {
+                      detail: { patches: message.patches },
+                    })
+                  );
+                }}
+              >
+                Apply Changes
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-xs font-medium border border-zinc-600 text-zinc-300 hover:bg-zinc-700/60 transition-colors"
+              >
+                Reject
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

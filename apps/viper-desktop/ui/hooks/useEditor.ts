@@ -6,41 +6,75 @@ export interface EditorTab {
   title: string;
   language: string;
   content: string;
+  savedContent: string;
+  dirty: boolean;
+}
+
+interface EditorState {
+  tabs: EditorTab[];
+  activeId: string | null;
 }
 
 export function useEditorTabs() {
-  const [tabs, setTabs] = useState<EditorTab[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [state, setState] = useState<EditorState>({ tabs: [], activeId: null });
 
   const openTab = useCallback((tab: EditorTab) => {
-    setTabs((prev) => {
-      const existing = prev.find((t) => t.path === tab.path);
+    setState((prev) => {
+      const existing = prev.tabs.find((t) => t.path === tab.path);
       if (existing) {
-        setActiveId(existing.id);
-        return prev;
+        return {
+          tabs: prev.tabs.map((t) =>
+            t.id === existing.id
+              ? { ...t, content: tab.content, savedContent: tab.content, dirty: false }
+              : t
+          ),
+          activeId: existing.id,
+        };
       }
-      const next = [...prev, tab];
-      setActiveId(tab.id);
-      return next;
+      return {
+        tabs: [...prev.tabs, { ...tab, savedContent: tab.content, dirty: false }],
+        activeId: tab.id,
+      };
     });
   }, []);
 
   const closeTab = useCallback((id: string) => {
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.id === id);
+    setState((prev) => {
+      const idx = prev.tabs.findIndex((t) => t.id === id);
       if (idx === -1) return prev;
-      const next = prev.filter((t) => t.id !== id);
-      if (activeId === id) {
-        setActiveId(next[idx - 1]?.id ?? next[0]?.id ?? null);
-      }
-      return next;
+      const nextTabs = prev.tabs.filter((t) => t.id !== id);
+      const nextActiveId =
+        prev.activeId === id
+          ? nextTabs[idx - 1]?.id ?? nextTabs[0]?.id ?? null
+          : prev.activeId;
+      return { tabs: nextTabs, activeId: nextActiveId };
     });
-  }, [activeId]);
-
-  const updateContent = useCallback((id: string, content: string) => {
-    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, content } : t)));
   }, []);
 
-  return { tabs, activeId, openTab, closeTab, setActiveId, updateContent };
-}
+  const setActiveId = useCallback((id: string | null) => {
+    setState((prev) => ({ ...prev, activeId: id }));
+  }, []);
 
+  const updateContent = useCallback((id: string, content: string) => {
+    setState((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((t) =>
+        t.id === id
+          ? { ...t, content, dirty: content !== t.savedContent }
+          : t
+      ),
+    }));
+  }, []);
+
+  const markSaved = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((t) =>
+        t.id === id ? { ...t, savedContent: t.content, dirty: false } : t
+      ),
+    }));
+  }, []);
+
+  const { tabs, activeId } = state;
+  return { tabs, activeId, openTab, closeTab, setActiveId, updateContent, markSaved };
+}

@@ -8,6 +8,15 @@ const IGNORED_DIRS = new Set([
   "dist",
   "build",
   ".viper",
+  ".next",
+  ".cache",
+  ".turbo",
+  "out",
+  ".nuxt",
+  ".output",
+  "coverage",
+  ".parcel-cache",
+  ".vite",
 ]);
 
 export const WORKSPACES_ROOT = path.join(

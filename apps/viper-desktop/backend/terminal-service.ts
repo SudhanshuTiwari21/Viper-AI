@@ -22,30 +22,46 @@ export function setupTerminalService() {
       ptyMap.delete(id);
     }
 
-    const shell = process.platform === "win32"
-      ? process.env.COMSPEC ?? "cmd.exe"
-      : process.env.SHELL ?? "/bin/bash";
-
     const nodePty = await import("node-pty");
     const fallbackCwd = process.env.HOME ?? process.env.USERPROFILE ?? process.cwd();
     const cwd = (workspaceRoot && workspaceRoot.trim() !== "") ? workspaceRoot : fallbackCwd;
-    const pty = nodePty.spawn(shell, [], {
-      cwd,
-      env: process.env as Record<string, string>,
-      cols: 80,
-      rows: 24,
-    });
 
-    pty.onData((data: string) => {
-      event.sender.send("terminal:data", { data });
-    });
+    const shells: string[] =
+      process.platform === "win32"
+        ? [process.env.COMSPEC ?? "cmd.exe"]
+        : [
+            process.env.SHELL && path.isAbsolute(process.env.SHELL) ? process.env.SHELL : "",
+            "/bin/zsh",
+            "/bin/bash",
+            "/bin/sh",
+          ].filter(Boolean) as string[];
 
-    pty.onExit(() => {
-      ptyMap.delete(id);
-    });
+    for (const shell of shells) {
+      try {
+        const pty = nodePty.spawn(shell, [], {
+          cwd,
+          env: process.env as Record<string, string>,
+          cols: 80,
+          rows: 24,
+        });
 
-    ptyMap.set(id, { pty });
-    return { ok: true };
+        pty.onData((data: string) => {
+          event.sender.send("terminal:data", { data });
+        });
+
+        pty.onExit(() => {
+          ptyMap.delete(id);
+        });
+
+        ptyMap.set(id, { pty });
+        return { ok: true, shell };
+      } catch (err) {
+        console.error("terminal:create failed for shell", shell, err);
+      }
+    }
+
+    console.error("terminal:create: all shell candidates failed");
+    return { ok: false };
   });
 
   ipcMain.handle("terminal:write", (event, data: string) => {
