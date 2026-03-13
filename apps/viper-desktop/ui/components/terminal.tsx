@@ -85,35 +85,53 @@ export function Terminal({ workspaceRoot }: TerminalProps) {
     if (rootRef.current === cwd) return;
     rootRef.current = cwd;
     terminalApi.destroy();
-    terminalApi
-      .create(cwd)
-      .then((res) => {
-        const term = termRef.current;
-        if (!term) return;
 
-        if (!hasShownBannerRef.current) {
-          term.write(`\x1b[38;5;244m[Terminal] Starting shell in ${cwd || "default directory"}...\x1b[0m\r\n`);
-          hasShownBannerRef.current = true;
-        }
+    // Wait for the panel container to have real size so xterm fit() gets valid dimensions.
+    const t = setTimeout(() => {
+      terminalApi
+        .create(cwd)
+        .then((res) => {
+          const term = termRef.current;
+          if (!term) return;
 
-        if (!res?.ok) {
-          term.write(
-            "\x1b[38;5;203m[Terminal] Failed to start shell. See Electron console for details.\x1b[0m\r\n"
-          );
-          return;
-        }
+          if (!hasShownBannerRef.current) {
+            term.write(`\x1b[38;5;244m[Terminal] Starting shell in ${cwd || "default directory"}...\x1b[0m\r\n`);
+            hasShownBannerRef.current = true;
+          }
 
-        if (term.cols && term.rows) {
-          terminalApi.resize(term.cols, term.rows);
-        }
-      })
-      .catch(() => {
-        const term = termRef.current;
-        if (!term) return;
-        term.write(
-          "\x1b[38;5;203m[Terminal] Error starting shell. See Electron console for details.\x1b[0m\r\n"
-        );
-      });
+          if (!res?.ok) {
+            const errMsg = (res as { error?: string })?.error ?? "See Electron console for details.";
+            term.write(`\x1b[38;5;203m[Terminal] Failed to start shell. ${errMsg}\x1b[0m\r\n`);
+            return;
+          }
+
+          // Always send valid dimensions so the shell outputs the prompt (backend uses 80x24 by default).
+          const cols = term.cols || 80;
+          const rows = term.rows || 24;
+          terminalApi.resize(cols, rows);
+
+          // After layout, fit and resize again so the pty matches the visible terminal size.
+          requestAnimationFrame(() => {
+            fitRef.current?.fit();
+            const t2 = termRef.current;
+            if (t2?.cols && t2?.rows) terminalApi.resize(t2.cols, t2.rows);
+          });
+          // Force another resize after a short delay so the shell redraws the prompt.
+          setTimeout(() => {
+            fitRef.current?.fit();
+            const t3 = termRef.current;
+            if (t3?.cols && t3?.rows) terminalApi.resize(t3.cols, t3.rows);
+          }, 150);
+        })
+        .catch((err) => {
+          const term = termRef.current;
+          if (!term) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          term.write(`\x1b[38;5;203m[Terminal] Error starting shell. ${msg}\x1b[0m\r\n`);
+        });
+    }, 80);
+
+    return () => clearTimeout(t);
   }, [cwd]);
 
   return (

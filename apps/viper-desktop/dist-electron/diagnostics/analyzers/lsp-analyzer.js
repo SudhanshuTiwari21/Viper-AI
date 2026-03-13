@@ -88,10 +88,25 @@ function convertLspDiagnostic(rootDir, uri, d) {
     };
 }
 async function startServer(rootDir, cfg) {
-    const child = (0, child_process_1.spawn)(cfg.command, cfg.args, {
-        cwd: rootDir,
-        stdio: ["pipe", "pipe", "pipe"],
-    });
+    let child;
+    try {
+        // In Electron's main process, stdin (fd 0) is often closed, which can cause
+        // spawn(..., stdio: ["pipe","pipe","pipe"]) to throw EBADF. We catch and skip
+        // so ESLint and other analyzers still run.
+        child = (0, child_process_1.spawn)(cfg.command, cfg.args, {
+            cwd: rootDir,
+            stdio: ["pipe", "pipe", "pipe"],
+            env: { ...process.env },
+            shell: false,
+        });
+    }
+    catch (err) {
+        const msg = err?.code === "EBADF"
+            ? "LSP spawn EBADF (common in Electron; install language servers and run from terminal to use LSP)"
+            : err?.message ?? String(err);
+        console.warn(`[lsp:${cfg.id}] failed to start:`, msg);
+        return null;
+    }
     child.stderr.on("data", (chunk) => {
         console.error(`[lsp:${cfg.id}]`, chunk.toString("utf8").trim());
     });
@@ -102,11 +117,6 @@ async function startServer(rootDir, cfg) {
         const uri = params.uri;
         const diags = Array.isArray(params.diagnostics) ? params.diagnostics : [];
         const relDiagnostics = diags.map((d) => convertLspDiagnostic(rootDir, uri, d));
-        for (const d of relDiagnostics) {
-            diagnostics[d.file] = diagnostics[d.file] ?? [];
-            // replace all diagnostics for this file with this server's diagnostics for that file
-        }
-        // Reset per-file and fill again
         const byFile = {};
         for (const d of relDiagnostics) {
             (byFile[d.file] = byFile[d.file] ?? []).push(d);
@@ -121,18 +131,25 @@ async function startServer(rootDir, cfg) {
         }
     });
     connection.listen();
-    // Initialize
     const initParams = {
         processId: process.pid,
         rootUri: (0, url_1.pathToFileURL)(rootDir).toString(),
         capabilities: {},
     };
-    await connection
-        .sendRequest("initialize", initParams)
-        .catch((err) => {
+    try {
+        await connection.sendRequest("initialize", initParams);
+        connection.sendNotification("initialized", {});
+    }
+    catch (err) {
         console.error(`[lsp:${cfg.id}] initialize failed`, err);
-    });
-    connection.sendNotification("initialized", {});
+        try {
+            child.kill();
+        }
+        catch {
+            // ignore
+        }
+        return null;
+    }
     const running = {
         config: cfg,
         process: child,

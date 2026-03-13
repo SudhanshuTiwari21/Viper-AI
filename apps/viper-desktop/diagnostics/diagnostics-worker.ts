@@ -1,7 +1,9 @@
 import path from "path";
 import type { Diagnostic, SerializedDiagnosticsMap } from "./types";
 import { analyzeEslint } from "./analyzers/eslint-analyzer";
-import { analyzeWithLsp } from "./analyzers/lsp-analyzer";
+import { analyzeTypeScript } from "./analyzers/typescript-analyzer";
+import { analyzePython } from "./analyzers/python-analyzer";
+import { analyzeGeneric } from "./analyzers/generic-analyzer";
 import fs from "fs/promises";
 
 const IGNORED_DIRS = new Set([
@@ -62,16 +64,18 @@ export async function runAnalyzers(
   const merged = new Map<string, Diagnostic[]>();
 
   const jsLike = filePaths.filter((p) => /\.(js|jsx|ts|tsx|mjs|cjs)$/i.test(p));
+  const tsLike = filePaths.filter((p) => /\.(ts|tsx)$/i.test(p));
+  const pyLike = filePaths.filter((p) => /\.py$/i.test(p));
 
-  const [lspMap, eslintMap] = await Promise.all([
-    analyzeWithLsp(rootDir, filePaths, readFile),
-    jsLike.length ? analyzeEslint(rootDir, jsLike) : Promise.resolve(new Map<string, Diagnostic[]>()),
-  ]);
+  // Primary analyzers: ESLint + language-specific compilers/linters.
+  let eslintMap = new Map<string, Diagnostic[]>();
 
-  // Merge LSP diagnostics
-  for (const [relPath, list] of lspMap) {
-    if (!list.length) continue;
-    merged.set(relPath, [...(merged.get(relPath) ?? []), ...list]);
+  try {
+    eslintMap = jsLike.length
+      ? await analyzeEslint(rootDir, jsLike)
+      : new Map<string, Diagnostic[]>();
+  } catch (err) {
+    console.error("[diagnostics] ESLint analyzer failed", err);
   }
 
   // Merge ESLint diagnostics
@@ -80,6 +84,58 @@ export async function runAnalyzers(
     const existing = merged.get(relPath) ?? [];
     merged.set(relPath, [...existing, ...list]);
   }
+
+  // Fallback TypeScript analyzer: only run for TS/TSX files that don't already
+  // have LSP diagnostics. This makes sure users still get TS errors even when
+  // LSP servers cannot be spawned from Electron.
+  if (tsLike.length) {
+    try {
+      const tsMap = await analyzeTypeScript(rootDir, tsLike);
+      for (const [relPath, list] of tsMap) {
+        if (!list.length) continue;
+        const existing = merged.get(relPath) ?? [];
+        if (existing.length === 0) {
+          merged.set(relPath, list);
+        } else {
+          merged.set(relPath, [...existing, ...list]);
+        }
+      }
+    } catch (err) {
+      console.error("[diagnostics] TypeScript analyzer failed", err);
+    }
+  }
+
+  // Python analyzer: run pyflakes-based diagnostics for .py files.
+  if (pyLike.length) {
+    await Promise.all(
+      pyLike.map(async (relPath) => {
+        try {
+          const diags = await analyzePython(rootDir, relPath, "");
+          if (!diags.length) return;
+          const existing = merged.get(relPath) ?? [];
+          merged.set(relPath, [...existing, ...diags]);
+        } catch (err) {
+          console.error("[diagnostics] Python analyzer failed", relPath, err);
+        }
+      })
+    );
+  }
+
+  // Generic analyzer: lightweight, runs for all files and only adds informational
+  // TODO/FIXME-style diagnostics that don't depend on external tooling.
+  await Promise.all(
+    filePaths.map(async (relPath) => {
+      try {
+        const content = await readFile(relPath);
+        const diags = analyzeGeneric(relPath, content);
+        if (!diags.length) return;
+        const existing = merged.get(relPath) ?? [];
+        merged.set(relPath, [...existing, ...diags]);
+      } catch {
+        // ignore generic-analyzer failures per file
+      }
+    })
+  );
 
   return merged;
 }

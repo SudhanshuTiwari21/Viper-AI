@@ -56,7 +56,14 @@ function setupTerminalService() {
             }
             ptyMap.delete(id);
         }
-        const nodePty = await Promise.resolve().then(() => __importStar(require("node-pty")));
+        let nodePty;
+        try {
+            nodePty = await Promise.resolve().then(() => __importStar(require("node-pty")));
+        }
+        catch (err) {
+            console.error("terminal:create node-pty failed to load (rebuild for Electron? run: npx electron-rebuild):", err);
+            return { ok: false, error: "Terminal runtime failed to load. Try: npx electron-rebuild" };
+        }
         const fallbackCwd = process.env.HOME ?? process.env.USERPROFILE ?? process.cwd();
         const cwd = (workspaceRoot && workspaceRoot.trim() !== "") ? workspaceRoot : fallbackCwd;
         const shells = process.platform === "win32"
@@ -71,12 +78,14 @@ function setupTerminalService() {
             try {
                 const pty = nodePty.spawn(shell, [], {
                     cwd,
-                    env: process.env,
+                    env: { ...process.env },
                     cols: 80,
                     rows: 24,
                 });
                 pty.onData((data) => {
-                    event.sender.send("terminal:data", { data });
+                    if (!event.sender.isDestroyed()) {
+                        event.sender.send("terminal:data", { data });
+                    }
                 });
                 pty.onExit(() => {
                     ptyMap.delete(id);
@@ -85,11 +94,15 @@ function setupTerminalService() {
                 return { ok: true, shell };
             }
             catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
                 console.error("terminal:create failed for shell", shell, err);
+                if (shell === shells[shells.length - 1]) {
+                    return { ok: false, error: msg };
+                }
             }
         }
         console.error("terminal:create: all shell candidates failed");
-        return { ok: false };
+        return { ok: false, error: "No shell could be started" };
     });
     electron_1.ipcMain.handle("terminal:write", (event, data) => {
         const pty = getPty(event.sender.id);
@@ -98,8 +111,11 @@ function setupTerminalService() {
     });
     electron_1.ipcMain.handle("terminal:resize", (event, cols, rows) => {
         const pty = getPty(event.sender.id);
-        if (pty)
-            pty.resize(cols, rows);
+        if (pty) {
+            const c = Math.max(1, Math.min(cols || 80, 500));
+            const r = Math.max(1, Math.min(rows || 24, 200));
+            pty.resize(c, r);
+        }
     });
     electron_1.ipcMain.handle("terminal:destroy", (event) => {
         const id = event.sender.id;
