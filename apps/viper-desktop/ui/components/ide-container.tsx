@@ -7,7 +7,9 @@ import { EditorContainer } from "./editor-container";
 import { ChatPanel } from "./chat-panel";
 import { PanelContainer } from "./panel-container";
 import { StatusBar } from "./status-bar";
+import { CommandPalette } from "./command-palette";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+import { useRegisterDefaultCommands } from "../commands/default-commands";
 
 const MIN_LEFT_SIDEBAR_WIDTH = 200;
 const MAX_LEFT_SIDEBAR_WIDTH = 400;
@@ -20,12 +22,48 @@ const CHAT_COLLAPSE_THRESHOLD = 80;
 
 export function IDEContainer() {
   const { workspace } = useWorkspaceContext();
+  useRegisterDefaultCommands();
   const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH);
   const [chatPanelVisible, setChatPanelVisible] = useState(true);
   const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_WIDTH);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const chatWidthBeforeCollapse = useRef(DEFAULT_CHAT_WIDTH);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setCommandPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    const onOpen = () => setCommandPaletteOpen(true);
+    window.addEventListener("viper:open-command-palette", onOpen);
+    return () => window.removeEventListener("viper:open-command-palette", onOpen);
+  }, []);
+
+  useEffect(() => {
+    const onFocusExplorer = () => {
+      setSidebarView("explorer");
+      setLeftSidebarOpen(true);
+    };
+    const onFocusChat = () => {
+      setChatPanelWidth(chatWidthBeforeCollapse.current);
+      setChatPanelVisible(true);
+    };
+    window.addEventListener("viper:focus-explorer", onFocusExplorer);
+    window.addEventListener("viper:focus-chat", onFocusChat);
+    return () => {
+      window.removeEventListener("viper:focus-explorer", onFocusExplorer);
+      window.removeEventListener("viper:focus-chat", onFocusChat);
+    };
+  }, []);
 
   // Cmd+B / Ctrl+B: toggle left explorer sidebar
   useEffect(() => {
@@ -106,7 +144,9 @@ export function IDEContainer() {
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col min-w-0" style={{ background: "var(--viper-bg)" }}>
+    <>
+      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+    <div className="flex-1 flex flex-col min-w-0 relative" style={{ background: "var(--viper-bg)" }}>
       <div className="flex flex-1 min-h-0">
         {/* Left: Activity bar (always visible) + optional resizable sidebar */}
         <ActivityBar activeView={sidebarView} onViewChange={handleViewChange} />
@@ -188,5 +228,6 @@ export function IDEContainer() {
 
       <StatusBar />
     </div>
+    </>
   );
 }

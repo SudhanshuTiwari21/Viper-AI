@@ -27,11 +27,16 @@ export function useWorkspace() {
     }
   }, []);
 
+  const closeWorkspace = useCallback(async () => {
+    setWorkspace(null);
+    await watchWorkspace(null);
+  }, []);
+
   useEffect(() => {
     fsApi.onFileChanged(() => {
       if (workspaceRootRef.current) reload();
     });
   }, [reload]);
 
-  return { workspace, reload, selectWorkspace: selectWorkspaceFolder };
+  return { workspace, reload, selectWorkspace: selectWorkspaceFolder, closeWorkspace };
 }

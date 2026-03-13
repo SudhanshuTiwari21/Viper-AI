@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { FileNode } from "../services/filesystem";
 import { FileIcon } from "./file-icons";
+import { useContextMenu } from "../context-menu/context-menu-provider";
+import type { ContextMenuItem } from "../context-menu/context-menu-types";
 
 const INDENT = 12;
 
@@ -54,6 +56,16 @@ interface TreeNodeProps {
   onCreateChange: (value: string) => void;
   onCreateCommit: () => void;
   onCreateCancel: () => void;
+  /** Error count for this file (from diagnostics). */
+  errorCount?: number;
+  /** Warning count for this file (from diagnostics). */
+  warningCount?: number;
+  /** Map of path -> error count (passed through for children). */
+  errorsByPath?: Record<string, number>;
+  /** Map of path -> warning count (passed through for children). */
+  warningsByPath?: Record<string, number>;
+  /** Workspace root (absolute) for building context menu targets. */
+  workspaceRoot?: string | null;
 }
 
 function TreeNode({
@@ -68,10 +80,82 @@ function TreeNode({
   onCreateChange,
   onCreateCommit,
   onCreateCancel,
+  errorCount = 0,
+  warningCount = 0,
+  errorsByPath = {},
+  warningsByPath = {},
+  workspaceRoot,
 }: TreeNodeProps) {
+  const { openMenu } = useContextMenu();
   const [expanded, setExpanded] = useState(false);
   const isDir = node.isDirectory;
   const isLoading = !isDir && loadingPath === node.path;
+  const hasErrors = !isDir && errorCount > 0;
+  const hasWarnings = !isDir && warningCount > 0;
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (!workspaceRoot) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const target = {
+      path: node.path,
+      isDirectory: isDir,
+      workspaceRoot,
+      name: node.name,
+    };
+
+    const items: ContextMenuItem[] = [];
+
+    if (isDir) {
+      items.push(
+        { id: "new-file", label: "New File…", command: "explorer.newFileInFolder" },
+        { id: "new-folder", label: "New Folder…", command: "explorer.newFolderInFolder" },
+        { id: "reveal", label: "Reveal in Finder", command: "explorer.revealInFinder" },
+        { id: "open-term", label: "Open in Integrated Terminal", command: "explorer.openTerminalHere" },
+        { id: "sep-1", label: "-", separator: true },
+        {
+          id: "share",
+          label: "Share",
+          submenu: [
+            { id: "copy-abs", label: "Copy Absolute Path", command: "explorer.copyAbsolutePath" },
+            { id: "copy-url", label: "Copy File URL", command: "explorer.copyFileUrl" },
+          ],
+        },
+        { id: "sep-2", label: "-", separator: true },
+        { id: "add-chat", label: "Add Directory to Viper Chat", command: "viper.chat.addDirectory" },
+        { id: "add-chat-new", label: "Add Directory to New Viper Chat", command: "viper.chat.addDirectoryNew" },
+        { id: "sep-3", label: "-", separator: true },
+        { id: "copy-path", label: "Copy Path", command: "explorer.copyRelativePath" },
+        { id: "rename", label: "Rename", command: "explorer.rename" },
+        { id: "delete", label: "Delete", command: "explorer.delete" }
+      );
+    } else {
+      items.push(
+        { id: "open-side", label: "Open to the Side", command: "explorer.openToSide" },
+        { id: "reveal", label: "Reveal in Finder", command: "explorer.revealInFinder" },
+        { id: "open-term", label: "Open in Integrated Terminal", command: "explorer.openTerminalHere" },
+        { id: "sep-1", label: "-", separator: true },
+        {
+          id: "share",
+          label: "Share",
+          submenu: [
+            { id: "copy-abs", label: "Copy Absolute Path", command: "explorer.copyAbsolutePath" },
+            { id: "copy-url", label: "Copy File URL", command: "explorer.copyFileUrl" },
+          ],
+        },
+        { id: "sep-2", label: "-", separator: true },
+        { id: "add-chat", label: "Add File to Viper Chat", command: "viper.chat.addFile" },
+        { id: "add-chat-new", label: "Add File to New Viper Chat", command: "viper.chat.addFileNew" },
+        { id: "sep-3", label: "-", separator: true },
+        { id: "copy-path", label: "Copy Path", command: "explorer.copyRelativePath" },
+        { id: "rename", label: "Rename", command: "explorer.rename" },
+        { id: "delete", label: "Delete", command: "explorer.delete" }
+      );
+    }
+
+    openMenu(items, { x: e.clientX, y: e.clientY }, target);
+  };
 
   if (isDir) {
     return (
@@ -84,6 +168,7 @@ function TreeNode({
             onSelectPath(node.path, true);
             setExpanded((e) => !e);
           }}
+          onContextMenu={handleContextMenu}
         >
           <span className="flex-shrink-0 w-4 text-[#6b6b6b] text-[8px] flex items-center justify-center leading-none">
             {expanded ? "▼" : "▶"}
@@ -107,6 +192,10 @@ function TreeNode({
                 onCreateChange={onCreateChange}
                 onCreateCommit={onCreateCommit}
                 onCreateCancel={onCreateCancel}
+                errorCount={errorsByPath[child.path]}
+                warningCount={warningsByPath[child.path]}
+                errorsByPath={errorsByPath}
+                warningsByPath={warningsByPath}
               />
             )) ?? null}
             {createMode && createParentPath === node.path && (
@@ -128,18 +217,39 @@ function TreeNode({
   return (
     <button
       type="button"
-      className="w-full flex items-center gap-0 py-[2px] pl-0 pr-[var(--viper-space-1)] text-left text-[13px] text-[#e5e7eb] hover:bg-white/[0.06] rounded cursor-pointer min-h-[22px] disabled:opacity-70"
+      className="w-full flex items-center gap-0 py-[2px] pl-0 pr-[var(--viper-space-1)] text-left text-[13px] hover:bg-white/[0.06] rounded cursor-pointer min-h-[22px] disabled:opacity-70"
       style={{ paddingLeft: 8 + depth * INDENT + 20 }}
       onClick={() => {
         onSelectPath(node.path, false);
         onOpenFile(node.path);
       }}
+      onContextMenu={handleContextMenu}
       disabled={isLoading}
     >
       <span className="flex-shrink-0 w-4" />
       <FileIcon node={node} />
-      <span className="truncate flex-1 text-left">{node.name}</span>
-      {isLoading && (
+      <span
+        className={`truncate flex-1 text-left ${hasErrors ? "text-red-400" : hasWarnings ? "text-amber-400" : "text-[#e5e7eb]"}`}
+      >
+        {node.name}
+      </span>
+      {hasErrors && (
+        <span
+          className="flex-shrink-0 ml-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-medium bg-red-500/20 text-red-400"
+          title={`${errorCount} error(s)`}
+        >
+          {errorCount}
+        </span>
+      )}
+      {hasWarnings && !hasErrors && (
+        <span
+          className="flex-shrink-0 ml-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-medium bg-amber-500/20 text-amber-400"
+          title={`${warningCount} warning(s)`}
+        >
+          {warningCount}
+        </span>
+      )}
+      {isLoading && !hasErrors && !hasWarnings && (
         <span className="text-[10px] text-[#6b6b6b] ml-1">…</span>
       )}
     </button>
@@ -159,6 +269,12 @@ export interface FileTreeProps {
   onCreateChange?: (value: string) => void;
   onCreateCommit?: () => void;
   onCreateCancel?: () => void;
+  /** Map of workspace-relative path -> error count (for badges and red file names). */
+  errorsByPath?: Record<string, number>;
+  /** Map of workspace-relative path -> warning count (for yellow badges). */
+  warningsByPath?: Record<string, number>;
+  /** Workspace root (absolute) for context menu targets. */
+  workspaceRoot?: string | null;
 }
 
 export function FileTree({
@@ -173,6 +289,9 @@ export function FileTree({
   onCreateChange,
   onCreateCommit,
   onCreateCancel,
+  errorsByPath = {},
+  warningsByPath = {},
+  workspaceRoot,
 }: FileTreeProps) {
   const handleSelect =
     onSelectPath ??
@@ -213,6 +332,11 @@ export function FileTree({
           onCreateChange={handleCreateChange}
           onCreateCommit={handleCreateCommit}
           onCreateCancel={handleCreateCancel}
+          errorCount={errorsByPath[node.path]}
+          warningCount={warningsByPath[node.path]}
+          errorsByPath={errorsByPath}
+          warningsByPath={warningsByPath}
+          workspaceRoot={workspaceRoot}
         />
       ))}
     </div>

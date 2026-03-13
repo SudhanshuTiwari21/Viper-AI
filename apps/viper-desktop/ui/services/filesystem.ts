@@ -29,9 +29,18 @@ declare global {
         destroy: () => Promise<void>;
         onData: (cb: (data: string) => void) => void;
       };
+      shell: {
+        revealInFolder: (workspaceRoot: string, relPath: string) => Promise<void>;
+      };
       git: {
         branch: (root: string) => Promise<string>;
         log: (root: string, relPath: string) => Promise<string[]>;
+      };
+      diagnostics: {
+        start: (root: string | null) => Promise<void>;
+        runForFile: (root: string, relPath: string) => Promise<void>;
+        restart: () => Promise<void>;
+        onUpdate: (cb: (payload: Array<[string, Array<{ file: string; line: number; column?: number; message: string; severity: "error" | "warning" | "info"; source?: string }>]>) => void) => () => void;
       };
     };
   }
@@ -60,4 +69,18 @@ export const fsApi = {
     window.viper.fs.renamePath(root, oldRel, newRel),
   onFileChanged: (cb: (payload: { path: string }) => void) =>
     window.viper.fs.onFileChanged(cb),
+};
+
+export const shellApi = {
+  revealInFolder: (workspaceRoot: string, relPath: string) =>
+    window.viper.shell.revealInFolder(workspaceRoot, relPath),
+};
+
+export const diagnosticsApi = {
+  start: (root: string | null) => window.viper.diagnostics.start(root),
+  runForFile: (root: string, relPath: string) =>
+    window.viper.diagnostics.runForFile(root, relPath),
+  restart: () => window.viper.diagnostics.restart(),
+  onUpdate: (cb: (payload: Array<[string, Array<{ file: string; line: number; column?: number; message: string; severity: "error" | "warning" | "info"; source?: string }>]>) => void) =>
+    window.viper.diagnostics.onUpdate(cb),
 };

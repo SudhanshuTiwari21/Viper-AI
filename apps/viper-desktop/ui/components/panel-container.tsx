@@ -17,7 +17,9 @@ interface PanelContainerProps {
 
 export function PanelContainer({ initialPanel = "terminal" }: PanelContainerProps) {
   const [active, setActive] = useState<PanelId>(initialPanel);
-  const [visible, setVisible] = useState(true);
+  // Start with the bottom panel hidden so the user explicitly opens it
+  // (this also delays terminal startup until first use).
+  const [visible, setVisible] = useState(false);
   const [height, setHeight] = useState(DEFAULT_PANEL_HEIGHT);
 
   const startResize = useCallback(() => {
@@ -33,16 +35,26 @@ export function PanelContainer({ initialPanel = "terminal" }: PanelContainerProp
     window.addEventListener("mouseup", up);
   }, []);
 
-  // Cmd/Ctrl + J toggles panel visibility (like VSCode)
+  // Cmd/Ctrl + Shift+` toggles panel visibility (like VSCode)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "`") {
         e.preventDefault();
         setVisible((v) => !v);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Menu: View > Toggle Terminal
+  useEffect(() => {
+    const onToggle = () => {
+      setActive("terminal");
+      setVisible((v) => !v);
+    };
+    window.addEventListener("viper:menu-toggle-panel", onToggle);
+    return () => window.removeEventListener("viper:menu-toggle-panel", onToggle);
   }, []);
 
   const tabClass = (id: PanelId, label: string) =>
@@ -130,7 +142,10 @@ export function PanelContainer({ initialPanel = "terminal" }: PanelContainerProp
             role="separator"
             aria-label="Resize panel"
           />
-          <div className="flex flex-col min-h-0 overflow-hidden" style={{ height }}>
+          <div
+            className="flex flex-col min-h-0 overflow-x-hidden overflow-y-auto"
+            style={{ height }}
+          >
             {active === "problems" && <ProblemsPanel />}
             {active === "debug" && <DebugConsolePanel />}
             {active === "terminal" && <TerminalPanel />}

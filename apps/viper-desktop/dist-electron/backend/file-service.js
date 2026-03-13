@@ -32,6 +32,10 @@ function setupFileService() {
         await promises_1.default.mkdir(path_1.default.dirname(full), { recursive: true });
         await promises_1.default.writeFile(full, "", "utf8");
     });
+    electron_1.ipcMain.handle("file:createFolder", async (_e, root, rel) => {
+        const full = resolvePath(root, rel);
+        await promises_1.default.mkdir(full, { recursive: true });
+    });
     electron_1.ipcMain.handle("file:delete", async (_e, root, rel) => {
         const full = resolvePath(root, rel);
         await promises_1.default.rm(full, { recursive: true, force: true });
@@ -52,10 +56,27 @@ function setupFileService() {
         currentWatcher = chokidar_1.default.watch(root, {
             ignoreInitial: true,
             persistent: true,
-            ignored: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.viper/**"],
+            ignored: [
+                "**/node_modules/**",
+                "**/.git/**",
+                "**/dist/**",
+                "**/build/**",
+                "**/.viper/**",
+                "**/.next/**",
+                "**/.cache/**",
+                "**/.turbo/**",
+                "**/out/**",
+                "**/.vite/**",
+            ],
         });
-        currentWatcher.on("change", (filePath) => {
+        const notify = (filePath) => {
             sendToAll("file:changed", { path: filePath });
-        });
+        };
+        currentWatcher
+            .on("change", notify)
+            .on("add", notify)
+            .on("addDir", notify)
+            .on("unlink", notify)
+            .on("unlinkDir", notify);
     });
 }

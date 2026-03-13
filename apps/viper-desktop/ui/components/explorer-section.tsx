@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   FilePlus,
   FolderPlus,
@@ -6,16 +6,29 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+import { useDiagnostics } from "../contexts/diagnostics-context";
 import { fsApi } from "../services/filesystem";
 import { FileTree } from "./file-tree";
 import type { SidebarView } from "./activity-bar";
+import { useContextMenu } from "../context-menu/context-menu-provider";
+import type { ContextMenuItem } from "../context-menu/context-menu-types";
 
 export interface ExplorerSectionProps {
   activeView: SidebarView;
 }
 
+
 export function ExplorerSection({ activeView }: ExplorerSectionProps) {
   const { workspace, reload, selectWorkspace } = useWorkspaceContext();
+  const { openMenu } = useContextMenu();
+  const { diagnostics, getFileErrorCount } = useDiagnostics();
+  const errorsByPath: Record<string, number> = {};
+  const warningsByPath: Record<string, number> = {};
+  for (const [filePath] of diagnostics) {
+    const { errors, warnings } = getFileErrorCount(filePath);
+    if (errors) errorsByPath[filePath] = errors;
+    if (warnings) warningsByPath[filePath] = warnings;
+  }
   const [collapseAll, setCollapseAll] = useState(0);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,14 +130,44 @@ export function ExplorerSection({ activeView }: ExplorerSectionProps) {
   const toolbarBtnClass =
     "p-[var(--viper-space-1)] rounded text-[#9ca3af] hover:text-[#e5e7eb] hover:bg-white/5 transition-all duration-150 hover:shadow-[0_0_8px_rgba(34,197,94,0.12)]";
 
+  // Respond to the native "File > Open Folder…" menu by triggering the same
+  // workspace selection flow as the in-app "Open Folder…" button.
+  useEffect(() => {
+    const handler = () => {
+      selectWorkspace().catch(console.error);
+    };
+    window.addEventListener("viper:menu-open-folder", handler);
+    return () => window.removeEventListener("viper:menu-open-folder", handler);
+  }, [selectWorkspace]);
+
   if (activeView !== "explorer") return null;
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "var(--viper-sidebar)" }}>
+    <div className="flex flex-col flex-1 min-h-0" style={{ background: "var(--viper-sidebar)" }}>
       {/* Styled section header: DOCKERA */}
       <div
         className="flex items-center justify-between min-h-9 px-[var(--viper-space-1)] flex-shrink-0 border-b"
         style={{ borderColor: "var(--viper-border)" }}
+        onContextMenu={(e) => {
+          if (!workspace) return;
+          e.preventDefault();
+          const target = {
+            path: "",
+            isDirectory: true,
+            workspaceRoot: workspace.root,
+            name: workspaceName ?? "Workspace",
+          };
+          const items: ContextMenuItem[] = [
+            { id: "new-file-root", label: "New File", command: "explorer.newFileInFolder" },
+            { id: "new-folder-root", label: "New Folder", command: "explorer.newFolderInFolder" },
+            { id: "open-term-root", label: "Open in Terminal", command: "explorer.openTerminalHere" },
+            { id: "reveal-root", label: "Reveal in Finder", command: "explorer.revealInFinder" },
+            { id: "sep-root-1", label: "-", separator: true },
+            { id: "add-chat-root", label: "Add Directory to Viper Chat", command: "viper.chat.addDirectory" },
+            { id: "copy-path-root", label: "Copy Path", command: "explorer.copyRelativePath" },
+          ];
+          openMenu(items, { x: e.clientX, y: e.clientY }, target);
+        }}
       >
         <span
           className="text-[11px] font-semibold uppercase tracking-wider text-[#e5e7eb] truncate flex-1 min-w-0"
@@ -182,6 +225,9 @@ export function ExplorerSection({ activeView }: ExplorerSectionProps) {
                 setCreateValue("");
                 setCreateParentPath(null);
               }}
+              errorsByPath={errorsByPath}
+              warningsByPath={warningsByPath}
+              workspaceRoot={workspace.root}
             />
           </>
         )}

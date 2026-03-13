@@ -6,6 +6,7 @@ type WorkspaceContextValue = {
   workspace: WorkspaceState | null;
   reload: () => Promise<void>;
   selectWorkspace: () => Promise<void>;
+  closeWorkspace: () => Promise<void>;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);

@@ -15,5 +15,5 @@
     "types": ["node"],
     "composite": true
   },
-  "include": ["./*.ts", "./types/**/*.d.ts", "../backend/**/*.ts"]
+  "include": ["./*.ts", "./types/**/*.d.ts", "../backend/**/*.ts", "../diagnostics/**/*.ts"]
 }

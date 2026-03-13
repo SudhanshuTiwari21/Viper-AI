@@ -19,6 +19,8 @@ export interface ChatSession {
   title: string;
   messages: ChatMessage[];
   createdAt: number;
+  /** Paths attached to this session for context (file or folder). */
+  attachedPaths?: string[];
 }
 
 interface ChatContextValue {
@@ -29,6 +31,8 @@ interface ChatContextValue {
   addMessage: (sessionId: string, message: Omit<ChatMessage, "id">) => string;
   updateMessage: (sessionId: string, messageId: string, content: string, streaming?: boolean) => void;
   setSessionTitle: (sessionId: string, title: string) => void;
+  addAttachedPath: (sessionId: string, path: string) => void;
+  addAttachedPathToNewSession: (path: string) => string;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -99,6 +103,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const addAttachedPath = useCallback((sessionId: string, path: string) => {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId
+          ? { ...s, attachedPaths: [...(s.attachedPaths ?? []), path] }
+          : s
+      )
+    );
+  }, []);
+
+  const addAttachedPathToNewSession = useCallback((path: string): string => {
+    const session = createNewSession();
+    session.attachedPaths = [path];
+    setSessions((prev) => [session, ...prev]);
+    setActiveSessionIdState(session.id);
+    return session.id;
+  }, []);
+
   const value: ChatContextValue = {
     sessions,
     activeSessionId,
@@ -107,6 +129,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     addMessage,
     updateMessage,
     setSessionTitle,
+    addAttachedPath,
+    addAttachedPathToNewSession,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

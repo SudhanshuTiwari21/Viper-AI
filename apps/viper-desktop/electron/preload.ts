@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+// In the preload context TypeScript doesn't have DOM types, so declare window for typing only.
+// At runtime this still runs in the renderer and window is available.
+declare const window: any;
+
 contextBridge.exposeInMainWorld("viper", {
   platform: process.platform,
   workspace: {
@@ -43,4 +47,36 @@ contextBridge.exposeInMainWorld("viper", {
     log: (root: string, relPath: string) =>
       ipcRenderer.invoke("git:log", root, relPath) as Promise<string[]>,
   },
+  shell: {
+    revealInFolder: (workspaceRoot: string, relPath: string) =>
+      ipcRenderer.invoke("shell:revealInFolder", workspaceRoot, relPath) as Promise<void>,
+  },
+  diagnostics: {
+    start: (root: string | null) => ipcRenderer.invoke("diagnostics:start", root) as Promise<void>,
+    runForFile: (root: string, relPath: string) =>
+      ipcRenderer.invoke("diagnostics:runForFile", root, relPath) as Promise<void>,
+    restart: () => ipcRenderer.invoke("diagnostics:restart") as Promise<void>,
+    onUpdate: (cb: (payload: Array<[string, unknown[]]>) => void) => {
+      const handler = (_e: unknown, payload: Array<[string, unknown[]]>) => cb(payload);
+      ipcRenderer.on("diagnostics:update", handler);
+      return () => ipcRenderer.removeListener("diagnostics:update", handler);
+    },
+  },
+});
+
+// Translate main-process menu actions into browser events that the React app can listen for.
+ipcRenderer.on("viper:menu-open-folder", () => {
+  window.dispatchEvent(new CustomEvent("viper:menu-open-folder"));
+});
+
+ipcRenderer.on("viper:menu-save", () => {
+  window.dispatchEvent(new CustomEvent("viper:menu-save"));
+});
+
+ipcRenderer.on("viper:menu-save-all", () => {
+  window.dispatchEvent(new CustomEvent("viper:menu-save-all"));
+});
+
+ipcRenderer.on("viper:menu-toggle-panel", () => {
+  window.dispatchEvent(new CustomEvent("viper:menu-toggle-panel"));
 });

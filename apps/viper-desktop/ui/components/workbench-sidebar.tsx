@@ -11,7 +11,7 @@ export interface WorkbenchSidebarProps {
 export function WorkbenchSidebar({ activeView, documentSymbols }: WorkbenchSidebarProps) {
   return (
     <div
-      className="w-full flex-shrink-0 flex flex-col min-h-0"
+      className="w-full flex-1 flex flex-col min-h-0"
       style={{ background: "var(--viper-sidebar)", borderRight: "1px solid var(--viper-border)" }}
     >
       <ExplorerSection activeView={activeView} />

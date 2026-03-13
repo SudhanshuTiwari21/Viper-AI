@@ -19,7 +19,9 @@ function createMainWindow(isDev) {
             preload: path_1.default.join(__dirname, "preload.js"),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true,
+            // Disable sandbox in dev to avoid issues with libraries like Monaco and
+            // to make sure DevTools can attach reliably.
+            sandbox: false,
         },
         show: false,
     });
@@ -28,7 +30,10 @@ function createMainWindow(isDev) {
     });
     if (isDev && VITE_DEV_SERVER_URL.startsWith("http")) {
         win.loadURL(VITE_DEV_SERVER_URL);
-        // DevTools: open manually via View > Toggle Developer Tools or Ctrl+Shift+I
+        // Open DevTools automatically in dev so you always see console errors.
+        win.webContents.once("did-frame-finish-load", () => {
+            win.webContents.openDevTools({ mode: "detach" });
+        });
     }
     else {
         win.loadFile(path_1.default.join(__dirname, "../dist/index.html"));

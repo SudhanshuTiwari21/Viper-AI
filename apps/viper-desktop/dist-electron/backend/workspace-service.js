@@ -14,6 +14,15 @@ const IGNORED_DIRS = new Set([
     "dist",
     "build",
     ".viper",
+    ".next",
+    ".cache",
+    ".turbo",
+    "out",
+    ".nuxt",
+    ".output",
+    "coverage",
+    ".parcel-cache",
+    ".vite",
 ]);
 exports.WORKSPACES_ROOT = path_1.default.join(process.env.HOME ?? process.env.USERPROFILE ?? electron_1.app.getPath("home"), ".viper", "workspaces");
 async function readDirRecursive(root, dir) {

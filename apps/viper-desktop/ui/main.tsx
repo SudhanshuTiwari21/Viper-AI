@@ -5,6 +5,7 @@ import { CurrentFileProvider } from "./contexts/current-file-context";
 import { OutputProvider } from "./contexts/output-context";
 import { StatusBarProvider } from "./contexts/status-bar-context";
 import { ChatProvider } from "./contexts/chat-context";
+import { DiagnosticsProvider } from "./contexts/diagnostics-context";
 import { Layout } from "./app/layout";
 import { Page } from "./app/page";
 import "./styles/globals.css";
@@ -57,11 +58,13 @@ function App() {
       <CurrentFileProvider>
         <OutputProvider>
           <StatusBarProvider>
-            <ChatProvider>
-              <Layout>
-                <Page />
-              </Layout>
-            </ChatProvider>
+            <DiagnosticsProvider>
+              <ChatProvider>
+                <Layout>
+                  <Page />
+                </Layout>
+              </ChatProvider>
+            </DiagnosticsProvider>
           </StatusBarProvider>
         </OutputProvider>
       </CurrentFileProvider>

@@ -4,6 +4,7 @@ import { EditorWelcome } from "./editor-welcome";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useCurrentFile } from "../contexts/current-file-context";
 import { useStatusBar } from "../contexts/status-bar-context";
+import { useDiagnostics } from "../contexts/diagnostics-context";
 import { fsApi } from "../services/filesystem";
 import { useEditorTabs } from "../hooks/useEditor";
 import type { CodePatch } from "../lib/patch-types";
@@ -16,6 +17,7 @@ export function EditorContainer() {
   const { workspace } = useWorkspaceContext();
   const { setCurrentFile } = useCurrentFile();
   const { setStatus } = useStatusBar();
+  const { setFileErrors } = useDiagnostics();
   const { tabs, activeId, openTab, closeTab, setActiveId, updateContent, markSaved } =
     useEditorTabs();
   const [saving, setSaving] = useState(false);
@@ -135,6 +137,22 @@ export function EditorContainer() {
     );
   }, [workspace, tabs, markSaved]);
 
+  // Respond to native "File > Save" / "File > Save All" menu actions.
+  useEffect(() => {
+    const handleMenuSave = () => {
+      void handleSave();
+    };
+    const handleMenuSaveAll = () => {
+      void saveAllDirty();
+    };
+    window.addEventListener("viper:menu-save", handleMenuSave);
+    window.addEventListener("viper:menu-save-all", handleMenuSaveAll);
+    return () => {
+      window.removeEventListener("viper:menu-save", handleMenuSave);
+      window.removeEventListener("viper:menu-save-all", handleMenuSaveAll);
+    };
+  }, [handleSave, saveAllDirty]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
@@ -229,6 +247,8 @@ export function EditorContainer() {
             value={activeTab.content}
             onChange={(val) => updateContent(activeTab.id, val)}
             onCursorChange={handleCursorChange}
+            currentFilePath={activeTab.path}
+            onDiagnosticsChange={setFileErrors}
           />
         )}
       </div>
