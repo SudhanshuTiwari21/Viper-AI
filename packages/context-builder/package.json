@@ -1,0 +1,24 @@
+{
+  "name": "@repo/context-builder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./raw-context.types": "./src/raw-context.types.ts",
+    "./build-raw-context": "./src/build-raw-context.ts",
+    "./context-merge.service": "./src/context-merge.service.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "typescript": "5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
