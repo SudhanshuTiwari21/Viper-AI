@@ -1,10 +1,28 @@
+import "dotenv/config";
 import Fastify from "fastify";
+import cors from "@fastify/cors";
+import { runMigrations } from "@repo/database";
 import { healthRoutes } from "./routes/health.routes.js";
 import { analysisRoutes } from "./routes/analysis.routes.js";
 import { chatRoutes } from "./routes/chat.routes.js";
 import { contextRoutes } from "./routes/context.routes.js";
 
 const app = Fastify({ logger: true });
+
+if (process.env.DATABASE_URL) {
+  try {
+    await runMigrations();
+  } catch (err) {
+    app.log.error(err, "Database migrations failed");
+    process.exit(1);
+  }
+}
+
+await app.register(cors, {
+  origin: true,
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+});
 
 await app.register(healthRoutes);
 await app.register(analysisRoutes);

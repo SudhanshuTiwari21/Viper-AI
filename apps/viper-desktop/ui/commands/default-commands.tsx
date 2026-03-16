@@ -3,7 +3,7 @@ import { registerCommand, unregisterCommand } from "./command-registry";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { diagnosticsApi, fsApi, shellApi } from "../services/filesystem";
 import { useChat } from "../contexts/chat-context";
-import { runAnalysis } from "../services/agent-api";
+import { runAnalysis, runAnalysisScan, formatScanReport } from "../services/agent-api";
 
 const COMMAND_IDS = [
   "workspace.openFolder",
@@ -13,6 +13,7 @@ const COMMAND_IDS = [
   "workbench.focusExplorer",
   "workbench.focusChat",
   "viper.analysis.run",
+  "viper.analysis.scan",
   "diagnostics.run",
   "diagnostics.restartWorker",
   "workbench.openCommandPalette",
@@ -97,6 +98,30 @@ export function useRegisterDefaultCommands() {
           window.alert("Analysis started. The backend is building the code intelligence (symbols, embeddings, dependency graph).");
         } catch (e) {
           window.alert(e instanceof Error ? e.message : "Analysis failed. Is the backend running on port 4000?");
+        }
+      },
+    });
+    registerCommand({
+      id: "viper.analysis.scan",
+      title: "Test Codebase Scan (current workspace)",
+      category: "Viper",
+      run: async () => {
+        if (!workspace?.root) {
+          window.alert("Open a workspace folder first.");
+          return;
+        }
+        const sessionId = chat.activeSessionId ?? chat.createSession();
+        try {
+          const result = await runAnalysisScan(workspace.root);
+          const report = formatScanReport(result);
+          chat.addMessage(sessionId, { role: "assistant", content: report });
+          window.dispatchEvent(new CustomEvent("viper:focus-chat"));
+        } catch (e) {
+          chat.addMessage(sessionId, {
+            role: "assistant",
+            content: `Scan failed: ${e instanceof Error ? e.message : "Unknown error"}. Is the backend running on port 4000?`,
+          });
+          window.dispatchEvent(new CustomEvent("viper:focus-chat"));
         }
       },
     });

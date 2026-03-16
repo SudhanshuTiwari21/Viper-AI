@@ -56,6 +56,7 @@ export class PostgresGraphStoreAdapter implements GraphStoreAdapter {
          name = EXCLUDED.name`,
       values
     );
+    console.log("[Viper] graph nodes stored");
   }
 
   async saveEdges(edges: GraphEdge[]): Promise<void> {
@@ -80,5 +81,6 @@ export class PostgresGraphStoreAdapter implements GraphStoreAdapter {
        ON CONFLICT (from_node, to_node, type) DO NOTHING`,
       values
     );
+    console.log("[Viper] graph edges stored");
   }
 }

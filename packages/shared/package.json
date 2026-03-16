@@ -1,19 +1,15 @@
 {
-  "name": "@repo/intent-agent",
+  "name": "@repo/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts",
-    "./context-builder-adapter": "./modules/context-builder-adapter/index.ts"
+    ".": "./cache/index.ts",
+    "./cache": "./cache/index.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "@repo/shared": "*",
-    "openai": "^4.77.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",

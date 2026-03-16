@@ -21,6 +21,7 @@ export function packContext(
   const functions: string[] = [];
   const snippets: string[] = [];
   let usedTokens = 0;
+  let truncated = false;
 
   for (const snip of bundle.snippets) {
     const formatted = formatSnippet(snip);
@@ -29,6 +30,7 @@ export function packContext(
       snippets.push(formatted);
       usedTokens += tokens;
     } else {
+      truncated = true;
       break;
     }
   }
@@ -39,6 +41,7 @@ export function packContext(
       functions.push(fn);
       usedTokens += tokens;
     } else {
+      truncated = true;
       break;
     }
   }
@@ -49,8 +52,13 @@ export function packContext(
       files.push(file);
       usedTokens += tokens;
     } else {
+      truncated = true;
       break;
     }
+  }
+
+  if (truncated && typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+    console.log("[Viper] Context truncated due to token budget");
   }
 
   return {

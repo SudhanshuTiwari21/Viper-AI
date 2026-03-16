@@ -82,6 +82,8 @@ function setupDiagnosticsService() {
         scanPromise = null;
         watcher = chokidar_1.default.watch(root, {
             ignoreInitial: true,
+            usePolling: true,
+            interval: 2000,
             ignored: [
                 "**/node_modules/**",
                 "**/.git/**",
@@ -93,6 +95,10 @@ function setupDiagnosticsService() {
                 "**/out/**",
                 "**/.vite/**",
                 "**/.viper/**",
+                "**/.cursor/**",
+                "**/coverage/**",
+                "**/*.log",
+                "**/.env*",
             ],
         });
         const debounce = new Map();
@@ -108,6 +114,9 @@ function setupDiagnosticsService() {
                 runIncrementalForFile(rel).catch(() => { });
             }, 300));
         };
+        watcher.on("error", (err) => {
+            console.warn("[diagnostics] watcher error:", err instanceof Error ? err.message : err);
+        });
         watcher.on("change", schedule);
         watcher.on("add", schedule);
         watcher.on("unlink", (absPath) => {
@@ -141,6 +150,8 @@ function setupDiagnosticsService() {
         scanPromise = null;
         watcher = chokidar_1.default.watch(root, {
             ignoreInitial: true,
+            usePolling: true,
+            interval: 2000,
             ignored: [
                 "**/node_modules/**",
                 "**/.git/**",
@@ -152,6 +163,10 @@ function setupDiagnosticsService() {
                 "**/out/**",
                 "**/.vite/**",
                 "**/.viper/**",
+                "**/.cursor/**",
+                "**/coverage/**",
+                "**/*.log",
+                "**/.env*",
             ],
         });
         const debounce = new Map();
@@ -167,6 +182,9 @@ function setupDiagnosticsService() {
                 runIncrementalForFile(rel).catch(() => { });
             }, 300));
         };
+        watcher.on("error", (err) => {
+            console.warn("[diagnostics] watcher error:", err instanceof Error ? err.message : err);
+        });
         watcher.on("change", schedule);
         watcher.on("add", schedule);
         watcher.on("unlink", (absPath) => {

@@ -4,7 +4,6 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["tests/**/*.test.ts", "modules/**/*.cache.test.ts"],
-    isolate: true,
+    include: ["cache/**/*.test.ts"],
   },
 });
