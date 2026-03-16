@@ -1,0 +1,29 @@
+{
+  "name": "@repo/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@repo/context-builder": "*",
+    "@repo/context-ranking": "*",
+    "@repo/codebase-analysis-agent": "*",
+    "@repo/intent-agent": "*",
+    "fastify": "^5.1.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.2",
+    "typescript": "5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

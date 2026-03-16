@@ -3,6 +3,7 @@ import { registerCommand, unregisterCommand } from "./command-registry";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { diagnosticsApi, fsApi, shellApi } from "../services/filesystem";
 import { useChat } from "../contexts/chat-context";
+import { runAnalysis } from "../services/agent-api";
 
 const COMMAND_IDS = [
   "workspace.openFolder",
@@ -11,6 +12,7 @@ const COMMAND_IDS = [
   "workbench.toggleTerminal",
   "workbench.focusExplorer",
   "workbench.focusChat",
+  "viper.analysis.run",
   "diagnostics.run",
   "diagnostics.restartWorker",
   "workbench.openCommandPalette",
@@ -79,6 +81,23 @@ export function useRegisterDefaultCommands() {
       category: "Workbench",
       run: () => {
         window.dispatchEvent(new CustomEvent("viper:focus-chat"));
+      },
+    });
+    registerCommand({
+      id: "viper.analysis.run",
+      title: "Run Codebase Analysis",
+      category: "Viper",
+      run: async () => {
+        if (!workspace?.root) {
+          window.alert("Open a workspace folder first.");
+          return;
+        }
+        try {
+          await runAnalysis(workspace.root);
+          window.alert("Analysis started. The backend is building the code intelligence (symbols, embeddings, dependency graph).");
+        } catch (e) {
+          window.alert(e instanceof Error ? e.message : "Analysis failed. Is the backend running on port 4000?");
+        }
       },
     });
     registerCommand({

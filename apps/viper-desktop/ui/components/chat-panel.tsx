@@ -3,9 +3,8 @@ import { Plus, Clock, MoreHorizontal } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatPromptBox } from "./chat-prompt-box";
 import { useChat } from "../contexts/chat-context";
-import { createChatStream } from "../lib/websocket";
-
-const CHAT_API_URL = "http://localhost:3000/agent/chat";
+import { useWorkspaceContext } from "../contexts/workspace-context";
+import { sendChat, formatChatResponse } from "../services/agent-api";
 
 function formatTimeAgo(ts: number): string {
   const d = Date.now() - ts;
@@ -24,6 +23,7 @@ export function ChatPanel() {
     addMessage,
     updateMessage,
   } = useChat();
+  const { workspace } = useWorkspaceContext();
   const [streaming, setStreaming] = useState(false);
   const [pastChatsOpen, setPastChatsOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -43,6 +43,15 @@ export function ChatPanel() {
     async (prompt: string) => {
       if (!prompt.trim() || streaming || !activeSessionId) return;
 
+      const workspacePath = workspace?.root ?? "";
+      if (!workspacePath) {
+        addMessage(activeSessionId, {
+          role: "assistant",
+          content: "Open a workspace folder first so the agent can use your codebase context.",
+        });
+        return;
+      }
+
       addMessage(activeSessionId, {
         role: "user",
         content: prompt.trim(),
@@ -56,13 +65,8 @@ export function ChatPanel() {
 
       setStreaming(true);
       try {
-        const stream = createChatStream(CHAT_API_URL, { prompt });
-        let full = "";
-
-        for await (const chunk of stream) {
-          full += chunk;
-          updateMessage(activeSessionId, assistantId, full, true);
-        }
+        const data = await sendChat(prompt.trim(), workspacePath);
+        const full = formatChatResponse(data);
         updateMessage(activeSessionId, assistantId, full, false);
       } catch (err) {
         const errorText = err instanceof Error ? err.message : "Request failed";
@@ -79,6 +83,7 @@ export function ChatPanel() {
     [
       activeSessionId,
       streaming,
+      workspace?.root,
       addMessage,
       updateMessage,
     ]
