@@ -3,14 +3,14 @@ export {
   getPool,
   closePool,
   type DatabaseConfig,
-} from "./database.service.js";
-export { pool } from "./pool.js";
-export { runMigrations } from "./migrate.js";
+} from "./database.service";
+export { pool } from "./pool";
+export { runMigrations } from "./migrate";
 export {
   saveRepository,
   type SaveRepositoryParams,
-} from "./repository.repository.js";
+} from "./repository.repository";
 export {
   insertRepositoryFiles,
-} from "./repository-files.repository.js";
-export type { RepositoryFileRow, RepositoryFileType, RepositoryRow } from "./types.js";
+} from "./repository-files.repository";
+export type { RepositoryFileRow, RepositoryFileType, RepositoryRow } from "./types";

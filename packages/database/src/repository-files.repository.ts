@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import type { RepositoryFileRow } from "./types.js";
+import type { RepositoryFileRow } from "./types";
 
 /** Rows per INSERT. pg has ~65535 param limit; 6 params/row => max ~10k. Use 2k for safety and speed. */
 const BATCH_SIZE = 2000;

@@ -2,20 +2,61 @@
  * Full Codebase Analysis pipeline: scan → optional persist → push jobs to Redis → start workers.
  * Single entry point for "Analyse the Codebase"; backend (or CLI) only calls this.
  */
-import { runRepoScanner } from "../modules/repo-scanner/pipeline/scan-repo.pipeline.js";
-import type { RunRepoScannerInput, RunRepoScannerOptions, RepoScanPipelineResult } from "../modules/repo-scanner/types/repo-scanner.types.js";
-import { RedisQueueService } from "../modules/repo-scanner/services/redis-queue.service.js";
-import { startASTParserWorkers } from "../modules/ast-parser/pipeline/run-ast-parser.js";
-import { DEFAULT_AST_PARSE_QUEUE_NAME } from "../modules/ast-parser/services/redis-consumer.service.js";
-import { startMetadataExtractionWorkers } from "../modules/metadata-extractor/pipeline/run-metadata-extraction.js";
-import { startGraphBuilderWorkers } from "../modules/dependency-graph-builder/pipeline/run-graph-builder.js";
-import type { GraphStoreService } from "../modules/dependency-graph-builder/services/graph-store.service.js";
+import {runRepoScanner} from "../modules/repo-scanner/pipeline/scan-repo.pipeline";
+import type { RunRepoScannerInput, RunRepoScannerOptions, RepoScanPipelineResult } from "../modules/repo-scanner/types/repo-scanner.types";
+import { startASTParserWorkers } from "../modules/ast-parser/pipeline/run-ast-parser";
+import { DEFAULT_AST_PARSE_QUEUE_NAME } from "../modules/ast-parser/services/redis-consumer.service";
+import { startMetadataExtractionWorkers } from "../modules/metadata-extractor/pipeline/run-metadata-extraction";
+import { startGraphBuilderWorkers } from "../modules/dependency-graph-builder/pipeline/run-graph-builder";
+import type { GraphStoreService } from "../modules/dependency-graph-builder/services/graph-store.service";
 import {
   startEmbeddingWorkers,
   EmbeddingModelService,
   createOpenAIEmbeddingAdapter,
-} from "../modules/chunk-embedding-generator/index.js";
-import type { VectorStoreService } from "../modules/chunk-embedding-generator/services/vector-store.service.js";
+} from "../modules/chunk-embedding-generator";
+import type { VectorStoreService } from "../modules/chunk-embedding-generator/services/vector-store.service";
+interface RedisQueueOptions {
+  url?: string;
+  host?: string;
+  port?: number;
+}
+
+class InlineRedisQueueService {
+  private redis: import("ioredis").Redis | null = null;
+  private readonly options: RedisQueueOptions;
+
+  constructor(options: RedisQueueOptions = {}) {
+    this.options = options;
+    if (options.url || options.host) {
+      const { default: Redis } = require("ioredis") as typeof import("ioredis");
+      this.redis =
+        options.url !== undefined
+          ? new Redis(options.url)
+          : new Redis(options.port ?? 6379, options.host ?? "localhost");
+    }
+  }
+
+  private getClient(): import("ioredis").Redis {
+    if (!this.redis) {
+      throw new Error("Redis not configured: provide url or host in options");
+    }
+    return this.redis;
+  }
+
+  async pushMany(queueName: string, jobs: unknown[]): Promise<void> {
+    if (jobs.length === 0) return;
+    const client = this.getClient();
+    const payloads = jobs.map((job) => JSON.stringify(job));
+    await client.rpush(queueName, ...payloads);
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.redis) {
+      await this.redis.quit();
+      this.redis = null;
+    }
+  }
+}
 
 export interface RunFullAnalysisOptions {
   /** Redis URL or host/port. If provided, scan jobs are pushed and workers are started. */
@@ -53,7 +94,7 @@ export async function runFullAnalysis(
     options.redis && (options.redis.url || options.redis.host) ? options.redis : undefined;
 
   if (redisConfig) {
-    const queue = new RedisQueueService(redisConfig);
+    const queue = new InlineRedisQueueService(redisConfig);
     await queue.pushMany(DEFAULT_AST_PARSE_QUEUE_NAME, scanResult.jobs);
     await queue.disconnect();
 

@@ -4,8 +4,8 @@
  */
 
 // Pipeline: single entry point for full analysis (scan → push jobs → start workers)
-export { runFullAnalysis } from "./pipeline/index.js";
-export type { RunFullAnalysisOptions, RunFullAnalysisResult } from "./pipeline/index.js";
+export { runFullAnalysis } from "./pipeline";
+export type { RunFullAnalysisOptions, RunFullAnalysisResult } from "./pipeline";
 
 // Repo Scanner: scan workspace, classify files, produce parse jobs
 export {
@@ -14,7 +14,7 @@ export {
   resolveWorkspace,
   RepoMetadataStoreService,
   WorkspaceNotFoundError,
-} from "./modules/repo-scanner/index.js";
+} from "./modules/repo-scanner";
 export type {
   RepoMetadataStoreAdapter,
   RepoScanWorkspaceResult,
@@ -26,7 +26,7 @@ export type {
   RunRepoScannerInput,
   RunRepoScannerOptions,
   WorkspaceInput,
-} from "./modules/repo-scanner/index.js";
+} from "./modules/repo-scanner";
 
 // AST Parser: parse source files, extract structure, publish metadata jobs
 export {
@@ -40,7 +40,7 @@ export {
   getParserForLanguage,
   DEFAULT_AST_PARSE_QUEUE_NAME,
   DEFAULT_METADATA_EXTRACT_QUEUE_NAME,
-} from "./modules/ast-parser/index.js";
+} from "./modules/ast-parser";
 export type {
   StartASTParserWorkersOptions,
   ASTParseJob,
@@ -51,7 +51,7 @@ export type {
   FunctionMetadata,
   MetadataExtractRequest,
   SupportedLanguageKey,
-} from "./modules/ast-parser/index.js";
+} from "./modules/ast-parser";
 
 // Metadata Extractor: normalize AST, build relationships, emit graph build events
 export {
@@ -62,7 +62,7 @@ export {
   EventPublisherService,
   toCanonicalId,
   DEPENDENCY_GRAPH_BUILD_CHANNEL,
-} from "./modules/metadata-extractor/index.js";
+} from "./modules/metadata-extractor";
 export type {
   StartMetadataExtractionWorkersOptions,
   MetadataJob,
@@ -75,8 +75,8 @@ export type {
   RelationshipEdge,
   ResolvedSymbol,
   DependencyGraphBuildEvent,
-} from "./modules/metadata-extractor/index.js";
-export type { FunctionMetadata as MetadataFunctionMetadata } from "./modules/metadata-extractor/types/metadata.types.js";
+} from "./modules/metadata-extractor";
+export type { FunctionMetadata as MetadataFunctionMetadata } from "./modules/metadata-extractor/types/metadata.types";
 
 // Dependency Graph Builder: consume metadata events, build graph, persist
 export {
@@ -88,7 +88,7 @@ export {
   SymbolIndexService,
   PostgresGraphStoreAdapter,
   GRAPH_UPDATED_CHANNEL,
-} from "./modules/dependency-graph-builder/index.js";
+} from "./modules/dependency-graph-builder";
 export type {
   StartGraphBuilderWorkersOptions,
   GraphBuilderPipelineOptions,
@@ -101,7 +101,7 @@ export type {
   NormalizedGraphNode,
   GraphStoreAdapter,
   PgQueryClient,
-} from "./modules/dependency-graph-builder/index.js";
+} from "./modules/dependency-graph-builder";
 
 // Chunk Embedding Generator: chunk code, compute embeddings, index
 export {
@@ -115,7 +115,7 @@ export {
   QdrantVectorStoreAdapter,
   EMBEDDING_GENERATE_REQUEST_CHANNEL,
   INDEX_UPDATED_CHANNEL,
-} from "./modules/chunk-embedding-generator/index.js";
+} from "./modules/chunk-embedding-generator";
 export type {
   StartEmbeddingWorkersOptions,
   EmbeddingPipelineOptions,
@@ -126,11 +126,11 @@ export type {
   EmbeddingModelAdapter,
   VectorStoreAdapter,
   IndexUpdatedEvent,
-} from "./modules/chunk-embedding-generator/index.js";
+} from "./modules/chunk-embedding-generator";
 
 // Tools
 export {
   cloneRepository,
   pullRepository,
   checkoutBranch,
-} from "./tools/git-tool/index.js";
+} from "./tools/git-tool";

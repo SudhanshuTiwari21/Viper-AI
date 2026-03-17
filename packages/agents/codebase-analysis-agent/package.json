@@ -5,7 +5,7 @@
     "type": "module",
     "exports": {
         ".": "./index.ts",
-        "./persistence/postgres-repo": "./modules/Repo-Scanner/adapters/postgres-repo-metadata.adapter.ts",
+        "./persistence/postgres-repo": "./modules/repo-scanner/adapters/postgres-repo-metadata.adapter.ts",
         "./*": "./src/*.ts"
     },
     "scripts": {
