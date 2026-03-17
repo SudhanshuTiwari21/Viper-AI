@@ -21,31 +21,34 @@ interface RedisQueueOptions {
   port?: number;
 }
 
+async function createRedisClient(options: RedisQueueOptions) {
+  const { default: Redis } = await import("ioredis");
+  return options.url
+    ? new Redis(options.url)
+    : new Redis(options.port ?? 6379, options.host ?? "localhost");
+}
+
 class InlineRedisQueueService {
   private redis: import("ioredis").Redis | null = null;
   private readonly options: RedisQueueOptions;
 
   constructor(options: RedisQueueOptions = {}) {
     this.options = options;
-    if (options.url || options.host) {
-      const { default: Redis } = require("ioredis") as typeof import("ioredis");
-      this.redis =
-        options.url !== undefined
-          ? new Redis(options.url)
-          : new Redis(options.port ?? 6379, options.host ?? "localhost");
-    }
   }
 
-  private getClient(): import("ioredis").Redis {
+  private async getClient(): Promise<import("ioredis").Redis> {
     if (!this.redis) {
-      throw new Error("Redis not configured: provide url or host in options");
+      if (!this.options.url && !this.options.host) {
+        throw new Error("Redis not configured: provide url or host in options");
+      }
+      this.redis = await createRedisClient(this.options);
     }
     return this.redis;
   }
 
   async pushMany(queueName: string, jobs: unknown[]): Promise<void> {
     if (jobs.length === 0) return;
-    const client = this.getClient();
+    const client = await this.getClient();
     const payloads = jobs.map((job) => JSON.stringify(job));
     await client.rpush(queueName, ...payloads);
   }
@@ -94,13 +97,25 @@ export async function runFullAnalysis(
     options.redis && (options.redis.url || options.redis.host) ? options.redis : undefined;
 
   if (redisConfig) {
+    console.log("[Viper] runFullAnalysis: pushing AST jobs", {
+      jobs: scanResult.jobs.length,
+      redis: redisConfig,
+    });
+
     const queue = new InlineRedisQueueService(redisConfig);
     await queue.pushMany(DEFAULT_AST_PARSE_QUEUE_NAME, scanResult.jobs);
+    console.log("[Viper] runFullAnalysis: pushed AST jobs to queue");
     await queue.disconnect();
+    console.log("[Viper] runFullAnalysis: disconnected Redis queue client");
 
     const getRepoRoot = options.getRepoRoot ?? (() => input.workspacePath);
+    console.log("[Viper] runFullAnalysis: starting AST parser workers");
     startASTParserWorkers({ redis: redisConfig, getRepoRoot });
+
+    console.log("[Viper] runFullAnalysis: starting metadata extraction workers");
     startMetadataExtractionWorkers({ redis: redisConfig });
+
+    console.log("[Viper] runFullAnalysis: starting graph builder workers");
     startGraphBuilderWorkers({ redis: redisConfig, graphStore: options.graphStore });
 
     const embeddingModel =
@@ -110,6 +125,7 @@ export async function runFullAnalysis(
         svc.setAdapter(createOpenAIEmbeddingAdapter());
         return svc;
       })();
+    console.log("[Viper] runFullAnalysis: starting embedding workers");
     startEmbeddingWorkers({
       redis: redisConfig,
       embeddingModel,

@@ -3,8 +3,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@repo/codebase-analysis-agent": ["./src/codebase-analysis-agent.d.ts"],
-      "@repo/codebase-analysis-agent/persistence/postgres-repo": ["./src/codebase-analysis-agent.d.ts"]
+      "@repo/codebase-analysis-agent": ["./src/codebase-analysis-agent.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"]

@@ -34,7 +34,10 @@ declare module "@repo/codebase-analysis-agent" {
 }
 
 declare module "@repo/codebase-analysis-agent/persistence/postgres-repo" {
-  export class PostgresRepoMetadataAdapter {
+  export default class PostgresRepoMetadataAdapter {
     constructor(client: { query: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }> });
   }
 }
+
+
+
