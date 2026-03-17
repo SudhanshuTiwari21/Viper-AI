@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --color-border-muted: #222222;
+  --color-border-active: #444444;
+  --font-sans: var(--font-inter), sans-serif;
+}
+
+@utility kerning-tight {
+  letter-spacing: -0.02em;
+}
+
+@utility kerning-wide {
+  letter-spacing: 0.05em;
+}
+
+::selection {
+  background: #ffffff;
+  color: #000000;
+}
