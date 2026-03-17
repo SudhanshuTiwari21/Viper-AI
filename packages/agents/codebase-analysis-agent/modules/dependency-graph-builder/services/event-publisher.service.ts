@@ -1,7 +1,7 @@
 import Redis from "ioredis";
 
 export const GRAPH_UPDATED_CHANNEL = "graph.updated";
-
+export const DEFAULT_GRAPH_BUILD_QUEUE_NAME = "graph.updated";
 export interface GraphUpdatedEvent {
   repo_id: string;
   updated_nodes: number;

@@ -1,7 +1,7 @@
 import Redis from "ioredis";
 
 export const INDEX_UPDATED_CHANNEL = "index.updated";
-
+export const DEFAULT_EMBEDDING_GENERATE_QUEUE_NAME = "embedding_generate.queue";
 export interface IndexUpdatedEvent {
   repo_id: string;
   indexed_chunks: number;

@@ -15,6 +15,7 @@ import {
   createOpenAIEmbeddingAdapter,
 } from "../modules/chunk-embedding-generator";
 import type { VectorStoreService } from "../modules/chunk-embedding-generator/services/vector-store.service";
+import { DEFAULT_METADATA_EXTRACT_QUEUE_NAME } from "../modules/ast-parser/services/metadata-publisher.service";
 interface RedisQueueOptions {
   url?: string;
   host?: string;
@@ -108,12 +109,15 @@ export async function runFullAnalysis(
     await queue.disconnect();
     console.log("[Viper] runFullAnalysis: disconnected Redis queue client");
 
+
     const getRepoRoot = options.getRepoRoot ?? (() => input.workspacePath);
     console.log("[Viper] runFullAnalysis: starting AST parser workers");
-    startASTParserWorkers({ redis: redisConfig, getRepoRoot });
+    startASTParserWorkers({ redis: redisConfig, getRepoRoot, queueName: DEFAULT_AST_PARSE_QUEUE_NAME});
 
     console.log("[Viper] runFullAnalysis: starting metadata extraction workers");
-    startMetadataExtractionWorkers({ redis: redisConfig });
+    startMetadataExtractionWorkers({ redis: redisConfig,
+      queueName: DEFAULT_METADATA_EXTRACT_QUEUE_NAME,
+     });
 
     console.log("[Viper] runFullAnalysis: starting graph builder workers");
     startGraphBuilderWorkers({ redis: redisConfig, graphStore: options.graphStore });

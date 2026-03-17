@@ -30,6 +30,13 @@ export interface StartASTParserWorkersOptions {
 export function startASTParserWorkers(
   options: StartASTParserWorkersOptions = {}
 ): WorkerScheduler {
+  console.log("[Viper] AST: startASTParserWorkers called", {
+    redis: options.redis,
+    queueName: options.queueName,
+    workerPoolSize: options.workerPoolSize,
+    retryAttempts: options.retryAttempts,
+  });
+
   const redisConsumer =
     options.redis instanceof RedisConsumerService
       ? options.redis
@@ -61,6 +68,13 @@ export function startASTParserWorkers(
     astStore: options.astStore,
   });
 
-  scheduler.start();
+  try {
+    console.log("[Viper] AST: starting WorkerScheduler");
+    scheduler.start();
+    console.log("[Viper] AST: WorkerScheduler started");
+  } catch (err) {
+    console.error("[Viper] AST: failed to start WorkerScheduler", err);
+  }
+
   return scheduler;
 }
