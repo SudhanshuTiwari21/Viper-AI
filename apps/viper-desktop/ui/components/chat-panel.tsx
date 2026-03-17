@@ -1,11 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Plus, Clock, MoreHorizontal } from "lucide-react";
+import { Plus, Clock, MoreHorizontal, Scan } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatPromptBox } from "./chat-prompt-box";
 import { useChat } from "../contexts/chat-context";
-import { createChatStream } from "../lib/websocket";
-
-const CHAT_API_URL = "http://localhost:3000/agent/chat";
+import { useWorkspaceContext } from "../contexts/workspace-context";
+import {
+  sendChat,
+  formatChatResponse,
+  runAnalysis,
+  runAnalysisScan,
+  formatScanReport,
+} from "../services/agent-api";
 
 function formatTimeAgo(ts: number): string {
   const d = Date.now() - ts;
@@ -24,7 +29,9 @@ export function ChatPanel() {
     addMessage,
     updateMessage,
   } = useChat();
+  const { workspace } = useWorkspaceContext();
   const [streaming, setStreaming] = useState(false);
+  const [analysing, setAnalysing] = useState(false);
   const [pastChatsOpen, setPastChatsOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -43,6 +50,15 @@ export function ChatPanel() {
     async (prompt: string) => {
       if (!prompt.trim() || streaming || !activeSessionId) return;
 
+      const workspacePath = workspace?.root ?? "";
+      if (!workspacePath) {
+        addMessage(activeSessionId, {
+          role: "assistant",
+          content: "Open a workspace folder first so the agent can use your codebase context.",
+        });
+        return;
+      }
+
       addMessage(activeSessionId, {
         role: "user",
         content: prompt.trim(),
@@ -56,13 +72,8 @@ export function ChatPanel() {
 
       setStreaming(true);
       try {
-        const stream = createChatStream(CHAT_API_URL, { prompt });
-        let full = "";
-
-        for await (const chunk of stream) {
-          full += chunk;
-          updateMessage(activeSessionId, assistantId, full, true);
-        }
+        const data = await sendChat(prompt.trim(), workspacePath);
+        const full = formatChatResponse(data);
         updateMessage(activeSessionId, assistantId, full, false);
       } catch (err) {
         const errorText = err instanceof Error ? err.message : "Request failed";
@@ -79,10 +90,80 @@ export function ChatPanel() {
     [
       activeSessionId,
       streaming,
+      workspace?.root,
       addMessage,
       updateMessage,
     ]
   );
+
+  const handleAnalyseCodebase = useCallback(async () => {
+    if (!activeSessionId || analysing) return;
+    const workspacePath = workspace?.root ?? "";
+    if (!workspacePath) {
+      addMessage(activeSessionId, {
+        role: "assistant",
+        content:
+          "Open a workspace folder first (File → Open Folder), then click **Analyse the Codebase** to run the full Codebase Analysis Agent pipeline.",
+      });
+      return;
+    }
+    setAnalysing(true);
+    const msgId = addMessage(activeSessionId, {
+      role: "assistant",
+      content: "Running codebase analysis (scanner → AST → metadata → graph → embeddings)…",
+    });
+    try {
+      await runAnalysis(workspacePath);
+      updateMessage(
+        activeSessionId,
+        msgId,
+        "**Codebase analysis started.**\n\nThe backend is running: Repo Scanner, AST Parser, Metadata Extractor, Dependency Graph Builder, and Embedding Generator. Use **Scan only – Repo scanner module** below to see how the agent understands your workspace.",
+        false
+      );
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : "Analysis failed";
+      updateMessage(
+        activeSessionId,
+        msgId,
+        `**Analysis failed:** ${errorText}\n\nCheck that the backend is running (e.g. \`npm run dev\` in \`apps/backend\`) and \`workspacePath\` is valid.`,
+        false
+      );
+    } finally {
+      setAnalysing(false);
+    }
+  }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage]);
+
+  const handleScanOnly = useCallback(async () => {
+    if (!activeSessionId || analysing) return;
+    const workspacePath = workspace?.root ?? "";
+    if (!workspacePath) {
+      addMessage(activeSessionId, {
+        role: "assistant",
+        content: "Open a workspace folder first (File → Open Folder), then click **Scan only – Repo scanner module**.",
+      });
+      return;
+    }
+    setAnalysing(true);
+    const msgId = addMessage(activeSessionId, {
+      role: "assistant",
+      content: "Scanning workspace (Repo Scanner only)…",
+    });
+    try {
+      const data = await runAnalysisScan(workspacePath);
+      const report = formatScanReport(data);
+      updateMessage(activeSessionId, msgId, report, false);
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : "Scan failed";
+      updateMessage(
+        activeSessionId,
+        msgId,
+        `**Scan failed:** ${errorText}`,
+        false
+      );
+    } finally {
+      setAnalysing(false);
+    }
+  }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage]);
 
   const pastChats = sessions
     .slice(0, 10)
@@ -135,10 +216,31 @@ export function ChatPanel() {
 
       {/* Prompt area: agent + context + input */}
       <div
-        className="flex-shrink-0 p-2 border-b"
+        className="flex-shrink-0 p-2 border-b space-y-2"
         style={{ borderColor: "var(--viper-border)" }}
       >
         <ChatPromptBox onSend={handleSend} disabled={streaming} />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium bg-[var(--viper-accent)]/20 text-[var(--viper-accent)] hover:bg-[var(--viper-accent)]/30 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+            onClick={handleAnalyseCodebase}
+            disabled={streaming || analysing}
+            title="Run full Codebase Analysis Agent (scanner, AST, metadata, graph, embeddings) using the current workspace"
+          >
+            <Scan size={14} />
+            Analyse the Codebase (for development and testing)
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-[#9ca3af] hover:bg-white/5 hover:text-[#e5e7eb] disabled:opacity-50 disabled:pointer-events-none transition-colors"
+            onClick={handleScanOnly}
+            disabled={streaming || analysing}
+            title="Run Repo Scanner module only; show report (files, modules, parse jobs) in chat"
+          >
+            Scan only – Repo scanner module
+          </button>
+        </div>
       </div>
 
       {/* Conversation area */}

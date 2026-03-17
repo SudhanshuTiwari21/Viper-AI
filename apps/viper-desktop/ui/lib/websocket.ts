@@ -32,6 +32,7 @@ export function createChatWebSocket(
 
 export interface ChatRequest {
   prompt: string;
+  workspacePath?: string;
 }
 
 /**

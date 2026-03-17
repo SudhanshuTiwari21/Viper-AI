@@ -56,6 +56,8 @@ function setupFileService() {
         currentWatcher = chokidar_1.default.watch(root, {
             ignoreInitial: true,
             persistent: true,
+            usePolling: true,
+            interval: 2000,
             ignored: [
                 "**/node_modules/**",
                 "**/.git/**",
@@ -67,12 +69,19 @@ function setupFileService() {
                 "**/.turbo/**",
                 "**/out/**",
                 "**/.vite/**",
+                "**/.cursor/**",
+                "**/coverage/**",
+                "**/*.log",
+                "**/.env*",
             ],
         });
         const notify = (filePath) => {
             sendToAll("file:changed", { path: filePath });
         };
         currentWatcher
+            .on("error", (err) => {
+            console.warn("[file-service] watcher error:", err instanceof Error ? err.message : err);
+        })
             .on("change", notify)
             .on("add", notify)
             .on("addDir", notify)

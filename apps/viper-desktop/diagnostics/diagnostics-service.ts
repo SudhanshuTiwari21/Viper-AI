@@ -80,6 +80,8 @@ export function setupDiagnosticsService(): void {
 
     watcher = chokidar.watch(root, {
       ignoreInitial: true,
+      usePolling: true,
+      interval: 2000,
       ignored: [
         "**/node_modules/**",
         "**/.git/**",
@@ -91,6 +93,10 @@ export function setupDiagnosticsService(): void {
         "**/out/**",
         "**/.vite/**",
         "**/.viper/**",
+        "**/.cursor/**",
+        "**/coverage/**",
+        "**/*.log",
+        "**/.env*",
       ],
     });
 
@@ -109,6 +115,9 @@ export function setupDiagnosticsService(): void {
       );
     };
 
+    watcher.on("error", (err: unknown) => {
+      console.warn("[diagnostics] watcher error:", err instanceof Error ? err.message : err);
+    });
     watcher.on("change", schedule);
     watcher.on("add", schedule);
     watcher.on("unlink", (absPath) => {
@@ -141,6 +150,8 @@ export function setupDiagnosticsService(): void {
     scanPromise = null;
     watcher = chokidar.watch(root, {
       ignoreInitial: true,
+      usePolling: true,
+      interval: 2000,
       ignored: [
         "**/node_modules/**",
         "**/.git/**",
@@ -152,6 +163,10 @@ export function setupDiagnosticsService(): void {
         "**/out/**",
         "**/.vite/**",
         "**/.viper/**",
+        "**/.cursor/**",
+        "**/coverage/**",
+        "**/*.log",
+        "**/.env*",
       ],
     });
     const debounce = new Map<string, NodeJS.Timeout>();
@@ -168,6 +183,9 @@ export function setupDiagnosticsService(): void {
         }, 300)
       );
     };
+    watcher.on("error", (err: unknown) => {
+      console.warn("[diagnostics] watcher error:", err instanceof Error ? err.message : err);
+    });
     watcher.on("change", schedule);
     watcher.on("add", schedule);
     watcher.on("unlink", (absPath) => {
