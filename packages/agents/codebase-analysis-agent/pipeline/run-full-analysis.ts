@@ -112,7 +112,12 @@ export async function runFullAnalysis(
 
     const getRepoRoot = options.getRepoRoot ?? (() => input.workspacePath);
     console.log("[Viper] runFullAnalysis: starting AST parser workers");
-    startASTParserWorkers({ redis: redisConfig, getRepoRoot, queueName: DEFAULT_AST_PARSE_QUEUE_NAME});
+    startASTParserWorkers({
+      redis: redisConfig,
+      getRepoRoot,
+      queueName: DEFAULT_AST_PARSE_QUEUE_NAME,
+      metadataPublish: { ...redisConfig, queueName: DEFAULT_METADATA_EXTRACT_QUEUE_NAME },
+    });
 
     console.log("[Viper] runFullAnalysis: starting metadata extraction workers");
     startMetadataExtractionWorkers({ redis: redisConfig,
