@@ -1,3 +1,8 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
+
 function TerminalWindow() {
   return (
     <div className="max-w-4xl mx-auto border border-border-muted bg-[#050505] text-left shadow-[0_0_50px_-12px_rgba(255,255,255,0.1)] overflow-hidden">
@@ -41,7 +46,6 @@ function TerminalWindow() {
                 Synthesizing{' '}
                 <span className="text-[#ff79c6]">auth_provider.tsx</span>...
               </div>
-              {/* Progress bar */}
               <div className="mt-2 h-px w-full bg-neutral-900 overflow-hidden relative">
                 <div className="absolute h-full bg-white w-[72%]" aria-hidden="true" />
               </div>
@@ -58,9 +62,26 @@ function TerminalWindow() {
   )
 }
 
+const TITLES = [
+  'Complete Engineering',
+  'Issues Solved',
+  'PRs Merged',
+  'Tickets Created',
+  'Product Management Done',
+]
+
 export default function Hero() {
+  const [titleIndex, setTitleIndex] = useState(0)
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setTitleIndex((prev) => (prev + 1) % TITLES.length)
+    }, 2000)
+    return () => clearTimeout(id)
+  }, [titleIndex])
+
   return (
-    <section className="relative pt-48 pb-32 px-8 overflow-hidden">
+    <section className="relative pt-25 pb-32 px-8 overflow-hidden">
       {/* Radial glow */}
       <div
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] -z-10 pointer-events-none"
@@ -72,14 +93,28 @@ export default function Hero() {
       />
 
       <div className="max-w-5xl mx-auto text-center">
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 border border-border-muted text-[10px] font-bold uppercase tracking-[0.2em] mb-12 text-neutral-400">
-          Public Beta 0.1
-        </div>
-
+       
         {/* Heading — only h1 on the page */}
-        <h1 className="text-6xl md:text-8xl font-medium kerning-tight mb-8 leading-[0.95] text-white">
-          One Prompt.<br />Complete Engineering.
+        <h1 className="text-4xl md:text-7xl font-medium kerning-tight mb-8 leading-[0.95] text-white">
+          One Prompt,
+          <br />
+          <span className="relative inline-flex justify-center overflow-hidden h-[1.1em] w-full">
+            {TITLES.map((title, index) => (
+              <motion.span
+                key={title}
+                className="absolute"
+                initial={{ opacity: 0, y: 60 }}
+                animate={
+                  titleIndex === index
+                    ? { opacity: 1, y: 0 }
+                    : { opacity: 0, y: titleIndex > index ? -60 : 60 }
+                }
+                transition={{ type: 'spring', stiffness: 50 }}
+              >
+                {title}
+              </motion.span>
+            ))}
+          </span>
         </h1>
 
         {/* Subheading */}
@@ -95,12 +130,6 @@ export default function Hero() {
             className="bg-white text-black px-8 py-3.5 text-sm font-semibold hover:bg-neutral-200 transition-all min-w-[180px]"
           >
             Get Started
-          </button>
-          <button
-            type="button"
-            className="border border-border-muted text-white px-8 py-3.5 text-sm font-semibold hover:border-border-active transition-all min-w-[180px]"
-          >
-            Book a Demo
           </button>
         </div>
 
