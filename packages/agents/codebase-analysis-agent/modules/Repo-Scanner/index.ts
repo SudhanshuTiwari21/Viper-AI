@@ -1,6 +1,6 @@
 export { runRepoScanner } from "./pipeline/scan-repo.pipeline";
 export { repoMetadataStoreService, resolveWorkspace } from "./services";
-export { RepoMetadataStoreService } from "./services";
+export { RepoMetadataStoreService, RedisQueueService } from "./services";
 export { WorkspaceNotFoundError } from "./services";
 export type { RepoMetadataStoreAdapter } from "./services";
 export type {

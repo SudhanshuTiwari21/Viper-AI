@@ -5,6 +5,7 @@ import type { ScannedFileEntry } from "../types/repo-scanner.types";
  * Minimal client for running SQL (e.g. pg Pool).
  * Use: new PostgresRepoMetadataAdapter(getPool()) from @repo/database.
  */
+
 export interface PgQueryClient {
   query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
 }
@@ -15,7 +16,7 @@ const BATCH_SIZE = 2000;
  * Postgres adapter for RepoMetadataStoreService.
  * Persists to repositories and repository_files (see packages/database migrations).
  */
-export class PostgresRepoMetadataAdapter implements RepoMetadataStoreAdapter {
+export default class PostgresRepoMetadataAdapter implements RepoMetadataStoreAdapter {
   constructor(private readonly client: PgQueryClient) {}
 
   async saveRepository(params: {

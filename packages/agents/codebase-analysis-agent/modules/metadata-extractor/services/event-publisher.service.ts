@@ -1,8 +1,7 @@
 import Redis from "ioredis";
 import type { RelationshipEdge } from "../types/metadata.types";
 
-export const DEPENDENCY_GRAPH_BUILD_CHANNEL = "dependency_graph.build";
-
+export const DEPENDENCY_GRAPH_BUILD_CHANNEL = "dependency_graph.build"; //pub sub channel for graph builder to listen to
 /**
  * Event payload includes file and module so the graph builder can update incrementally.
  */

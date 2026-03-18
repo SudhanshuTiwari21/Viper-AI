@@ -21,7 +21,7 @@ beforeEach(() => {
 
 describe("OpenAI embedding adapter cache and batching", () => {
   it("returns cached embedding on second call (OpenAI not called again)", async () => {
-    const { createOpenAIEmbeddingAdapter } = await import("./openai-embedding.adapter.js");
+    const { createOpenAIEmbeddingAdapter } = await import("./openai-embedding.adapter.ts");
     const adapter = createOpenAIEmbeddingAdapter();
     const text = "same text for cache";
     const r1 = await adapter.generateEmbeddings([text]);
@@ -31,7 +31,7 @@ describe("OpenAI embedding adapter cache and batching", () => {
   });
 
   it("batches requests (64 per batch)", async () => {
-    const { createOpenAIEmbeddingAdapter } = await import("./openai-embedding.adapter.js");
+    const { createOpenAIEmbeddingAdapter } = await import("./openai-embedding.adapter.ts");
     const adapter = createOpenAIEmbeddingAdapter();
     const texts = Array.from({ length: 100 }, (_, i) => `unique-${i}`);
     const result = await adapter.generateEmbeddings(texts);

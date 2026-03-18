@@ -1,6 +1,6 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
-import type { VectorStoreAdapter } from "../services/vector-store.service.ts";
-import type { VectorRecord } from "../types/chunk.types.ts";
+import type { VectorStoreAdapter } from "../services/vector-store.service";
+import type { VectorRecord } from "../types/chunk.types";
 
 const COLLECTION = process.env.QDRANT_COLLECTION ?? "viper_code";
 

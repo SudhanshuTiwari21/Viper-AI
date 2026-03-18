@@ -8,7 +8,6 @@ import {
   VectorStoreService,
   QdrantVectorStoreAdapter,
 } from "@repo/codebase-analysis-agent";
-import { PostgresRepoMetadataAdapter } from "@repo/codebase-analysis-agent/persistence/postgres-repo";
 import { getRepoId } from "../services/workspace.service.js";
 import type { AnalysisRequest } from "../validators/request.schemas.js";
 
@@ -52,15 +51,22 @@ export async function runAnalysis(
     const databaseUrl = process.env.DATABASE_URL;
     const qdrantUrl = process.env.QDRANT_URL;
 
+    request.log.info({ redisUrl, databaseUrl, qdrantUrl }, "analysis options env");
     const options: Parameters<typeof runFullAnalysis>[1] = {};
     if (redisUrl) options.redis = { url: redisUrl };
 
     if (databaseUrl) {
       const pool = getPool();
+      const { default: PostgresRepoMetadataAdapter } = await import(
+        "@repo/codebase-analysis-agent/persistence/postgres-repo"
+      );
+    
       const repoMetadataStore = new RepoMetadataStoreService();
-      repoMetadataStore.setAdapter(new PostgresRepoMetadataAdapter(pool));
+      const adapter = new PostgresRepoMetadataAdapter(pool);
+      request.log.info("Created PostgresRepoMetadataAdapter");
+      repoMetadataStore.setAdapter(adapter);
       options.persistMetadata = repoMetadataStore;
-
+    
       const graphStore = new GraphStoreService();
       graphStore.setAdapter(new PostgresGraphStoreAdapter(pool));
       options.graphStore = graphStore;

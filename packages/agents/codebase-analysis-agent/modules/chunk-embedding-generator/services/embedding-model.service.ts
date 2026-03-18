@@ -5,6 +5,8 @@ export interface EmbeddingModelAdapter {
   generateEmbeddings(texts: string[]): Promise<number[][]>;
 }
 
+// chunk-embedding-generator/services/redis-consumer.service.ts
+export const DEFAULT_EMBEDDING_GENERATE_QUEUE_NAME = "embedding_generate.queue";
 /**
  * Service that delegates to an adapter. When no adapter is set, generateEmbeddings throws.
  */
