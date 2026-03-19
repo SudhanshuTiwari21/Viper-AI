@@ -63,6 +63,7 @@ describe("Intent Reasoner", () => {
     );
 
     const result = await runReasoning(
+      "fix the login API bug",
       makeIntent(),
       makeEntities(),
       makeTasks(),
@@ -71,5 +72,9 @@ describe("Intent Reasoner", () => {
 
     expect(result.detectedComponents).toEqual(["loginUser", "auth/login.ts"]);
     expect(mockedRunReasoningPrompt).toHaveBeenCalledTimes(1);
+    const builtPrompt = mockedRunReasoningPrompt.mock.calls[0][0];
+    expect(builtPrompt).toContain('"fix the login API bug"');
+    expect(builtPrompt).toContain("USER REQUEST:");
+    expect(builtPrompt).toContain("Intent Type: CODE_FIX");
   });
 });

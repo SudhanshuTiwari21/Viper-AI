@@ -71,6 +71,17 @@ describe("routeTools", () => {
     expect(d.runRanking).toBe(false);
   });
 
+  it("GENERIC intent: directLLMResponse true (e.g. greeting)", () => {
+    const d = routeTools(
+      intent("GENERIC"),
+      entities([]),
+      tasks([]),
+    );
+    expect(d.directLLMResponse).toBe(true);
+    expect(d.runContextEngine).toBe(false);
+    expect(d.runRanking).toBe(false);
+  });
+
   it("unknown intent: directLLMResponse true (generic question)", () => {
     const d = routeTools(
       intent("UNKNOWN"),

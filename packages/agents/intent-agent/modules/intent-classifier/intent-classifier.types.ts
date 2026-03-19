@@ -1,4 +1,5 @@
 export type IntentType =
+  | "GENERIC"
   | "CODE_FIX"
   | "FEATURE_IMPLEMENTATION"
   | "REFACTOR"

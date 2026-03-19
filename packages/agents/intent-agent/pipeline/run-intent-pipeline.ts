@@ -12,12 +12,12 @@ export async function runIntentPipeline(
   prompt: string,
 ): Promise<IntentPipelineResult> {
   const normalizedPrompt = normalizePrompt(prompt);
-  const intent = classifyIntent(normalizedPrompt);
+  const intent = await classifyIntent(normalizedPrompt);
   const entities = extractEntities(normalizedPrompt);
   const tasks = planTasks(intent, entities);
   const contextRequest = buildContextRequest(tasks, entities);
   const contextBundle = await buildContext(contextRequest);
-  const reasoning = await runReasoning(intent, entities, tasks, contextBundle);
+  const reasoning = await runReasoning(prompt, intent, entities, tasks, contextBundle);
   const response = generateIntentResponse(
     intent,
     entities,

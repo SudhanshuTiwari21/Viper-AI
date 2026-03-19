@@ -11,14 +11,26 @@ vi.mock("../modules/intent-reasoner", () => ({
   runReasoning: vi.fn(),
 }));
 
+vi.mock("../modules/intent-classifier", () => ({
+  classifyIntent: vi.fn(),
+}));
+
 import { buildContext } from "../modules/context-builder-adapter";
 import { runReasoning } from "../modules/intent-reasoner";
+import { classifyIntent } from "../modules/intent-classifier";
 
 const mockedBuildContext = vi.mocked(buildContext);
 const mockedRunReasoning = vi.mocked(runReasoning);
+const mockedClassifyIntent = vi.mocked(classifyIntent);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedClassifyIntent.mockImplementation(async (prompt) => {
+    const text = (prompt as { normalized?: string }).normalized ?? "";
+    if (/fix|bug|error/i.test(text)) return { intentType: "CODE_FIX", confidence: 1, matchedKeywords: [] };
+    if (/add|implement|create/i.test(text)) return { intentType: "FEATURE_IMPLEMENTATION", confidence: 1, matchedKeywords: [] };
+    return { intentType: "CODE_FIX", confidence: 1, matchedKeywords: [] };
+  });
   mockedBuildContext.mockResolvedValue({
     files: ["auth/login.ts"],
     functions: ["loginUser"],
@@ -65,8 +77,9 @@ describe("Intent Pipeline", () => {
 
     expect(mockedBuildContext).toHaveBeenCalledTimes(1);
     expect(mockedRunReasoning).toHaveBeenCalledTimes(1);
-    const [intent, entities, tasks, contextBundle] =
+    const [userPrompt, intent, entities, tasks, contextBundle] =
       mockedRunReasoning.mock.calls[0];
+    expect(userPrompt).toBe("add password reset");
     expect(intent.intentType).toBe("FEATURE_IMPLEMENTATION");
     expect(entities.entities).toBeDefined();
     expect(tasks.tasks.length).toBeGreaterThan(0);

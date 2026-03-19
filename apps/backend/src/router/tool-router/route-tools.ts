@@ -78,6 +78,13 @@ export function routeTools(
         runImplementationAgent: false,
         directLLMResponse: false,
       };
+    case "GENERIC":
+      return {
+        runContextEngine: false,
+        runRanking: false,
+        runImplementationAgent: false,
+        directLLMResponse: true,
+      };
     default:
       return {
         runContextEngine: false,

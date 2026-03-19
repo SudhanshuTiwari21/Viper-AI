@@ -11,6 +11,10 @@ import {
   buildContextWindow,
 } from "@repo/context-ranking";
 import type { ContextBuilderAdapter, RawContextBundle } from "@repo/context-builder";
+import { getPool } from "@repo/database";
+import { createContextAdapter } from "../adapters/context-builder.adapter.js";
+import { runCodebaseAnalysisIfConfigured } from "./analysis-options.service.js";
+import { getRepoId } from "./workspace.service.js";
 
 const FALLBACK_NO_CONTEXT = "No relevant code found in repository.";
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
@@ -38,6 +42,13 @@ export interface AssistantPipelineResult {
     functions: string[];
     snippets: string[];
     estimatedTokens: number;
+  };
+  /** For code-related intents: what's in place, what's missing, suggested next step. */
+  reasoning?: {
+    detectedComponents: string[];
+    missingComponents: string[];
+    potentialIssues: string[];
+    recommendedNextStep?: string;
   };
 }
 
@@ -141,14 +152,50 @@ export async function runAssistantPipeline(
   }
 
   log("Context retrieval start");
-  const adapter = await getIntentAgentAdapter();
-  const repo_id = workspacePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "repo";
+  const repo_id = getRepoId(workspacePath);
+
+  // Option A: run codebase analysis on every code-related chat request for fresh embeddings/metadata
+  const analysisRan = await runCodebaseAnalysisIfConfigured(workspacePath, repo_id);
+  if (analysisRan) {
+    const waitMs = Math.max(0, parseInt(process.env.RUN_ANALYSIS_WAIT_MS ?? "12000", 10));
+    if (waitMs > 0) {
+      log("Waiting for analysis pipeline", { waitMs });
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+
+  const databaseUrl = process.env.DATABASE_URL;
+  const qdrantUrl = process.env.QDRANT_URL ?? "http://localhost:6333";
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+
+  const adapter: ContextBuilderAdapter =
+    databaseUrl && openaiApiKey
+      ? createContextAdapter({
+          repo_id,
+          pool: getPool(),
+          qdrantUrl,
+          openaiApiKey,
+        })
+      : (await getIntentAgentAdapter()) as unknown as ContextBuilderAdapter;
 
   const rawContext: RawContextBundle = await buildRawContext(
     repo_id,
     intentResult.contextRequest,
-    adapter as ContextBuilderAdapter,
+    adapter,
   );
+
+  // Verify buildRawContext returns non-empty data when analysis has been run
+  const hasRawData =
+    rawContext.files.length > 0 ||
+    rawContext.functions.length > 0 ||
+    rawContext.classes.length > 0 ||
+    rawContext.embeddings.length > 0 ||
+    rawContext.dependencies.length > 0;
+  if (!hasRawData && analysisRan) {
+    log("Context empty after analysis — pipeline may still be running or workspace has no indexed code");
+  } else if (!hasRawData) {
+    log("Context empty — run codebase analysis (POST /analysis/run) to populate symbols and embeddings");
+  }
 
   if (!decision.runRanking) {
     const contextWindow = buildContextWindow({
@@ -172,6 +219,14 @@ export async function runAssistantPipeline(
         snippets: contextWindow.snippets,
         estimatedTokens: contextWindow.estimatedTokens,
       },
+      reasoning: intentResult.reasoning
+        ? {
+            detectedComponents: intentResult.reasoning.detectedComponents ?? [],
+            missingComponents: intentResult.reasoning.missingComponents ?? [],
+            potentialIssues: intentResult.reasoning.potentialIssues ?? [],
+            recommendedNextStep: intentResult.reasoning.recommendedNextStep,
+          }
+        : undefined,
     };
   }
 
@@ -206,6 +261,14 @@ export async function runAssistantPipeline(
         snippets: [FALLBACK_NO_CONTEXT],
         estimatedTokens: 0,
       },
+      reasoning: intentResult.reasoning
+        ? {
+            detectedComponents: intentResult.reasoning.detectedComponents ?? [],
+            missingComponents: intentResult.reasoning.missingComponents ?? [],
+            potentialIssues: intentResult.reasoning.potentialIssues ?? [],
+            recommendedNextStep: intentResult.reasoning.recommendedNextStep,
+          }
+        : undefined,
     };
   }
 
@@ -220,6 +283,14 @@ export async function runAssistantPipeline(
       snippets: contextWindow.snippets,
       estimatedTokens: contextWindow.estimatedTokens,
     },
+    reasoning: intentResult.reasoning
+      ? {
+          detectedComponents: intentResult.reasoning.detectedComponents ?? [],
+          missingComponents: intentResult.reasoning.missingComponents ?? [],
+          potentialIssues: intentResult.reasoning.potentialIssues ?? [],
+          recommendedNextStep: intentResult.reasoning.recommendedNextStep,
+        }
+      : undefined,
   };
 }
 

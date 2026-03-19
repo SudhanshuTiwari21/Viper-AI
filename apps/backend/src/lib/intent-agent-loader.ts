@@ -15,6 +15,12 @@ export type IntentPipelineResult = {
     dependencyLookup?: boolean;
   };
   response: { intent: string; summary: string };
+  reasoning?: {
+    detectedComponents?: string[];
+    missingComponents?: string[];
+    potentialIssues?: string[];
+    recommendedNextStep?: string;
+  };
 };
 
 export async function runIntentPipeline(prompt: string): Promise<IntentPipelineResult> {

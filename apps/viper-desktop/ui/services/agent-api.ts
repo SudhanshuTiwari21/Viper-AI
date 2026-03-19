@@ -15,6 +15,13 @@ export interface ChatResponse {
     snippets: string[];
     estimatedTokens: number;
   };
+  /** For code-related intents: what's in place, what's missing, suggested next step. */
+  reasoning?: {
+    detectedComponents: string[];
+    missingComponents: string[];
+    potentialIssues: string[];
+    recommendedNextStep?: string;
+  };
 }
 
 /** POST /chat — run assistant pipeline (intent + context ranking). Returns intent + context. */
@@ -38,6 +45,29 @@ export function formatChatResponse(data: ChatResponse): string {
   lines.push(`**Intent:** ${data.intent.intent}`);
   lines.push(`**Summary:** ${data.intent.summary}`);
   lines.push("");
+
+  if (data.reasoning && (data.reasoning.detectedComponents?.length || data.reasoning.missingComponents?.length || data.reasoning.potentialIssues?.length || data.reasoning.recommendedNextStep)) {
+    if (data.reasoning.detectedComponents?.length) {
+      lines.push("**What's in place:**");
+      data.reasoning.detectedComponents.forEach((c) => lines.push(`- ${c}`));
+      lines.push("");
+    }
+    if (data.reasoning.missingComponents?.length) {
+      lines.push("**What needs to be done:**");
+      data.reasoning.missingComponents.forEach((c) => lines.push(`- ${c}`));
+      lines.push("");
+    }
+    if (data.reasoning.potentialIssues?.length) {
+      lines.push("**Potential issues:**");
+      data.reasoning.potentialIssues.forEach((c) => lines.push(`- ${c}`));
+      lines.push("");
+    }
+    if (data.reasoning.recommendedNextStep) {
+      lines.push(`**Suggested next step:** ${data.reasoning.recommendedNextStep}`);
+      lines.push("");
+    }
+  }
+
   lines.push(`**Context** (${data.context.estimatedTokens} tokens):`);
   if (data.context.files.length) {
     lines.push(`Files: ${data.context.files.join(", ")}`);

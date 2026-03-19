@@ -7,12 +7,13 @@ import { buildReasoningPrompt } from "./reasoning-prompt-builder";
 import { runReasoningPrompt } from "./llm-client.service";
 
 export async function runReasoning(
+  userPrompt: string,
   intent: IntentClassification,
   entities: EntityExtractionResult,
   tasks: TaskPlan,
   context: ContextBundle,
 ): Promise<IntentReasoning> {
-  const prompt = buildReasoningPrompt(intent, entities, tasks, context);
+  const prompt = buildReasoningPrompt(userPrompt, intent, entities, tasks, context);
   const rawResponse = await runReasoningPrompt(prompt);
   return parseReasoningResponse(rawResponse);
 }

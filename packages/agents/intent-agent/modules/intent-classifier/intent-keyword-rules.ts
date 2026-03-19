@@ -3,6 +3,7 @@ import type { IntentType } from "./intent-classifier.types";
 export type IntentKeywordRules = Record<IntentType, string[]>;
 
 export const INTENT_KEYWORD_RULES: IntentKeywordRules = {
+  GENERIC: [], // No keywords; used when nothing else matches (e.g. "Hi", "how are you")
   CODE_FIX: ["fix", "bug", "issue", "error", "broken", "debug"],
   FEATURE_IMPLEMENTATION: ["add", "implement", "create", "build", "support"],
   REFACTOR: ["refactor", "improve", "cleanup", "simplify"],

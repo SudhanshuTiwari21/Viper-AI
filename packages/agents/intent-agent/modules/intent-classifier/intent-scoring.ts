@@ -28,7 +28,7 @@ export function scoreIntents(
   });
 
   return {
-    intentType: bestIntent ?? "CODE_SEARCH",
+    intentType: bestIntent ?? "GENERIC",
     confidence: bestScore,
     matchedKeywords: bestMatched,
   };
