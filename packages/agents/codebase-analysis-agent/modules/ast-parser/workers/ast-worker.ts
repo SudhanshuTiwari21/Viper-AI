@@ -7,10 +7,20 @@ import { extractStructure } from "../extractors/structure-extractor";
 import type { MetadataPublisherService } from "../services/metadata-publisher.service";
 import type { AstStoreService } from "../services/ast-store.service";
 
+/** Minimal shape for publishing an embedding job (avoids coupling to chunk-embedding-generator). */
+export interface EmbeddingRequestJob {
+  repo_id: string;
+  file: string;
+  module: string;
+  content: string;
+}
+
 export interface ASTWorkerOptions {
   getRepoRoot: (repo: string) => string;
   /** If set, publish extracted metadata + serialized AST to next stage (metadata.extract.request). */
   metadataPublisher?: MetadataPublisherService;
+  /** If set, publish one embedding job per parsed file to embedding_generate.request channel. */
+  onEmbeddingRequest?: (job: EmbeddingRequestJob) => Promise<void>;
   /** If set, store serialized AST (file_asts). Storage happens inside AST module. */
   astStore?: AstStoreService;
 }
@@ -21,6 +31,7 @@ export interface ASTWorkerOptions {
 export class ASTWorker {
   private readonly parserEngine: ParserEngine;
   private readonly metadataPublisher?: MetadataPublisherService;
+  private readonly onEmbeddingRequest?: (job: EmbeddingRequestJob) => Promise<void>;
   private readonly astStore?: AstStoreService;
 
   constructor(options: ASTWorkerOptions) {
@@ -28,6 +39,7 @@ export class ASTWorker {
       getRepoRoot: options.getRepoRoot,
     });
     this.metadataPublisher = options.metadataPublisher;
+    this.onEmbeddingRequest = options.onEmbeddingRequest;
     this.astStore = options.astStore;
   }
 
@@ -60,11 +72,21 @@ export class ASTWorker {
 
     if (this.metadataPublisher) {
       await this.metadataPublisher.publish({
+        // Match MetadataJob shape expected by metadata-extractor
         repo_id: job.repo,
         file: job.file,
-        functions: extracted.functions,
-        imports: extracted.imports,
-        serialized_ast: serialized,
+        module: job.module ?? "root",
+        language: job.language,
+        ast: serialized,
+      });
+    }
+
+    if (this.onEmbeddingRequest) {
+      await this.onEmbeddingRequest({
+        repo_id: job.repo,
+        file: job.file,
+        module: job.module ?? "root",
+        content,
       });
     }
 

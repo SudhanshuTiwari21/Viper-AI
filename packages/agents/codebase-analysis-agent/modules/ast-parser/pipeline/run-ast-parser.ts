@@ -2,6 +2,7 @@ import { RedisConsumerService } from "../services/redis-consumer.service";
 import { WorkerScheduler } from "../services/worker-scheduler.service";
 import { MetadataPublisherService } from "../services/metadata-publisher.service";
 import type { AstStoreService } from "../services/ast-store.service";
+import type { EmbeddingRequestJob } from "../workers/ast-worker";
 
 export interface StartASTParserWorkersOptions {
   /** Redis connection. */
@@ -20,6 +21,8 @@ export interface StartASTParserWorkersOptions {
   metadataPublish?:
     | { url?: string; host?: string; port?: number; queueName?: string }
     | MetadataPublisherService;
+  /** If set, workers publish one embedding job per parsed file to embedding_generate.request channel. */
+  onEmbeddingRequest?: (job: EmbeddingRequestJob) => Promise<void>;
   /** If set, workers store serialized AST (file_asts). Storage happens inside AST module. */
   astStore?: AstStoreService;
 }
@@ -65,6 +68,7 @@ export function startASTParserWorkers(
     retryAttempts: options.retryAttempts ?? 3,
     getRepoRoot: options.getRepoRoot,
     metadataPublisher,
+    onEmbeddingRequest: options.onEmbeddingRequest,
     astStore: options.astStore,
   });
 

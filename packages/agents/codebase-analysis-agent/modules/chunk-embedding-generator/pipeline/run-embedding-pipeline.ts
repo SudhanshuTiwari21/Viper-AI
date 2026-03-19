@@ -29,7 +29,6 @@ export async function runEmbeddingPipeline(
     console.error("[ChunkEmbedding] Validation failed, skipping:", validation.errors);
     return;
   }
-
   const chunks = extractChunks(job);
   if (chunks.length === 0) return;
 

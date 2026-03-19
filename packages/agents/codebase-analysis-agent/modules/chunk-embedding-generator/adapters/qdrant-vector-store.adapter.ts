@@ -1,8 +1,15 @@
+import { createHash } from "node:crypto";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import type { VectorStoreAdapter } from "../services/vector-store.service";
 import type { VectorRecord } from "../types/chunk.types";
 
 const COLLECTION = process.env.QDRANT_COLLECTION ?? "viper_code";
+
+/** Qdrant expects point IDs to be UUID or integer; convert chunk_id to a deterministic UUID. */
+function toPointId(chunkId: string): string {
+  const hex = createHash("sha256").update(chunkId).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 
 /**
  * Qdrant vector store adapter. Persists code embeddings with metadata (repo_id, file, module, symbol).
@@ -46,9 +53,10 @@ export class QdrantVectorStoreAdapter implements VectorStoreAdapter {
     await this.ensureCollection(vectorSize);
 
     const points = records.map((r) => ({
-      id: r.id,
+      id: toPointId(r.id),
       vector: r.vector,
       payload: {
+        chunk_id: r.id,
         repo_id: r.repo_id,
         file: r.file,
         module: r.module,
@@ -57,8 +65,18 @@ export class QdrantVectorStoreAdapter implements VectorStoreAdapter {
       },
     }));
 
-    await this.client.upsert(this.collection, { wait: true, points });
-    console.log("[Viper] embeddings stored");
+    try {
+      await this.client.upsert(this.collection, { wait: true, points });
+      console.log("[Viper] embeddings stored");
+    } catch (err: unknown) {
+      const e = err as Record<string, unknown>;
+      console.error("[Viper] Qdrant upsert error", {
+        status: e?.status ?? e?.statusCode,
+        message: e?.message,
+        body: e?.body ?? e?.error,
+      });
+      throw err;
+    }
   }
 
   /**
@@ -85,10 +103,10 @@ export class QdrantVectorStoreAdapter implements VectorStoreAdapter {
       filter,
     });
 
-    return (results ?? []).map((p) => ({
-      id: String(p.id),
-      score: p.score ?? 0,
-      payload: (p.payload ?? {}) as Record<string, unknown>,
-    }));
+    return (results ?? []).map((p) => {
+      const payload = (p.payload ?? {}) as Record<string, unknown>;
+      const id = (payload.chunk_id as string) ?? String(p.id);
+      return { id, score: p.score ?? 0, payload };
+    });
   }
 }

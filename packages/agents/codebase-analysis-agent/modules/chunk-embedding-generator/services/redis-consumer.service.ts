@@ -53,9 +53,19 @@ export class EmbeddingRedisConsumerService {
         const job = JSON.parse(message) as EmbeddingGenerateJob;
         await handler(job);
       } catch (err) {
-        if (err instanceof Error) {
-          console.error("[ChunkEmbedding] Job handler error:", err.message);
-        }
+        const msg = err instanceof Error ? err.message : String(err);
+        const detail =
+          err instanceof Error && "cause" in err
+            ? String((err as { cause?: unknown }).cause)
+            : err instanceof Error && "response" in err
+              ? JSON.stringify((err as { response?: unknown }).response)
+              : "";
+        const errObj = err && typeof err === "object" ? (err as Record<string, unknown>) : {};
+        const safeDetail =
+          typeof errObj.status !== "undefined" || errObj.error != null
+            ? JSON.stringify({ status: errObj.status, error: errObj.error })
+            : detail;
+        console.error("[ChunkEmbedding] Job handler error:", msg, safeDetail || "");
       }
     });
   }
