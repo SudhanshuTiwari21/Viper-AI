@@ -5,6 +5,14 @@ import type { ContextBundle } from "../context-builder-adapter/context-builder.t
 import type { IntentReasoning } from "./reasoning.types";
 import { buildReasoningPrompt } from "./reasoning-prompt-builder";
 import { runReasoningPrompt } from "./llm-client.service";
+import type { CacheKeyMessage } from "@repo/shared";
+
+type IntentReasonerCacheContext = {
+  workspaceKey?: string;
+  conversationId?: string;
+  messages?: CacheKeyMessage[];
+  contextHash?: string;
+};
 
 export async function runReasoning(
   userPrompt: string,
@@ -12,9 +20,16 @@ export async function runReasoning(
   entities: EntityExtractionResult,
   tasks: TaskPlan,
   context: ContextBundle,
+  cacheContext?: IntentReasonerCacheContext,
 ): Promise<IntentReasoning> {
   const prompt = buildReasoningPrompt(userPrompt, intent, entities, tasks, context);
-  const rawResponse = await runReasoningPrompt(prompt);
+  const rawResponse = await runReasoningPrompt(prompt, {
+    workspaceKey: cacheContext?.workspaceKey,
+    conversationId: cacheContext?.conversationId,
+    messages: cacheContext?.messages,
+    contextHash: cacheContext?.contextHash,
+    intentType: intent.intentType,
+  });
   return parseReasoningResponse(rawResponse);
 }
 

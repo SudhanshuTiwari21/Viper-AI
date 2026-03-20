@@ -1,6 +1,10 @@
 import OpenAI from "openai";
-import { hashString, createMemoryCache, withRetry } from "@repo/shared";
-import { runIntentPipeline, getIntentAgentAdapter } from "../lib/intent-agent-loader.js";
+import { buildCacheKey, createMemoryCache, withRetry } from "@repo/shared";
+import {
+  runIntentPipeline,
+  getIntentAgentAdapter,
+  runIntentReasoning,
+} from "../lib/intent-agent-loader.js";
 import { routeTools } from "../router/tool-router/index.js";
 import { buildRawContext } from "@repo/context-builder";
 import {
@@ -18,9 +22,16 @@ import { getRepoId } from "./workspace.service.js";
 
 const FALLBACK_NO_CONTEXT = "No relevant code found in repository.";
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-const DIRECT_LLM_CACHE_TTL = Math.max(
+// Cache toggle (defaults to enabled once cache scoping is implemented).
+const DISABLE_LLM_CACHE =
+  (process.env.DISABLE_LLM_CACHE ?? "false").toLowerCase() === "true";
+const DIRECT_LLM_CACHE_TTL = DISABLE_LLM_CACHE
+  ? 0
+  : Math.max(0, parseInt(process.env.DIRECT_LLM_CACHE_TTL ?? "900", 10));
+
+const CHAT_HISTORY_LIMIT = Math.max(
   0,
-  parseInt(process.env.DIRECT_LLM_CACHE_TTL ?? "900", 10),
+  Math.min(10, parseInt(process.env.CHAT_HISTORY_LIMIT ?? "10", 10)),
 );
 
 const directLLMCache = createMemoryCache<AssistantPipelineResult>();
@@ -64,9 +75,26 @@ function isRetryableError(err: unknown): boolean {
 }
 
 /** Direct LLM path (no context retrieval). Uses OpenAI gpt-4o-mini with cache and retry. */
-async function runDirectLLM(prompt: string): Promise<AssistantPipelineResult> {
-  const cacheKey = `direct-llm:${hashString(prompt)}`;
-  if (DIRECT_LLM_CACHE_TTL > 0) {
+async function runDirectLLM(
+  prompt: string,
+  lastMessages: Array<{ role: "user" | "assistant"; content: string }> = [],
+  args: {
+    workspaceKey: string;
+    conversationId?: string;
+    intentType?: string;
+  },
+): Promise<AssistantPipelineResult> {
+  const cacheKey = `direct-llm:${buildCacheKey({
+    workspaceKey: args.workspaceKey,
+    conversationId: args.conversationId,
+    prompt,
+    messages: lastMessages,
+    intentType: args.intentType ?? "DIRECT_LLM",
+    // No context window hash in direct-LLM path.
+    contextHash: "",
+  })}`;
+  const canUseCache = DIRECT_LLM_CACHE_TTL > 0 && Boolean(args.conversationId);
+  if (canUseCache) {
     const cached = await directLLMCache.get(cacheKey);
     if (cached !== null) {
       if (process.env.NODE_ENV !== "test") {
@@ -94,6 +122,10 @@ async function runDirectLLM(prompt: string): Promise<AssistantPipelineResult> {
               content:
                 "You are an AI software engineering assistant. Answer concisely and helpfully.",
             },
+            ...lastMessages.slice(-CHAT_HISTORY_LIMIT).map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
             { role: "user", content: prompt },
           ],
           temperature: 0.3,
@@ -112,7 +144,7 @@ async function runDirectLLM(prompt: string): Promise<AssistantPipelineResult> {
         estimatedTokens,
       },
     };
-    if (DIRECT_LLM_CACHE_TTL > 0) {
+    if (canUseCache) {
       await directLLMCache.set(cacheKey, result, DIRECT_LLM_CACHE_TTL);
     }
     return result;
@@ -127,8 +159,27 @@ async function runDirectLLM(prompt: string): Promise<AssistantPipelineResult> {
 export async function runAssistantPipeline(
   prompt: string,
   workspacePath: string,
+  conversationId?: string,
+  messages: Array<{ role: "user" | "assistant"; content: string }> = [],
 ): Promise<AssistantPipelineResult> {
-  const intentResult = await runIntentPipeline(prompt);
+  const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
+  const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
+  const historyAwarePrompt =
+    lastMessages.length > 0
+      ? `${lastMessages
+          .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+          .join("\n")}\nUser: ${prompt}`
+      : prompt;
+
+  const intentResult = await runIntentPipeline(historyAwarePrompt, {
+    cacheContext: {
+      workspaceKey,
+      conversationId,
+      messages: lastMessages,
+      contextHash: "",
+    },
+    skipReasoning: true,
+  });
 
   log("Intent classification", {
     intentType: intentResult.intent.intentType,
@@ -144,11 +195,19 @@ export async function runAssistantPipeline(
 
   if (decision.directLLMResponse) {
     log("Direct LLM response (skipping context retrieval)");
-    return await runDirectLLM(prompt);
+    return await runDirectLLM(prompt, lastMessages, {
+      workspaceKey,
+      conversationId,
+      intentType: intentResult.intent.intentType,
+    });
   }
 
   if (!decision.runContextEngine) {
-    return await runDirectLLM(prompt);
+    return await runDirectLLM(prompt, lastMessages, {
+      workspaceKey,
+      conversationId,
+      intentType: intentResult.intent.intentType,
+    });
   }
 
   log("Context retrieval start");
@@ -208,6 +267,33 @@ export async function runAssistantPipeline(
       })),
     });
     log("Context window size", contextWindow.estimatedTokens);
+
+    log("Computing reasoning from contextWindow", {
+      files: contextWindow.files.length,
+      functions: contextWindow.functions.length,
+    });
+
+    const reasoningFromContext = await runIntentReasoning(
+      prompt,
+      intentResult.intent,
+      intentResult.entities,
+      intentResult.tasks,
+      {
+        files: contextWindow.files,
+        functions: contextWindow.functions,
+        classes: [],
+        dependencies: [],
+      },
+      {
+        cacheContext: {
+          workspaceKey,
+          conversationId,
+          messages: lastMessages,
+          contextHash: "",
+        },
+      },
+    );
+
     return {
       intent: {
         intent: intentResult.response.intent,
@@ -219,12 +305,12 @@ export async function runAssistantPipeline(
         snippets: contextWindow.snippets,
         estimatedTokens: contextWindow.estimatedTokens,
       },
-      reasoning: intentResult.reasoning
+      reasoning: reasoningFromContext
         ? {
-            detectedComponents: intentResult.reasoning.detectedComponents ?? [],
-            missingComponents: intentResult.reasoning.missingComponents ?? [],
-            potentialIssues: intentResult.reasoning.potentialIssues ?? [],
-            recommendedNextStep: intentResult.reasoning.recommendedNextStep,
+            detectedComponents: reasoningFromContext.detectedComponents ?? [],
+            missingComponents: reasoningFromContext.missingComponents ?? [],
+            potentialIssues: reasoningFromContext.potentialIssues ?? [],
+            recommendedNextStep: reasoningFromContext.recommendedNextStep,
           }
         : undefined,
     };
@@ -232,7 +318,7 @@ export async function runAssistantPipeline(
 
   const candidates = generateCandidates(rawContext);
   const scoringContext = {
-    query: prompt,
+    query: historyAwarePrompt,
     entities: intentResult.entities.entities.map((e: { value: string }) => e.value),
     rawContext: { dependencies: rawContext.dependencies },
     openedFiles: [],
@@ -249,6 +335,32 @@ export async function runAssistantPipeline(
     contextWindow.functions.length > 0 ||
     contextWindow.snippets.length > 0;
 
+  log("Computing reasoning from contextWindow", {
+    files: contextWindow.files.length,
+    functions: contextWindow.functions.length,
+  });
+
+  const reasoningFromContext = await runIntentReasoning(
+    prompt,
+    intentResult.intent,
+    intentResult.entities,
+    intentResult.tasks,
+    {
+      files: contextWindow.files,
+      functions: contextWindow.functions,
+      classes: [],
+      dependencies: [],
+    },
+    {
+      cacheContext: {
+        workspaceKey,
+        conversationId,
+        messages: lastMessages,
+        contextHash: "",
+      },
+    },
+  );
+
   if (!hasContext) {
     return {
       intent: {
@@ -261,12 +373,12 @@ export async function runAssistantPipeline(
         snippets: [FALLBACK_NO_CONTEXT],
         estimatedTokens: 0,
       },
-      reasoning: intentResult.reasoning
+      reasoning: reasoningFromContext
         ? {
-            detectedComponents: intentResult.reasoning.detectedComponents ?? [],
-            missingComponents: intentResult.reasoning.missingComponents ?? [],
-            potentialIssues: intentResult.reasoning.potentialIssues ?? [],
-            recommendedNextStep: intentResult.reasoning.recommendedNextStep,
+            detectedComponents: reasoningFromContext.detectedComponents ?? [],
+            missingComponents: reasoningFromContext.missingComponents ?? [],
+            potentialIssues: reasoningFromContext.potentialIssues ?? [],
+            recommendedNextStep: reasoningFromContext.recommendedNextStep,
           }
         : undefined,
     };
@@ -283,12 +395,12 @@ export async function runAssistantPipeline(
       snippets: contextWindow.snippets,
       estimatedTokens: contextWindow.estimatedTokens,
     },
-    reasoning: intentResult.reasoning
+    reasoning: reasoningFromContext
       ? {
-          detectedComponents: intentResult.reasoning.detectedComponents ?? [],
-          missingComponents: intentResult.reasoning.missingComponents ?? [],
-          potentialIssues: intentResult.reasoning.potentialIssues ?? [],
-          recommendedNextStep: intentResult.reasoning.recommendedNextStep,
+          detectedComponents: reasoningFromContext.detectedComponents ?? [],
+          missingComponents: reasoningFromContext.missingComponents ?? [],
+          potentialIssues: reasoningFromContext.potentialIssues ?? [],
+          recommendedNextStep: reasoningFromContext.recommendedNextStep,
         }
       : undefined,
   };

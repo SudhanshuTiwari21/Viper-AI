@@ -3,7 +3,7 @@
  * "Is this code-related? Which intent?" call for better generic vs code detection.
  */
 import OpenAI from "openai";
-import { hashString, createMemoryCache, withRetry } from "@repo/shared";
+import { buildCacheKey, type CacheKeyMessage, createMemoryCache, withRetry } from "@repo/shared";
 import type { IntentType } from "./intent-classifier.types";
 
 const INTENT_TYPES: IntentType[] = [
@@ -21,7 +21,11 @@ const INTENT_TYPES: IntentType[] = [
 ];
 
 const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-const CACHE_TTL = Math.max(0, parseInt(process.env.INTENT_LLM_CACHE_TTL ?? "3600", 10));
+const DISABLE_INTENT_CACHE =
+  (process.env.DISABLE_INTENT_CACHE ?? "false").toLowerCase() === "true";
+const CACHE_TTL = DISABLE_INTENT_CACHE
+  ? 0
+  : Math.max(0, parseInt(process.env.INTENT_LLM_CACHE_TTL ?? "3600", 10));
 const cache = createMemoryCache<IntentType>();
 
 const SYSTEM_PROMPT = `You are an intent classifier for a coding assistant. Given a user message, respond with exactly one of these labels:
@@ -63,9 +67,29 @@ function parseIntent(raw: string): IntentType {
   return match ?? "GENERIC";
 }
 
-export async function classifyIntentWithLLM(userMessage: string): Promise<IntentType> {
-  const key = hashString(`intent:${userMessage}`);
-  if (CACHE_TTL > 0) {
+type IntentClassifierCacheContext = {
+  workspaceKey?: string;
+  conversationId?: string;
+  messages?: CacheKeyMessage[];
+  contextHash?: string;
+};
+
+export async function classifyIntentWithLLM(
+  userMessage: string,
+  cacheContext?: IntentClassifierCacheContext,
+): Promise<IntentType> {
+  const key = `intent-classifier:${buildCacheKey({
+    workspaceKey: cacheContext?.workspaceKey,
+    conversationId: cacheContext?.conversationId,
+    prompt: userMessage,
+    messages: cacheContext?.messages,
+    intentType: "INTENT_CLASSIFIER",
+    contextHash: cacheContext?.contextHash ?? "",
+  })}`;
+
+  const canUseCache =
+    CACHE_TTL > 0 && Boolean(cacheContext?.conversationId);
+  if (canUseCache) {
     const cached = await cache.get(key);
     if (cached !== null) return cached;
   }
@@ -86,7 +110,7 @@ export async function classifyIntentWithLLM(userMessage: string): Promise<Intent
 
   const content = response.choices[0]?.message?.content?.trim() ?? "";
   const intent = parseIntent(content);
-  if (CACHE_TTL > 0) {
+  if (canUseCache) {
     await cache.set(key, intent, CACHE_TTL);
   }
   return intent;

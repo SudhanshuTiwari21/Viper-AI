@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import type { CodePatch } from "../lib/patch-types";
+import { useWorkspaceContext } from "./workspace-context";
 
 export interface ChatMessage {
   id: string;
@@ -53,8 +54,70 @@ function createNewSession(): ChatSession {
 const initialSession = createNewSession();
 
 export function ChatProvider({ children }: { children: ReactNode }) {
+  const { workspace } = useWorkspaceContext();
+
   const [sessions, setSessions] = useState<ChatSession[]>(() => [initialSession]);
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(() => initialSession.id);
+
+  const normalizeWorkspaceKey = useCallback((rootPath: string) => {
+    const normalized = rootPath.replace(/\\/g, "/").replace(/\/$/, "");
+    return normalized;
+  }, []);
+
+  const workspaceKey = workspace?.root ? normalizeWorkspaceKey(workspace.root) : null;
+  const storageKey = workspaceKey
+    ? `viperai.chat.${workspaceKey}`
+    : null;
+
+  // Load sessions from local storage when workspace changes.
+  useEffect(() => {
+    if (!storageKey) {
+      setSessions([initialSession]);
+      setActiveSessionIdState(initialSession.id);
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) {
+        const s = createNewSession();
+        setSessions([s]);
+        setActiveSessionIdState(s.id);
+        return;
+      }
+      const parsed = JSON.parse(raw) as {
+        sessions?: ChatSession[];
+        activeSessionId?: string | null;
+      };
+
+      if (Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+        setSessions(parsed.sessions);
+      } else {
+        setSessions([createNewSession()]);
+      }
+
+      const fallbackId = parsed.sessions?.[0]?.id;
+      setActiveSessionIdState(parsed.activeSessionId ?? fallbackId ?? null);
+    } catch {
+      // If localStorage is unavailable/corrupt, fall back to a new in-memory session.
+      const s = createNewSession();
+      setSessions([s]);
+      setActiveSessionIdState(s.id);
+    }
+  }, [storageKey]);
+
+  // Persist sessions to local storage.
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({ sessions, activeSessionId }),
+      );
+    } catch {
+      // Ignore persistence failures (private mode, storage disabled, etc).
+    }
+  }, [storageKey, sessions, activeSessionId]);
 
   const setActiveSessionId = useCallback((id: string | null) => {
     setActiveSessionIdState(id);

@@ -5,7 +5,7 @@ import { ChatPromptBox } from "./chat-prompt-box";
 import { useChat } from "../contexts/chat-context";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import {
-  sendChat,
+  sendChatStream,
   formatChatResponse,
   runAnalysis,
   runAnalysisScan,
@@ -59,6 +59,11 @@ export function ChatPanel() {
         return;
       }
 
+      const lastMessages = messages
+        .filter((m) => !m.streaming)
+        .slice(-10)
+        .map((m) => ({ role: m.role, content: m.content }));
+
       addMessage(activeSessionId, {
         role: "user",
         content: prompt.trim(),
@@ -72,7 +77,12 @@ export function ChatPanel() {
 
       setStreaming(true);
       try {
-        const data = await sendChat(prompt.trim(), workspacePath);
+        const data = await sendChatStream(
+          prompt.trim(),
+          workspacePath,
+          activeSessionId,
+          lastMessages,
+        );
         const full = formatChatResponse(data);
         updateMessage(activeSessionId, assistantId, full, false);
       } catch (err) {
@@ -91,6 +101,7 @@ export function ChatPanel() {
       activeSessionId,
       streaming,
       workspace?.root,
+      messages,
       addMessage,
       updateMessage,
     ]

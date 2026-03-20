@@ -4,6 +4,7 @@ import type { TaskType } from "./task-planner.types";
 export type TaskRuleMap = Record<IntentType, TaskType[]>;
 
 export const TASK_RULES: TaskRuleMap = {
+  GENERIC: [],
   CODE_FIX: [
     "LOCATE_CODE",
     "ANALYZE_FLOW",

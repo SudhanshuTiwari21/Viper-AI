@@ -8,7 +8,7 @@ export async function postChat(
   reply: FastifyReply,
 ): Promise<void> {
   try {
-    const { prompt, workspacePath } = request.body;
+    const { prompt, workspacePath, conversationId, messages } = request.body;
 
     const exists = await verifyWorkspaceExists(workspacePath);
     if (!exists) {
@@ -16,7 +16,12 @@ export async function postChat(
       return;
     }
 
-    const result = await runAssistantPipeline(prompt, workspacePath);
+    const result = await runAssistantPipeline(
+      prompt,
+      workspacePath,
+      conversationId,
+      messages,
+    );
     await reply.send(result);
   } catch (err) {
     request.log.error(err);
@@ -31,7 +36,7 @@ export async function postChatStream(
   reply: FastifyReply,
 ): Promise<void> {
   try {
-    const { prompt, workspacePath } = request.body;
+    const { prompt, workspacePath, conversationId, messages } = request.body;
 
     const exists = await verifyWorkspaceExists(workspacePath);
     if (!exists) {
@@ -50,7 +55,12 @@ export async function postChatStream(
     };
 
     send("status", { message: "intent detected" });
-    const result = await runAssistantPipeline(prompt, workspacePath);
+    const result = await runAssistantPipeline(
+      prompt,
+      workspacePath,
+      conversationId,
+      messages,
+    );
     send("status", { message: "context retrieved" });
     send("status", { message: "ranking complete" });
     send("result", result);

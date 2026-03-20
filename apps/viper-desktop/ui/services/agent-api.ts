@@ -25,11 +25,16 @@ export interface ChatResponse {
 }
 
 /** POST /chat — run assistant pipeline (intent + context ranking). Returns intent + context. */
-export async function sendChat(prompt: string, workspacePath: string): Promise<ChatResponse> {
+export async function sendChat(
+  prompt: string,
+  workspacePath: string,
+  conversationId?: string,
+  messages?: Array<{ role: "user" | "assistant"; content: string }>,
+): Promise<ChatResponse> {
   const res = await fetch(`${BACKEND_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, workspacePath }),
+    body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
     signal: AbortSignal.timeout(120_000),
   });
   if (!res.ok) {
@@ -37,6 +42,60 @@ export async function sendChat(prompt: string, workspacePath: string): Promise<C
     throw new Error((err as { error?: string }).error ?? `Chat failed: ${res.status}`);
   }
   return res.json() as Promise<ChatResponse>;
+}
+
+/** POST /chat/stream — same payload as /chat, but backend returns SSE events.
+ * Resolves once `event: result` is received. */
+export async function sendChatStream(
+  prompt: string,
+  workspacePath: string,
+  conversationId?: string,
+  messages?: Array<{ role: "user" | "assistant"; content: string }>,
+): Promise<ChatResponse> {
+  const res = await fetch(`${BACKEND_URL}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
+    signal: AbortSignal.timeout(120_000),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error?: string }).error ?? `Chat failed: ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Each SSE message ends with a blank line.
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      const lines = part.split("\n").map((l) => l.trim()).filter(Boolean);
+      const eventLine = lines.find((l) => l.startsWith("event:"));
+      const dataLine = lines.find((l) => l.startsWith("data:"));
+      if (!eventLine || !dataLine) continue;
+
+      const event = eventLine.slice("event:".length).trim();
+      const dataStr = dataLine.slice("data:".length).trim();
+
+      if (event === "result") {
+        const parsed = JSON.parse(dataStr) as ChatResponse;
+        return parsed;
+      }
+    }
+  }
+
+  throw new Error("Chat stream finished without a result event");
 }
 
 /** Format assistant response for display in chat. */

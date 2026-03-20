@@ -50,7 +50,9 @@ export function extractModuleAndServiceEntities(
 
   while ((match = MODULE_SERVICE_REGEX.exec(text)) !== null) {
     const name = match[1];
-    const kind = match[2].toLowerCase();
+    const kindRaw = match[2];
+    if (!name || !kindRaw) continue;
+    const kind = kindRaw.toLowerCase();
     const phrase = `${name} ${kind}`;
 
     if (kind === "module") {

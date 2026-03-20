@@ -14,6 +14,6 @@ export interface IntentPipelineResult {
   tasks: TaskPlan;
   contextRequest: ContextRequest;
   contextBundle: ContextBundle;
-  reasoning: IntentReasoning;
+  reasoning?: IntentReasoning;
   response: IntentResponse;
 }

@@ -11,6 +11,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         properties: {
           prompt: { type: "string" },
           workspacePath: { type: "string" },
+          conversationId: { type: "string" },
+          messages: {
+            type: "array",
+            maxItems: 10,
+            items: {
+              type: "object",
+              required: ["role", "content"],
+              properties: {
+                role: { type: "string", enum: ["user", "assistant"] },
+                content: { type: "string" },
+              },
+            },
+          },
         },
       },
     },
@@ -35,6 +48,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         properties: {
           prompt: { type: "string" },
           workspacePath: { type: "string" },
+          conversationId: { type: "string" },
+          messages: {
+            type: "array",
+            maxItems: 10,
+            items: {
+              type: "object",
+              required: ["role", "content"],
+              properties: {
+                role: { type: "string", enum: ["user", "assistant"] },
+                content: { type: "string" },
+              },
+            },
+          },
         },
       },
     },

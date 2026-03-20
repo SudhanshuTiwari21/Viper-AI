@@ -3,12 +3,24 @@
  * Includes response caching and retry on 429/503.
  */
 import OpenAI from "openai";
-import { hashString, createMemoryCache, withRetry } from "@repo/shared";
+import { buildCacheKey, type CacheKeyMessage, createMemoryCache, withRetry } from "@repo/shared";
 
 const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-const LLM_CACHE_TTL = Math.max(0, parseInt(process.env.LLM_CACHE_TTL ?? "3600", 10));
+const DISABLE_INTENT_CACHE =
+  (process.env.DISABLE_INTENT_CACHE ?? "false").toLowerCase() === "true";
+const LLM_CACHE_TTL = DISABLE_INTENT_CACHE
+  ? 0
+  : Math.max(0, parseInt(process.env.LLM_CACHE_TTL ?? "3600", 10));
 
 const cache = createMemoryCache<string>();
+
+type IntentReasonerCacheContext = {
+  workspaceKey?: string;
+  conversationId?: string;
+  messages?: CacheKeyMessage[];
+  intentType?: string;
+  contextHash?: string;
+};
 
 function getClient(): OpenAI {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -25,9 +37,21 @@ function isRetryableError(err: unknown): boolean {
   return status === 429 || status === 503;
 }
 
-export async function runReasoningPrompt(prompt: string): Promise<string> {
-  const key = hashString(prompt);
-  if (LLM_CACHE_TTL > 0) {
+export async function runReasoningPrompt(
+  prompt: string,
+  cacheContext?: IntentReasonerCacheContext,
+): Promise<string> {
+  const key = `intent-reasoner:${buildCacheKey({
+    workspaceKey: cacheContext?.workspaceKey,
+    conversationId: cacheContext?.conversationId,
+    prompt,
+    messages: cacheContext?.messages,
+    intentType: cacheContext?.intentType ?? "INTENT_REASONER",
+    contextHash: cacheContext?.contextHash ?? "",
+  })}`;
+  const canUseCache =
+    LLM_CACHE_TTL > 0 && Boolean(cacheContext?.conversationId);
+  if (canUseCache) {
     const cached = await cache.get(key);
     if (cached !== null) {
       if (process.env.NODE_ENV !== "test") {
@@ -60,7 +84,7 @@ export async function runReasoningPrompt(prompt: string): Promise<string> {
     );
     const content = response.choices[0]?.message?.content ?? "";
     const result = content.trim();
-    if (LLM_CACHE_TTL > 0) {
+    if (canUseCache) {
       await cache.set(key, result, LLM_CACHE_TTL);
     }
     return result;

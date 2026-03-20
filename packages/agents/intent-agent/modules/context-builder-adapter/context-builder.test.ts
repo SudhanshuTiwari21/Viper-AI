@@ -6,6 +6,9 @@ import type {
   EmbeddingMatch,
   SymbolSearchResult,
 } from "./context-builder.types";
+import { searchSymbols } from "./symbol-query.service";
+import { searchEmbeddings } from "./embedding-query.service";
+import { getDependencies } from "./dependency-query.service";
 
 vi.mock("./symbol-query.service", () => ({
   searchSymbols: vi.fn(),
@@ -21,15 +24,15 @@ vi.mock("./dependency-query.service", () => ({
 
 const mockedSearchSymbols = vi.mocked<
   (term: string) => Promise<SymbolSearchResult[]>
->(require("./symbol-query.service").searchSymbols);
+>(searchSymbols);
 
 const mockedSearchEmbeddings = vi.mocked<
   (term: string) => Promise<EmbeddingMatch[]>
->(require("./embedding-query.service").searchEmbeddings);
+>(searchEmbeddings);
 
 const mockedGetDependencies = vi.mocked<
   (symbol: string) => Promise<DependencyEdge[]>
->(require("./dependency-query.service").getDependencies);
+>(getDependencies);
 
 beforeEach(() => {
   vi.clearAllMocks();

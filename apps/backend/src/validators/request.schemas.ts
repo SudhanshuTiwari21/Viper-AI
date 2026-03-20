@@ -3,6 +3,16 @@ import { z } from "zod";
 export const ChatRequestSchema = z.object({
   prompt: z.string().min(1),
   workspacePath: z.string().min(1),
+  conversationId: z.string().min(1).optional(),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 export const AnalysisRequestSchema = z.object({

@@ -35,8 +35,8 @@ function sentenceCase(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
 
-  const lower = trimmed.toLowerCase();
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
+  // Preserve existing casing for reference detection (e.g. camelCase function names).
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
 function tokenize(text: string): string[] {
