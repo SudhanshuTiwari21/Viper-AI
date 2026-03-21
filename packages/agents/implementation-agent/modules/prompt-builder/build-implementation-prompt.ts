@@ -39,9 +39,24 @@ ${snippetsText}
 
 TASK:
 Generate the exact code changes required to fulfill the user request.
-Only modify files that need changing. Produce full updated file content for each changed file.
+Prefer SURGICAL line-range operations (minimal diffs). Use full-file changes only when necessary.
 
-Return ONLY valid JSON (no markdown fences, no commentary) in this exact shape:
+Return ONLY valid JSON (no markdown fences, no commentary) in one of these shapes:
+
+{
+  "operations": [
+    {
+      "file": "path/to/file.ts",
+      "type": "replace",
+      "startLine": 10,
+      "endLine": 14,
+      "content": "replacement lines",
+      "expectedOldText": "old exact lines"
+    }
+  ]
+}
+
+or
 
 {
   "changes": [

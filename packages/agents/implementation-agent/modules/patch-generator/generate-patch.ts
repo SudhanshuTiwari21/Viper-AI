@@ -1,10 +1,14 @@
-import type { FileChange, Patch } from "../../pipeline/implementation.types";
+import type {
+  GeneratedPatchPayload,
+  Patch,
+} from "../../pipeline/implementation.types";
 
-export function generatePatch(changes: FileChange[]): Patch {
+export function generatePatch(payload: GeneratedPatchPayload): Patch {
   return {
-    changes: changes.map((c) => ({
+    changes: (payload.changes ?? []).map((c) => ({
       file: c.file,
       content: c.content,
     })),
+    operations: [...(payload.operations ?? [])],
   };
 }

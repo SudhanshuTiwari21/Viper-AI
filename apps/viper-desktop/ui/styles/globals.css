@@ -3,13 +3,24 @@
 @tailwind utilities;
 
 :root {
-  /* Premium dark theme */
-  --viper-bg: #0b0f17;
-  --viper-sidebar: #111827;
-  --viper-border: #1f2937;
-  --viper-accent: #22c55e;
-  --viper-accent-hover: #16a34a;
-  /* 8px spacing system */
+  /* Cursor-style dark theme */
+  --v-bg: #0E0F11;
+  --v-bg2: #15171A;
+  --v-text: #E6EDF3;
+  --v-text2: #9DA7B3;
+  --v-text3: #6B7280;
+  --v-accent: #3B82F6;
+  --v-success: #22C55E;
+  --v-error: #EF4444;
+  --v-warning: #F59E0B;
+  --v-border: #23262B;
+
+  /* Legacy aliases (keep existing components working) */
+  --viper-bg: #0E0F11;
+  --viper-sidebar: #15171A;
+  --viper-border: #23262B;
+  --viper-accent: #3B82F6;
+  --viper-accent-hover: #2563EB;
   --viper-space-1: 8px;
   --viper-space-2: 16px;
   --viper-space-3: 24px;
@@ -28,34 +39,134 @@ body,
 }
 
 body {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--viper-bg);
-  color: #e5e7eb;
+  background: var(--v-bg);
+  color: var(--v-text);
 }
 
 .font-mono,
 .viper-mono {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, monospace;
 }
 
-/* Scrollbar */
-.overflow-y-auto::-webkit-scrollbar,
-.overflow-x-auto::-webkit-scrollbar {
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-.overflow-y-auto::-webkit-scrollbar-track,
-.overflow-x-auto::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
-.overflow-y-auto::-webkit-scrollbar-thumb,
-.overflow-x-auto::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
-.overflow-y-auto::-webkit-scrollbar-thumb:hover,
-.overflow-x-auto::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Animations ─── */
+@keyframes v-thinking-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes v-blink-cursor {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes v-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes v-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes v-slide-down {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+  }
+}
+
+.animate-v-thinking-dot {
+  animation: v-thinking-dot 1.4s infinite ease-in-out both;
+}
+
+.animate-v-blink {
+  animation: v-blink-cursor 1s step-end infinite;
+}
+
+.animate-v-fade-in {
+  animation: v-fade-in 150ms ease-out forwards;
+}
+
+.animate-v-spin {
+  animation: v-spin 1s linear infinite;
+}
+
+/* Thinking dot stagger delays */
+.v-dot-1 {
+  animation-delay: 0s;
+}
+.v-dot-2 {
+  animation-delay: 0.16s;
+}
+.v-dot-3 {
+  animation-delay: 0.32s;
+}
+
+/* Collapsible container */
+.v-collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease-out;
+}
+.v-collapsible.v-open {
+  grid-template-rows: 1fr;
+}
+.v-collapsible > .v-collapsible-inner {
+  overflow: hidden;
+}
+
+/* Button press feedback */
+.v-press {
+  transition: transform 100ms ease-out;
+}
+.v-press:active {
+  transform: scale(0.97);
 }

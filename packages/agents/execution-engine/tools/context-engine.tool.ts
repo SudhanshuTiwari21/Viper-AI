@@ -5,6 +5,7 @@ import {
   computeCandidateScores,
   combineScores,
   selectTopK,
+  CONTEXT_LIMITS,
   buildContextWindow,
 } from "@repo/context-ranking";
 import type { ToolInput, ToolOutput } from "./tool.types";
@@ -42,8 +43,27 @@ export async function runContextTool(
   });
 
   const ranked = combineScores(scored);
-  const bundle = selectTopK(ranked);
+  const iter = ctx.iteration ?? 0;
+  const depth = 1 + Math.min(iter, 2) * 0.5;
+  const bundle = selectTopK(ranked, {
+    files: Math.max(1, Math.round(CONTEXT_LIMITS.files * depth)),
+    functions: Math.max(1, Math.round(CONTEXT_LIMITS.functions * depth)),
+    snippets: Math.max(1, Math.round(CONTEXT_LIMITS.snippets * depth)),
+  });
   const window = buildContextWindow(bundle);
+
+  ctx.logs.push(
+    `[Viper] context tool ${input.type} iteration=${iter} topK depth≈${depth.toFixed(2)}`,
+  );
+
+  ctx.onEvent?.({
+    type: "context:retrieved",
+    data: {
+      files: window.files.length,
+      functions: window.functions.length,
+      tokens: window.estimatedTokens,
+    },
+  });
 
   return { result: window };
 }

@@ -21,8 +21,22 @@ declare module "@repo/planner-agent" {
     steps: PlanStep[];
   }
 
+  export interface PlannerMemoryContext {
+    lastIntent?: { intent: string; summary: string; entities?: string[] };
+    lastPatch?: { files: string[]; success: boolean };
+    lastError?: string;
+    recentFiles: string[];
+    lastLoopReflection?: {
+      iteration: number;
+      strategy: string;
+      failureSummary: string;
+      shouldRetry: boolean;
+    };
+  }
+
   export function buildExecutionPlan(
     intent: string,
     entities: string[],
+    memory?: PlannerMemoryContext,
   ): ExecutionPlan;
 }

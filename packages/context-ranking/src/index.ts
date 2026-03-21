@@ -8,6 +8,7 @@ export { combineScores, SCORE_WEIGHTS } from "./score-aggregator/combine-scores.
 export type { RankedCandidate } from "./score-aggregator/score-aggregator.types.js";
 
 export { selectTopK, CONTEXT_LIMITS } from "./topk-selector/select-topk.js";
+export type { TopKLimits } from "./topk-selector/select-topk.js";
 export type { RankedContextBundle, RankedSnippet } from "./topk-selector/topk-selector.types.js";
 
 export {

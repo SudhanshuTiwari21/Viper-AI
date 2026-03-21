@@ -8,5 +8,8 @@ export type {
   ExecutionContext,
   ExecutionResult,
   StepOutput,
+  EngineMemorySnapshot,
+  RecordStepFn,
 } from "./engine/execution.types";
 export type { ToolInput, ToolOutput, ToolFn } from "./tools/tool.types";
+export type { StreamEvent, OnStreamEvent } from "./engine/stream-events";

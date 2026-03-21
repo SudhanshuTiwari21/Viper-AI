@@ -12,7 +12,13 @@ export async function runStep(
   const tool = TOOL_REGISTRY[step.type];
 
   if (!tool) {
-    ctx.logs.push(`[Viper] No tool for step: ${step.type} — skipped`);
+    const reason = `No tool for step: ${step.type}`;
+    ctx.logs.push(`[Viper] ${reason} — skipped`);
+    ctx.onEvent?.({
+      type: "step:skip",
+      data: { stepId: step.id, stepType: step.type, reason },
+    });
+    ctx.recordStep?.(step.id, step.type, "skipped", undefined, reason);
     return { stepId: step.id, stepType: step.type };
   }
 

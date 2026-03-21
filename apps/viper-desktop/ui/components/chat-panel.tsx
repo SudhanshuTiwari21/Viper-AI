@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Plus, Clock, MoreHorizontal, Scan } from "lucide-react";
+import {
+  Plus,
+  Clock,
+  MoreHorizontal,
+  Scan,
+} from "lucide-react";
 import { ChatMessage } from "./chat-message";
-import { ChatPromptBox } from "./chat-prompt-box";
+import { ChatInput } from "./chat-input";
 import { useChat } from "../contexts/chat-context";
+import type { ExecutionStep, PendingDiff } from "../contexts/chat-context";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import {
   sendChatStream,
@@ -10,7 +16,12 @@ import {
   runAnalysis,
   runAnalysisScan,
   formatScanReport,
+  applyPatch as apiApplyPatch,
+  rejectPatch as apiRejectPatch,
+  type ChatResponse,
 } from "../services/agent-api";
+import { filterPatchByHunks, buildInitialHunkStatuses } from "../lib/filter-patch";
+import { buildFileDiffWithHunks } from "../lib/hunk-model";
 
 function formatTimeAgo(ts: number): string {
   const d = Date.now() - ts;
@@ -28,12 +39,25 @@ export function ChatPanel() {
     createSession,
     addMessage,
     updateMessage,
+    appendTokens,
+    updateSteps,
+    setStreamingPhase,
+    setPendingPatch,
+    updatePendingPatchStatus,
+    updateHunkStatus,
+    bulkUpdateHunkStatuses,
+    setPendingPatchApplySummary,
+    setPlanSteps,
+    setExploredFiles,
+    setErrorMessage,
   } = useChat();
   const { workspace } = useWorkspaceContext();
   const [streaming, setStreaming] = useState(false);
   const [analysing, setAnalysing] = useState(false);
-  const [pastChatsOpen, setPastChatsOpen] = useState(true);
+  const [pastChatsOpen, setPastChatsOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages ?? [];
@@ -45,6 +69,8 @@ export function ChatPanel() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  /* ─── Send handler ─── */
 
   const handleSend = useCallback(
     async (prompt: string) => {
@@ -75,24 +101,135 @@ export function ChatPanel() {
         streaming: true,
       });
 
+      const sid = activeSessionId;
+      const steps: ExecutionStep[] = [];
+
       setStreaming(true);
       try {
-        const data = await sendChatStream(
+        await sendChatStream(
           prompt.trim(),
           workspacePath,
+          (event) => {
+            switch (event.type) {
+              case "intent":
+                setStreamingPhase(sid, assistantId, "intent");
+                break;
+
+              case "plan": {
+                setStreamingPhase(sid, assistantId, "planning");
+                const planData = event.data as { steps?: Array<{ id: string; type: string; description?: string }> };
+                if (planData.steps) {
+                  setPlanSteps(sid, assistantId, planData.steps);
+                }
+                break;
+              }
+
+              case "step:start": {
+                const d = event.data as { stepId: string; stepType: string };
+                steps.push({ stepId: d.stepId, stepType: d.stepType, status: "running" });
+                updateSteps(sid, assistantId, [...steps]);
+                setStreamingPhase(sid, assistantId, "executing");
+                break;
+              }
+
+              case "step:complete": {
+                const d = event.data as { stepId: string; durationMs: number };
+                const step = steps.find((s) => s.stepId === d.stepId);
+                if (step) {
+                  step.status = "complete";
+                  step.durationMs = d.durationMs;
+                }
+                updateSteps(sid, assistantId, [...steps]);
+                break;
+              }
+
+              case "step:skip": {
+                const d = event.data as { stepId: string; stepType: string };
+                steps.push({ stepId: d.stepId, stepType: d.stepType, status: "skipped" });
+                updateSteps(sid, assistantId, [...steps]);
+                break;
+              }
+
+              case "context:retrieved": {
+                const d = event.data as {
+                  files?: string[];
+                  counts?: { files: number; functions: number; tokens: number };
+                };
+                if (d.files) {
+                  setExploredFiles(sid, assistantId, d.files, d.counts);
+                }
+                break;
+              }
+
+              case "patch:start":
+                setStreamingPhase(sid, assistantId, "generating");
+                break;
+
+              case "token": {
+                const d = event.data as { content: string };
+                appendTokens(sid, assistantId, d.content);
+                break;
+              }
+
+              case "patch:preview": {
+                const d = event.data as {
+                  patch: { changes: unknown[]; operations: unknown[] };
+                  diffs: PendingDiff[];
+                  workspacePath: string;
+                  previewId: string;
+                  patchHash: string;
+                };
+                setPendingPatch(sid, assistantId, {
+                  patch: d.patch,
+                  diffs: d.diffs,
+                  workspacePath: d.workspacePath,
+                  previewId: d.previewId,
+                  patchHash: d.patchHash,
+                  status: "pending",
+                  hunkStatuses: buildInitialHunkStatuses(d.diffs),
+                });
+                setStreamingPhase(sid, assistantId, "awaiting_approval");
+                break;
+              }
+
+              case "reasoning:start":
+                setStreamingPhase(sid, assistantId, "reasoning");
+                break;
+
+              case "reflection": {
+                const d = event.data as { summary?: string };
+                if (d.summary) {
+                  appendTokens(sid, assistantId, `\n\n**Reflection:** ${d.summary}`);
+                }
+                break;
+              }
+
+              case "result": {
+                const data = event.data as unknown as ChatResponse;
+                const full = formatChatResponse(data);
+                updateMessage(sid, assistantId, full, false);
+                break;
+              }
+
+              case "error": {
+                const d = event.data as { message: string };
+                setErrorMessage(sid, assistantId, d.message);
+                updateMessage(sid, assistantId, "", false);
+                break;
+              }
+
+              case "done":
+                setStreamingPhase(sid, assistantId, "done");
+                break;
+            }
+          },
           activeSessionId,
           lastMessages,
         );
-        const full = formatChatResponse(data);
-        updateMessage(activeSessionId, assistantId, full, false);
       } catch (err) {
         const errorText = err instanceof Error ? err.message : "Request failed";
-        updateMessage(
-          activeSessionId,
-          assistantId,
-          `Error: ${errorText}`,
-          false
-        );
+        setErrorMessage(sid, assistantId, errorText);
+        updateMessage(sid, assistantId, "", false);
       } finally {
         setStreaming(false);
       }
@@ -104,8 +241,138 @@ export function ChatPanel() {
       messages,
       addMessage,
       updateMessage,
-    ]
+      appendTokens,
+      updateSteps,
+      setStreamingPhase,
+      setPendingPatch,
+      setPlanSteps,
+      setExploredFiles,
+      setErrorMessage,
+    ],
   );
+
+  /* ─── Hunk-level approval handlers ─── */
+
+  const handleApplySelected = useCallback(
+    async (messageId: string) => {
+      if (!activeSessionId) return;
+      const session = sessions.find((s) => s.id === activeSessionId);
+      const msg = session?.messages.find((m) => m.id === messageId);
+      if (!msg?.pendingPatch || msg.pendingPatch.status !== "pending") return;
+
+      const pp = msg.pendingPatch;
+      const hs = pp.hunkStatuses ?? {};
+
+      const { patch: filtered, appliedFiles, skippedFiles } =
+        filterPatchByHunks(pp.patch, pp.diffs, hs);
+
+      if (filtered.changes.length === 0) {
+        updateMessage(
+          activeSessionId,
+          messageId,
+          `${msg.content}\n\n(No approved hunks to apply.)`,
+          false,
+        );
+        return;
+      }
+
+      try {
+        const result = await apiApplyPatch(
+          pp.workspacePath,
+          filtered,
+          pp.previewId,
+          pp.patchHash,
+        );
+        setPendingPatchApplySummary(activeSessionId, messageId, {
+          applied: appliedFiles,
+          skipped: skippedFiles,
+        });
+        updatePendingPatchStatus(
+          activeSessionId,
+          messageId,
+          "approved",
+          result.rollbackId,
+        );
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : "Apply failed";
+        setErrorMessage(activeSessionId, messageId, errorText);
+      }
+    },
+    [activeSessionId, sessions, updatePendingPatchStatus, updateMessage, setPendingPatchApplySummary, setErrorMessage],
+  );
+
+  const handleRejectProposal = useCallback(
+    async (messageId: string) => {
+      if (!activeSessionId) return;
+      try {
+        await apiRejectPatch();
+      } catch {
+        /* best-effort */
+      }
+      updatePendingPatchStatus(activeSessionId, messageId, "rejected");
+    },
+    [activeSessionId, updatePendingPatchStatus],
+  );
+
+  const handleIncludeAll = useCallback(
+    (messageId: string) => {
+      if (!activeSessionId) return;
+      const session = sessions.find((s) => s.id === activeSessionId);
+      const msg = session?.messages.find((m) => m.id === messageId);
+      if (!msg?.pendingPatch) return;
+      const allHunkIds = msg.pendingPatch.diffs.flatMap(
+        (d) => buildFileDiffWithHunks(d).hunks.map((h) => h.id),
+      );
+      bulkUpdateHunkStatuses(activeSessionId, messageId, allHunkIds, "approved");
+    },
+    [activeSessionId, sessions, bulkUpdateHunkStatuses],
+  );
+
+  const handleHunkAccept = useCallback(
+    (messageId: string, hunkId: string) => {
+      if (!activeSessionId) return;
+      updateHunkStatus(activeSessionId, messageId, hunkId, "approved");
+    },
+    [activeSessionId, updateHunkStatus],
+  );
+
+  const handleHunkReject = useCallback(
+    (messageId: string, hunkId: string) => {
+      if (!activeSessionId) return;
+      updateHunkStatus(activeSessionId, messageId, hunkId, "rejected");
+    },
+    [activeSessionId, updateHunkStatus],
+  );
+
+  const handleFileAcceptAll = useCallback(
+    (messageId: string, file: string) => {
+      if (!activeSessionId) return;
+      const session = sessions.find((s) => s.id === activeSessionId);
+      const msg = session?.messages.find((m) => m.id === messageId);
+      if (!msg?.pendingPatch) return;
+      const diff = msg.pendingPatch.diffs.find((d) => d.file === file);
+      if (!diff) return;
+      const ids = buildFileDiffWithHunks(diff).hunks.map((h) => h.id);
+      bulkUpdateHunkStatuses(activeSessionId, messageId, ids, "approved");
+    },
+    [activeSessionId, sessions, bulkUpdateHunkStatuses],
+  );
+
+  const handleFileRejectAll = useCallback(
+    (messageId: string, file: string) => {
+      if (!activeSessionId) return;
+      const session = sessions.find((s) => s.id === activeSessionId);
+      const msg = session?.messages.find((m) => m.id === messageId);
+      if (!msg?.pendingPatch) return;
+      const diff = msg.pendingPatch.diffs.find((d) => d.file === file);
+      if (!diff) return;
+      const ids = buildFileDiffWithHunks(diff).hunks.map((h) => h.id);
+      bulkUpdateHunkStatuses(activeSessionId, messageId, ids, "rejected");
+    },
+    [activeSessionId, sessions, bulkUpdateHunkStatuses],
+  );
+
+  /* ─── Analysis handlers ─── */
 
   const handleAnalyseCodebase = useCallback(async () => {
     if (!activeSessionId || analysing) return;
@@ -113,36 +380,31 @@ export function ChatPanel() {
     if (!workspacePath) {
       addMessage(activeSessionId, {
         role: "assistant",
-        content:
-          "Open a workspace folder first (File → Open Folder), then click **Analyse the Codebase** to run the full Codebase Analysis Agent pipeline.",
+        content: "Open a workspace folder first.",
       });
       return;
     }
     setAnalysing(true);
     const msgId = addMessage(activeSessionId, {
       role: "assistant",
-      content: "Running codebase analysis (scanner → AST → metadata → graph → embeddings)…",
+      content: "Running codebase analysis\u2026",
     });
     try {
       await runAnalysis(workspacePath);
       updateMessage(
         activeSessionId,
         msgId,
-        "**Codebase analysis started.**\n\nThe backend is running: Repo Scanner, AST Parser, Metadata Extractor, Dependency Graph Builder, and Embedding Generator. Use **Scan only – Repo scanner module** below to see how the agent understands your workspace.",
-        false
+        "**Codebase analysis started.** The backend is running Scanner, AST Parser, Metadata Extractor, Dependency Graph Builder, and Embedding Generator.",
+        false,
       );
     } catch (err) {
       const errorText = err instanceof Error ? err.message : "Analysis failed";
-      updateMessage(
-        activeSessionId,
-        msgId,
-        `**Analysis failed:** ${errorText}\n\nCheck that the backend is running (e.g. \`npm run dev\` in \`apps/backend\`) and \`workspacePath\` is valid.`,
-        false
-      );
+      setErrorMessage(activeSessionId, msgId, errorText);
+      updateMessage(activeSessionId, msgId, "", false);
     } finally {
       setAnalysing(false);
     }
-  }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage]);
+  }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage, setErrorMessage]);
 
   const handleScanOnly = useCallback(async () => {
     if (!activeSessionId || analysing) return;
@@ -150,14 +412,14 @@ export function ChatPanel() {
     if (!workspacePath) {
       addMessage(activeSessionId, {
         role: "assistant",
-        content: "Open a workspace folder first (File → Open Folder), then click **Scan only – Repo scanner module**.",
+        content: "Open a workspace folder first.",
       });
       return;
     }
     setAnalysing(true);
     const msgId = addMessage(activeSessionId, {
       role: "assistant",
-      content: "Scanning workspace (Repo Scanner only)…",
+      content: "Scanning workspace\u2026",
     });
     try {
       const data = await runAnalysisScan(workspacePath);
@@ -165,149 +427,97 @@ export function ChatPanel() {
       updateMessage(activeSessionId, msgId, report, false);
     } catch (err) {
       const errorText = err instanceof Error ? err.message : "Scan failed";
-      updateMessage(
-        activeSessionId,
-        msgId,
-        `**Scan failed:** ${errorText}`,
-        false
-      );
+      setErrorMessage(activeSessionId, msgId, errorText);
+      updateMessage(activeSessionId, msgId, "", false);
     } finally {
       setAnalysing(false);
     }
-  }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage]);
+  }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage, setErrorMessage]);
 
-  const pastChats = sessions
-    .slice(0, 10)
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const pastChats = sessions.slice(0, 10).sort((a, b) => b.createdAt - a.createdAt);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* Top bar: Chat tabs + New Chat, + , Clock, ... */}
-      <div
-        className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b"
-        style={{ borderColor: "var(--viper-border)" }}
-      >
-        <button
-          type="button"
-          className="px-3 py-1.5 rounded text-xs font-medium text-[#9ca3af] hover:bg-white/5 hover:text-[#e5e7eb] transition-colors"
-        >
-          Chat
-        </button>
-        <button
-          type="button"
-          className="px-3 py-1.5 rounded text-xs font-medium bg-white/10 text-[#e5e7eb]"
-          onClick={() => createSession()}
-        >
-          New Chat
-        </button>
+    <div className="flex flex-col h-full min-h-0 bg-v-bg">
+      {/* ─── Header ─── */}
+      <div className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-v-border">
+        <span className="text-sm font-medium text-v-text">Viper AI</span>
         <div className="flex-1 min-w-0" />
+
+        {/* Past chats toggle */}
         <button
           type="button"
-          className="p-2 rounded text-[#6b7280] hover:bg-white/5 hover:text-[#e5e7eb]"
+          className="v-press p-1.5 rounded-lg text-v-text3 hover:bg-white/[0.04] hover:text-v-text transition-colors"
+          title="History"
+          onClick={() => setPastChatsOpen((v) => !v)}
+        >
+          <Clock size={15} />
+        </button>
+
+        {/* Actions menu */}
+        <div className="relative">
+          <button
+            type="button"
+            className="v-press p-1.5 rounded-lg text-v-text3 hover:bg-white/[0.04] hover:text-v-text transition-colors"
+            title="More actions"
+            onClick={() => setActionsOpen((v) => !v)}
+          >
+            <MoreHorizontal size={15} />
+          </button>
+          {actionsOpen && (
+            <div className="absolute right-0 top-full mt-1 py-1 rounded-lg border border-v-border bg-v-bg2 shadow-xl z-20 min-w-[220px]">
+              <button
+                type="button"
+                className="v-press w-full text-left px-3 py-2 text-xs text-v-text hover:bg-white/[0.04] flex items-center gap-2 disabled:opacity-40"
+                onClick={() => { handleAnalyseCodebase(); setActionsOpen(false); }}
+                disabled={streaming || analysing}
+              >
+                <Scan size={14} className="text-v-accent" />
+                Analyse Codebase
+              </button>
+              <button
+                type="button"
+                className="v-press w-full text-left px-3 py-2 text-xs text-v-text hover:bg-white/[0.04] flex items-center gap-2 disabled:opacity-40"
+                onClick={() => { handleScanOnly(); setActionsOpen(false); }}
+                disabled={streaming || analysing}
+              >
+                <Scan size={14} className="text-v-text3" />
+                Scan only (Repo Scanner)
+              </button>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="v-press p-1.5 rounded-lg text-v-text3 hover:bg-white/[0.04] hover:text-v-text transition-colors"
           title="New chat"
           onClick={() => createSession()}
         >
-          <Plus size={16} />
-        </button>
-        <button
-          type="button"
-          className="p-2 rounded text-[#6b7280] hover:bg-white/5 hover:text-[#e5e7eb]"
-          title="History"
-        >
-          <Clock size={16} />
-        </button>
-        <button
-          type="button"
-          className="p-2 rounded text-[#6b7280] hover:bg-white/5 hover:text-[#e5e7eb]"
-          title="More"
-        >
-          <MoreHorizontal size={16} />
+          <Plus size={15} />
         </button>
       </div>
 
-      {/* Prompt area: agent + context + input */}
-      <div
-        className="flex-shrink-0 p-2 border-b space-y-2"
-        style={{ borderColor: "var(--viper-border)" }}
-      >
-        <ChatPromptBox onSend={handleSend} disabled={streaming} />
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium bg-[var(--viper-accent)]/20 text-[var(--viper-accent)] hover:bg-[var(--viper-accent)]/30 disabled:opacity-50 disabled:pointer-events-none transition-colors"
-            onClick={handleAnalyseCodebase}
-            disabled={streaming || analysing}
-            title="Run full Codebase Analysis Agent (scanner, AST, metadata, graph, embeddings) using the current workspace"
-          >
-            <Scan size={14} />
-            Analyse the Codebase (for development and testing)
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-[#9ca3af] hover:bg-white/5 hover:text-[#e5e7eb] disabled:opacity-50 disabled:pointer-events-none transition-colors"
-            onClick={handleScanOnly}
-            disabled={streaming || analysing}
-            title="Run Repo Scanner module only; show report (files, modules, parse jobs) in chat"
-          >
-            Scan only – Repo scanner module
-          </button>
-        </div>
-      </div>
-
-      {/* Conversation area */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col gap-4 p-4 min-h-0">
-        {messages.length === 0 && (
-          <div className="flex-1 flex items-center justify-center text-center px-4">
-            <p className="text-sm text-[#6b7280]">
-              Send a message to start. Use @ for context, / for commands.
-            </p>
-          </div>
-        )}
-        {messages.map((m) => (
-          <ChatMessage key={m.id} message={m} />
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Past Chats */}
-      <div
-        className="flex-shrink-0 border-t"
-        style={{ borderColor: "var(--viper-border)" }}
-      >
-        <button
-          type="button"
-          className="w-full flex items-center justify-between px-3 py-2 text-left text-xs text-[#9ca3af] hover:bg-white/5"
-          onClick={() => setPastChatsOpen((v) => !v)}
-        >
-          <span className="font-medium">Past Chats</span>
-          <span className="text-[10px] text-[#6b7280]">
-            {pastChatsOpen ? "▼" : "▶"}
-          </span>
-        </button>
-        {pastChatsOpen && (
-          <div className="px-3 pb-3">
-            <div className="flex justify-end mb-1">
-              <button
-                type="button"
-                className="text-[10px] text-[var(--viper-accent)] hover:underline"
-              >
-                View All
-              </button>
-            </div>
-            <ul className="space-y-0.5 max-h-32 overflow-y-auto">
+      {/* ─── Past chats collapsible ─── */}
+      {pastChatsOpen && (
+        <div className="shrink-0 border-b border-v-border bg-v-bg2 animate-v-fade-in">
+          <div className="px-3 py-2">
+            <ul className="space-y-0.5 max-h-40 overflow-y-auto">
               {pastChats.map((s) => (
                 <li key={s.id}>
                   <button
                     type="button"
-                    className={`w-full text-left px-2 py-1.5 rounded text-xs truncate flex items-center justify-between gap-2 ${
+                    className={`v-press w-full text-left px-2.5 py-1.5 rounded-lg text-xs truncate flex items-center justify-between gap-2 transition-colors ${
                       s.id === activeSessionId
-                        ? "bg-white/10 text-[#e5e7eb]"
-                        : "text-[#9ca3af] hover:bg-white/5 hover:text-[#e5e7eb]"
+                        ? "bg-v-accent/10 text-v-text"
+                        : "text-v-text2 hover:bg-white/[0.03] hover:text-v-text"
                     }`}
-                    onClick={() => setActiveSessionId(s.id)}
+                    onClick={() => {
+                      setActiveSessionId(s.id);
+                      setPastChatsOpen(false);
+                    }}
                   >
                     <span className="truncate min-w-0">{s.title}</span>
-                    <span className="text-[10px] text-[#6b7280] flex-shrink-0">
+                    <span className="text-2xs text-v-text3 shrink-0">
                       {formatTimeAgo(s.createdAt)}
                     </span>
                   </button>
@@ -315,7 +525,42 @@ export function ChatPanel() {
               ))}
             </ul>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* ─── Message stream ─── */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden min-h-0"
+      >
+        <div className="flex flex-col gap-5 p-4 max-w-3xl mx-auto">
+          {messages.length === 0 && (
+            <div className="flex-1 flex items-center justify-center text-center py-20">
+              <p className="text-sm text-v-text3">
+                Ask anything about your code.
+              </p>
+            </div>
+          )}
+          {messages.map((m) => (
+            <ChatMessage
+              key={m.id}
+              message={m}
+              onApplySelected={handleApplySelected}
+              onRejectProposal={handleRejectProposal}
+              onIncludeAll={handleIncludeAll}
+              onHunkAccept={handleHunkAccept}
+              onHunkReject={handleHunkReject}
+              onFileAcceptAll={handleFileAcceptAll}
+              onFileRejectAll={handleFileRejectAll}
+            />
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* ─── Sticky input ─── */}
+      <div className="shrink-0 border-t border-v-border bg-v-bg p-3 max-w-3xl mx-auto w-full">
+        <ChatInput onSend={handleSend} disabled={streaming} />
       </div>
     </div>
   );

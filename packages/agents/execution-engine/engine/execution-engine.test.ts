@@ -59,7 +59,8 @@ describe("executePlan", () => {
     expect(result.logs).toContain("[Viper] Running step: ANALYZE_CODE");
     expect(result.logs).toContain("[Viper] Running step: IDENTIFY_ISSUE");
     expect(result.logs).toContain("[Viper] Running step: GENERATE_PATCH");
-    expect(result.logs).toHaveLength(9);
+    expect(result.logs.length).toBeGreaterThanOrEqual(9);
+    expect(result.logs.some((l) => l.includes("iteration=0"))).toBe(true);
 
     expect(result.stepOutputs.length).toBeGreaterThanOrEqual(3);
     expect(result.contextWindow).toBeDefined();

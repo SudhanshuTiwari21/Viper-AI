@@ -44,19 +44,29 @@ export async function sendChat(
   return res.json() as Promise<ChatResponse>;
 }
 
-/** POST /chat/stream — same payload as /chat, but backend returns SSE events.
- * Resolves once `event: result` is received. */
+export interface StreamEventPayload {
+  type: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * POST /chat/stream — SSE streaming.
+ * Calls onEvent for each SSE event as it arrives (intent, plan, step:start, token, result, done, etc.).
+ * Resolves when the stream closes.
+ */
 export async function sendChatStream(
   prompt: string,
   workspacePath: string,
+  onEvent: (event: StreamEventPayload) => void,
   conversationId?: string,
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
-): Promise<ChatResponse> {
+  signal?: AbortSignal,
+): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
-    signal: AbortSignal.timeout(120_000),
+    signal: signal ?? AbortSignal.timeout(300_000),
   });
 
   if (!res.ok) {
@@ -75,7 +85,6 @@ export async function sendChatStream(
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    // Each SSE message ends with a blank line.
     const parts = buffer.split("\n\n");
     buffer = parts.pop() ?? "";
 
@@ -85,17 +94,17 @@ export async function sendChatStream(
       const dataLine = lines.find((l) => l.startsWith("data:"));
       if (!eventLine || !dataLine) continue;
 
-      const event = eventLine.slice("event:".length).trim();
+      const eventType = eventLine.slice("event:".length).trim();
       const dataStr = dataLine.slice("data:".length).trim();
 
-      if (event === "result") {
-        const parsed = JSON.parse(dataStr) as ChatResponse;
-        return parsed;
+      try {
+        const data = JSON.parse(dataStr) as Record<string, unknown>;
+        onEvent({ type: eventType, data });
+      } catch {
+        onEvent({ type: eventType, data: { raw: dataStr } });
       }
     }
   }
-
-  throw new Error("Chat stream finished without a result event");
 }
 
 /** Format assistant response for display in chat. */
@@ -224,6 +233,54 @@ export async function checkBackendHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** POST /patch/apply — apply a previously previewed patch (previewId + patchHash required). */
+export async function applyPatch(
+  workspacePath: string,
+  patch: { changes: unknown[]; operations: unknown[] },
+  previewId: string,
+  patchHash: string,
+): Promise<{ success: boolean; rollbackId?: string; logs: string[] }> {
+  const res = await fetch(`${BACKEND_URL}/patch/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspacePath, previewId, patchHash, patch }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error?: string }).error ?? `Patch apply failed: ${res.status}`);
+  }
+  return res.json() as Promise<{ success: boolean; rollbackId?: string; logs: string[] }>;
+}
+
+/** POST /patch/reject — reject a previewed patch (no-op on backend). */
+export async function rejectPatch(): Promise<void> {
+  await fetch(`${BACKEND_URL}/patch/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(5_000),
+  });
+}
+
+/** POST /patch/rollback — undo a previously applied patch. */
+export async function rollbackPatch(
+  workspacePath: string,
+  rollbackId: string,
+): Promise<{ success: boolean; logs: string[] }> {
+  const res = await fetch(`${BACKEND_URL}/patch/rollback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspacePath, rollbackId }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error?: string }).error ?? `Rollback failed: ${res.status}`);
+  }
+  return res.json() as Promise<{ success: boolean; logs: string[] }>;
 }
 
 export const EDIT_URL = "http://localhost:3000/editor/apply-change";
