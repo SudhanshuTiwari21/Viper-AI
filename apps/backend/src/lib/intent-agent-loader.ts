@@ -8,13 +8,14 @@ const INTENT_AGENT_MODULE = "@repo/intent-agent";
 export type IntentPipelineResult = {
   intent: { intentType: string };
   entities: { entities: Array<{ value: string }> };
-  tasks: { tasks: Array<{ type: string }> };
-  contextRequest: {
+  tasks?: { tasks: Array<{ type: string }> };
+  /** @deprecated Use backend `planTasks` + `buildContextRequest` for retrieval. */
+  contextRequest?: {
     symbolSearch?: string[];
     embeddingSearch?: string[];
     dependencyLookup?: boolean;
   };
-  response: { intent: string; summary: string };
+  response?: { intent: string; summary: string };
   reasoning?: {
     detectedComponents?: string[];
     missingComponents?: string[];
@@ -32,12 +33,20 @@ export type IntentAgentCacheContext = {
 
 export async function runIntentPipeline(
   prompt: string,
-  options?: { cacheContext?: IntentAgentCacheContext; skipReasoning?: boolean },
+  options?: {
+    cacheContext?: IntentAgentCacheContext;
+    skipReasoning?: boolean;
+    skipContextRequest?: boolean;
+  },
 ): Promise<IntentPipelineResult> {
   const mod = await import(INTENT_AGENT_MODULE) as {
     runIntentPipeline: (
       p: string,
-      o?: { cacheContext?: IntentAgentCacheContext; skipReasoning?: boolean },
+      o?: {
+        cacheContext?: IntentAgentCacheContext;
+        skipReasoning?: boolean;
+        skipContextRequest?: boolean;
+      },
     ) => Promise<IntentPipelineResult>;
   };
   return mod.runIntentPipeline(prompt, options);

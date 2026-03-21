@@ -1,20 +1,15 @@
 import OpenAI from "openai";
 import { buildCacheKey, createMemoryCache, withRetry } from "@repo/shared";
+import { buildExecutionPlan, type ExecutionPlan } from "@repo/planner-agent";
+import { executePlan } from "@repo/execution-engine";
+import type { ContextWindow } from "@repo/context-ranking";
 import {
   runIntentPipeline,
   getIntentAgentAdapter,
   runIntentReasoning,
 } from "../lib/intent-agent-loader.js";
 import { routeTools } from "../router/tool-router/index.js";
-import { buildRawContext } from "@repo/context-builder";
-import {
-  generateCandidates,
-  computeCandidateScores,
-  combineScores,
-  selectTopK,
-  buildContextWindow,
-} from "@repo/context-ranking";
-import type { ContextBuilderAdapter, RawContextBundle } from "@repo/context-builder";
+import type { ContextBuilderAdapter } from "@repo/context-builder";
 import { getPool } from "@repo/database";
 import { createContextAdapter } from "../adapters/context-builder.adapter.js";
 import { runCodebaseAnalysisIfConfigured } from "./analysis-options.service.js";
@@ -22,7 +17,6 @@ import { getRepoId } from "./workspace.service.js";
 
 const FALLBACK_NO_CONTEXT = "No relevant code found in repository.";
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-// Cache toggle (defaults to enabled once cache scoping is implemented).
 const DISABLE_LLM_CACHE =
   (process.env.DISABLE_LLM_CACHE ?? "false").toLowerCase() === "true";
 const DIRECT_LLM_CACHE_TTL = DISABLE_LLM_CACHE
@@ -74,6 +68,12 @@ function isRetryableError(err: unknown): boolean {
   return status === 429 || status === 503;
 }
 
+function toRoutingTasks(plan: ExecutionPlan): { tasks: Array<{ type: string }> } {
+  return {
+    tasks: plan.steps.map((step) => ({ type: step.type })),
+  };
+}
+
 /** Direct LLM path (no context retrieval). Uses OpenAI gpt-4o-mini with cache and retry. */
 async function runDirectLLM(
   prompt: string,
@@ -90,7 +90,6 @@ async function runDirectLLM(
     prompt,
     messages: lastMessages,
     intentType: args.intentType ?? "DIRECT_LLM",
-    // No context window hash in direct-LLM path.
     contextHash: "",
   })}`;
   const canUseCache = DIRECT_LLM_CACHE_TTL > 0 && Boolean(args.conversationId);
@@ -156,6 +155,21 @@ async function runDirectLLM(
   }
 }
 
+function resolveAdapter(repo_id: string): ContextBuilderAdapter | null {
+  const databaseUrl = process.env.DATABASE_URL;
+  const qdrantUrl = process.env.QDRANT_URL ?? "http://localhost:6333";
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  if (databaseUrl && openaiApiKey) {
+    return createContextAdapter({
+      repo_id,
+      pool: getPool(),
+      qdrantUrl,
+      openaiApiKey,
+    });
+  }
+  return null;
+}
+
 export async function runAssistantPipeline(
   prompt: string,
   workspacePath: string,
@@ -171,6 +185,7 @@ export async function runAssistantPipeline(
           .join("\n")}\nUser: ${prompt}`
       : prompt;
 
+  // 1. Intent classification (pure, no LLM reasoning or context)
   const intentResult = await runIntentPipeline(historyAwarePrompt, {
     cacheContext: {
       workspaceKey,
@@ -179,21 +194,32 @@ export async function runAssistantPipeline(
       contextHash: "",
     },
     skipReasoning: true,
+    skipContextRequest: true,
   });
+
+  // 2. Execution plan from intent + entities
+  const plan = buildExecutionPlan(
+    intentResult.intent.intentType,
+    intentResult.entities.entities.map((entity) => entity.value),
+  );
+  log("Execution Plan:", plan);
+
+  const tasksForRouting = toRoutingTasks(plan);
 
   log("Intent classification", {
     intentType: intentResult.intent.intentType,
-    summary: intentResult.response.summary,
+    summary: intentResult.response?.summary ?? intentResult.intent.intentType,
   });
 
+  // 3. Routing decision
   const decision = routeTools(
     intentResult.intent,
     intentResult.entities,
-    intentResult.tasks,
+    tasksForRouting,
   );
   log("Routing decision", decision);
 
-  if (decision.directLLMResponse) {
+  if (decision.directLLMResponse || !decision.runContextEngine) {
     log("Direct LLM response (skipping context retrieval)");
     return await runDirectLLM(prompt, lastMessages, {
       workspaceKey,
@@ -202,18 +228,10 @@ export async function runAssistantPipeline(
     });
   }
 
-  if (!decision.runContextEngine) {
-    return await runDirectLLM(prompt, lastMessages, {
-      workspaceKey,
-      conversationId,
-      intentType: intentResult.intent.intentType,
-    });
-  }
-
+  // 4. Pre-flight: codebase analysis + adapter
   log("Context retrieval start");
   const repo_id = getRepoId(workspacePath);
 
-  // Option A: run codebase analysis on every code-related chat request for fresh embeddings/metadata
   const analysisRan = await runCodebaseAnalysisIfConfigured(workspacePath, repo_id);
   if (analysisRan) {
     const waitMs = Math.max(0, parseInt(process.env.RUN_ANALYSIS_WAIT_MS ?? "12000", 10));
@@ -223,111 +241,25 @@ export async function runAssistantPipeline(
     }
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
-  const qdrantUrl = process.env.QDRANT_URL ?? "http://localhost:6333";
-  const openaiApiKey = process.env.OPENAI_API_KEY;
-
   const adapter: ContextBuilderAdapter =
-    databaseUrl && openaiApiKey
-      ? createContextAdapter({
-          repo_id,
-          pool: getPool(),
-          qdrantUrl,
-          openaiApiKey,
-        })
-      : (await getIntentAgentAdapter()) as unknown as ContextBuilderAdapter;
+    resolveAdapter(repo_id) ??
+    ((await getIntentAgentAdapter()) as unknown as ContextBuilderAdapter);
 
-  const rawContext: RawContextBundle = await buildRawContext(
+  // 5. Execute plan via Execution Engine
+  const executionResult = await executePlan(plan, {
     repo_id,
-    intentResult.contextRequest,
-    adapter,
-  );
-
-  // Verify buildRawContext returns non-empty data when analysis has been run
-  const hasRawData =
-    rawContext.files.length > 0 ||
-    rawContext.functions.length > 0 ||
-    rawContext.classes.length > 0 ||
-    rawContext.embeddings.length > 0 ||
-    rawContext.dependencies.length > 0;
-  if (!hasRawData && analysisRan) {
-    log("Context empty after analysis — pipeline may still be running or workspace has no indexed code");
-  } else if (!hasRawData) {
-    log("Context empty — run codebase analysis (POST /analysis/run) to populate symbols and embeddings");
-  }
-
-  if (!decision.runRanking) {
-    const contextWindow = buildContextWindow({
-      files: rawContext.files.map((f) => f.file),
-      functions: rawContext.functions.map((f) => f.name),
-      snippets: rawContext.embeddings.map((e) => ({
-        file: e.file,
-        content: e.content,
-        score: e.score,
-      })),
-    });
-    log("Context window size", contextWindow.estimatedTokens);
-
-    log("Computing reasoning from contextWindow", {
-      files: contextWindow.files.length,
-      functions: contextWindow.functions.length,
-    });
-
-    const reasoningFromContext = await runIntentReasoning(
-      prompt,
-      intentResult.intent,
-      intentResult.entities,
-      intentResult.tasks,
-      {
-        files: contextWindow.files,
-        functions: contextWindow.functions,
-        classes: [],
-        dependencies: [],
-      },
-      {
-        cacheContext: {
-          workspaceKey,
-          conversationId,
-          messages: lastMessages,
-          contextHash: "",
-        },
-      },
-    );
-
-    return {
-      intent: {
-        intent: intentResult.response.intent,
-        summary: intentResult.response.summary,
-      },
-      context: {
-        files: contextWindow.files,
-        functions: contextWindow.functions,
-        snippets: contextWindow.snippets,
-        estimatedTokens: contextWindow.estimatedTokens,
-      },
-      reasoning: reasoningFromContext
-        ? {
-            detectedComponents: reasoningFromContext.detectedComponents ?? [],
-            missingComponents: reasoningFromContext.missingComponents ?? [],
-            potentialIssues: reasoningFromContext.potentialIssues ?? [],
-            recommendedNextStep: reasoningFromContext.recommendedNextStep,
-          }
-        : undefined,
-    };
-  }
-
-  const candidates = generateCandidates(rawContext);
-  const scoringContext = {
     query: historyAwarePrompt,
-    entities: intentResult.entities.entities.map((e: { value: string }) => e.value),
-    rawContext: { dependencies: rawContext.dependencies },
-    openedFiles: [],
+    adapter,
+    workspacePath,
+  });
+  executionResult.logs.forEach((l) => log(l));
+
+  const contextWindow: ContextWindow = executionResult.contextWindow ?? {
+    files: [],
+    functions: [],
+    snippets: [],
+    estimatedTokens: 0,
   };
-  const scored = computeCandidateScores(candidates, scoringContext);
-  const ranked = combineScores(scored);
-  log("Ranking complete");
-  const bundle = selectTopK(ranked);
-  const contextWindow = buildContextWindow(bundle);
   log("Context window size", contextWindow.estimatedTokens);
 
   const hasContext =
@@ -335,16 +267,12 @@ export async function runAssistantPipeline(
     contextWindow.functions.length > 0 ||
     contextWindow.snippets.length > 0;
 
-  log("Computing reasoning from contextWindow", {
-    files: contextWindow.files.length,
-    functions: contextWindow.functions.length,
-  });
-
+  // 6. Optional reasoning (LLM-based analysis of context)
   const reasoningFromContext = await runIntentReasoning(
     prompt,
     intentResult.intent,
     intentResult.entities,
-    intentResult.tasks,
+    tasksForRouting,
     {
       files: contextWindow.files,
       functions: contextWindow.functions,
@@ -361,87 +289,76 @@ export async function runAssistantPipeline(
     },
   );
 
+  const intentSummary = {
+    intent: intentResult.response?.intent ?? intentResult.intent.intentType,
+    summary:
+      intentResult.response?.summary ?? intentResult.intent.intentType,
+  };
+
+  const reasoning = reasoningFromContext
+    ? {
+        detectedComponents: reasoningFromContext.detectedComponents ?? [],
+        missingComponents: reasoningFromContext.missingComponents ?? [],
+        potentialIssues: reasoningFromContext.potentialIssues ?? [],
+        recommendedNextStep: reasoningFromContext.recommendedNextStep,
+      }
+    : undefined;
+
   if (!hasContext) {
     return {
-      intent: {
-        intent: intentResult.response.intent,
-        summary: intentResult.response.summary,
-      },
+      intent: intentSummary,
       context: {
         files: [],
         functions: [],
         snippets: [FALLBACK_NO_CONTEXT],
         estimatedTokens: 0,
       },
-      reasoning: reasoningFromContext
-        ? {
-            detectedComponents: reasoningFromContext.detectedComponents ?? [],
-            missingComponents: reasoningFromContext.missingComponents ?? [],
-            potentialIssues: reasoningFromContext.potentialIssues ?? [],
-            recommendedNextStep: reasoningFromContext.recommendedNextStep,
-          }
-        : undefined,
+      reasoning,
     };
   }
 
   return {
-    intent: {
-      intent: intentResult.response.intent,
-      summary: intentResult.response.summary,
-    },
+    intent: intentSummary,
     context: {
       files: contextWindow.files,
       functions: contextWindow.functions,
       snippets: contextWindow.snippets,
       estimatedTokens: contextWindow.estimatedTokens,
     },
-    reasoning: reasoningFromContext
-      ? {
-          detectedComponents: reasoningFromContext.detectedComponents ?? [],
-          missingComponents: reasoningFromContext.missingComponents ?? [],
-          potentialIssues: reasoningFromContext.potentialIssues ?? [],
-          recommendedNextStep: reasoningFromContext.recommendedNextStep,
-        }
-      : undefined,
+    reasoning,
   };
 }
 
 export interface ContextDebugResult {
   intent: Record<string, unknown>;
-  rawContext: Record<string, unknown>;
-  candidates: unknown[];
-  ranked: unknown[];
+  executionResult: Record<string, unknown>;
   contextWindow: Record<string, unknown>;
 }
 
 export async function runContextDebugPipeline(prompt: string): Promise<ContextDebugResult> {
   const intentResult = await runIntentPipeline(prompt);
-  const adapter = await getIntentAgentAdapter();
+  const adapter = (await getIntentAgentAdapter()) as unknown as ContextBuilderAdapter;
   const repo_id = "debug-repo";
 
-  const rawContext = await buildRawContext(
-    repo_id,
-    intentResult.contextRequest,
-    adapter as ContextBuilderAdapter,
+  const plan = buildExecutionPlan(
+    intentResult.intent.intentType,
+    intentResult.entities.entities.map((entity) => entity.value),
   );
+  log("Execution Plan:", plan);
 
-  const candidates = generateCandidates(rawContext);
-  const scoringContext = {
+  const result = await executePlan(plan, {
+    repo_id,
     query: prompt,
-    entities: intentResult.entities.entities.map((e: { value: string }) => e.value),
-    rawContext: { dependencies: rawContext.dependencies },
-    openedFiles: [],
-  };
-  const scored = computeCandidateScores(candidates, scoringContext);
-  const ranked = combineScores(scored);
-  const bundle = selectTopK(ranked);
-  const contextWindow = buildContextWindow(bundle);
+    adapter,
+  });
+  result.logs.forEach((l) => log(l));
 
   return {
-    intent: intentResult.response as unknown as Record<string, unknown>,
-    rawContext: rawContext as unknown as Record<string, unknown>,
-    candidates: candidates as unknown[],
-    ranked: ranked as unknown[],
-    contextWindow: contextWindow as unknown as Record<string, unknown>,
+    intent: (intentResult.response ?? {
+      intent: intentResult.intent.intentType,
+      summary: intentResult.intent.intentType,
+    }) as unknown as Record<string, unknown>,
+    executionResult: result as unknown as Record<string, unknown>,
+    contextWindow: (result.contextWindow ?? {}) as unknown as Record<string, unknown>,
   };
 }

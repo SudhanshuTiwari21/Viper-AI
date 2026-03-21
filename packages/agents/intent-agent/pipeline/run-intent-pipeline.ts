@@ -8,6 +8,10 @@ import { buildContext } from "../modules/context-builder-adapter";
 import { runReasoning } from "../modules/intent-reasoner";
 import { generateIntentResponse } from "../modules/intent-response";
 import type { CacheKeyMessage } from "@repo/shared";
+import type { TaskPlan } from "../modules/task-planner/task-planner.types";
+import type { ContextBundle } from "../modules/context-builder-adapter/context-builder.types";
+import type { ContextRequest } from "../modules/context-request-builder/context-request.types";
+import type { IntentReasoning } from "../modules/intent-reasoner/reasoning.types";
 
 export type IntentAgentCacheContext = {
   workspaceKey?: string;
@@ -20,19 +24,30 @@ export async function runIntentPipeline(
   prompt: string,
   options?: {
     cacheContext?: IntentAgentCacheContext;
+    /** When true (default), skips LLM reasoning and context bundle fetch. */
     skipReasoning?: boolean;
+    /** When true (default), skips task planning, context request, and context builder (pure intent path). */
+    skipContextRequest?: boolean;
   },
 ): Promise<IntentPipelineResult> {
+  const skipReasoning = options?.skipReasoning ?? true;
+  const skipContextRequest = options?.skipContextRequest ?? true;
+
   const normalizedPrompt = normalizePrompt(prompt);
   const intent = await classifyIntent(normalizedPrompt, options?.cacheContext);
   const entities = extractEntities(normalizedPrompt);
-  const tasks = planTasks(intent, entities);
-  const contextRequest = buildContextRequest(tasks, entities);
-  const contextBundle = options?.skipReasoning ? ({} as any) : await buildContext(contextRequest);
 
-  const reasoning = options?.skipReasoning
-    ? undefined
-    : await runReasoning(
+  let tasks: TaskPlan | undefined;
+  let contextRequest: ContextRequest | undefined;
+  let contextBundle: ContextBundle = {} as ContextBundle;
+  let reasoning: IntentReasoning | undefined;
+
+  if (!skipContextRequest) {
+    tasks = planTasks(intent, entities);
+    contextRequest = buildContextRequest(tasks, entities);
+    if (!skipReasoning) {
+      contextBundle = await buildContext(contextRequest);
+      reasoning = await runReasoning(
         prompt,
         intent,
         entities,
@@ -40,7 +55,13 @@ export async function runIntentPipeline(
         contextBundle,
         options?.cacheContext,
       );
+    }
+  }
 
+  const tasksForResponse: TaskPlan = tasks ?? {
+    intent: intent.intentType,
+    tasks: [],
+  };
   const reasoningForResponse =
     reasoning ??
     ({
@@ -49,22 +70,34 @@ export async function runIntentPipeline(
       potentialIssues: [],
       recommendedNextStep: undefined,
     } as const);
+
   const response = generateIntentResponse(
     intent,
     entities,
-    tasks,
+    tasksForResponse,
     contextBundle,
     reasoningForResponse,
   );
 
-  return {
+  const result: IntentPipelineResult = {
     normalizedPrompt,
     intent,
     entities,
-    tasks,
-    contextRequest,
-    contextBundle,
-    reasoning,
     response,
   };
+
+  if (tasks !== undefined) {
+    result.tasks = tasks;
+  }
+  if (contextRequest !== undefined) {
+    result.contextRequest = contextRequest;
+  }
+  if (!skipContextRequest) {
+    result.contextBundle = contextBundle;
+  }
+  if (reasoning !== undefined) {
+    result.reasoning = reasoning;
+  }
+
+  return result;
 }
