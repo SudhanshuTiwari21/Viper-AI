@@ -81,7 +81,7 @@ export function VideoScrollHero({
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 1.0, duration: 0.8, type: 'spring', stiffness: 200, damping: 25 }}
                 >
-                  Scroll down to see what's broken
+                  Watch the clip or Scroll down to see what's broken
                 </motion.p>
               </div>
             </motion.div>
@@ -113,7 +113,7 @@ export function VideoScrollHero({
             </h2>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
             {[
               {
                 id: '01',
@@ -128,12 +128,12 @@ export function VideoScrollHero({
               {
                 id: '03',
                 title: 'AI without system awareness.',
-                body: 'Current AI tools see a file — not a system. They have no understanding of your architecture, your intent, or your workflow.',
+                body: 'Current AI tools see a file - not a system. They have no understanding of your architecture, your intent, or your workflow.',
               },
             ].map((item, index) => (
               <motion.div
                 key={item.id}
-                className="bg-card p-6 rounded-xl border border-border/50 shadow-sm flex flex-col gap-8"
+                className="bg-[#111111] p-8 rounded-lg border border-white/8 shadow-lg flex flex-col gap-0 h-full"
                 initial={{ opacity: 0, y: 30, scale: 0.95 }}
                 whileInView={{ opacity: 1, y: 0, scale: 1 }}
                 viewport={{ once: true }}
@@ -150,10 +150,10 @@ export function VideoScrollHero({
                   transition: { type: 'spring', stiffness: 400, damping: 25 },
                 }}
               >
-                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground">
+                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-8 block">
                   {item.id}
                 </span>
-                <h3 className="text-xl font-semibold text-foreground leading-snug">
+                <h3 className="text-xl font-semibold text-foreground leading-snug mb-6 min-h-14">
                   {item.title}
                 </h3>
                 <p className="text-muted-foreground text-sm leading-relaxed flex-1">
