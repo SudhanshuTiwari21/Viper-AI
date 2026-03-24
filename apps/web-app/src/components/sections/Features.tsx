@@ -1,49 +1,38 @@
-// ── Icons (inline SVG to avoid CDN dependencies) ──────────────────────────────
+'use client'
 
-function IconDocument() {
+import { motion, useInView } from 'framer-motion'
+import { useRef } from 'react'
+
+// ── Icons ──────────────────────────────────────────────────────────────────────
+
+function IconLayers() {
   return (
     <svg className="size-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.429 9.75 2.25 12l4.179 2.25m0-4.5 5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0 4.179 2.25L12 21.75 2.25 16.5l4.179-2.25m11.142 0-5.571 3-5.571-3" />
     </svg>
   )
 }
 
-function IconSync() {
+function IconArrow() {
   return (
     <svg className="size-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
     </svg>
   )
 }
 
-function IconHub() {
+function IconGraph() {
   return (
     <svg className="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0v-9m0 0L7.5 7.5M12 12l4.5-4.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5m.75-9 3-3 2.148 2.148A12.061 12.061 0 0 1 16.5 7.605" />
     </svg>
   )
 }
 
-function IconApi() {
+function IconDeps() {
   return (
     <svg className="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
-    </svg>
-  )
-}
-
-function IconShield() {
-  return (
-    <svg className="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-    </svg>
-  )
-}
-
-function IconSpeed() {
-  return (
-    <svg className="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
     </svg>
   )
 }
@@ -56,117 +45,129 @@ function IconTerminal() {
   )
 }
 
-// ── Stage sub-sections ────────────────────────────────────────────────────────
+// ── Shared hook ───────────────────────────────────────────────────────────────
 
-function ProductManagement() {
+function useFadeIn() {
+  const ref = useRef<HTMLDivElement>(null)
+  const isInView = useInView(ref, { once: true, margin: '-60px' })
+  return { ref, isInView }
+}
+
+// ── Sub-sections ──────────────────────────────────────────────────────────────
+
+function UnifiedContext() {
+  const { ref, isInView } = useFadeIn()
   return (
-    <div className="bg-black p-12 md:p-20 flex flex-col justify-between">
-      <div>
+    <div ref={ref} className="bg-black p-12 md:p-20 flex flex-col justify-between">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={isInView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.55, ease: [0.25, 0.4, 0.25, 1] }}
+      >
         <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
-          01 / Product Management
+          01 / Unified Context
         </span>
         <h2 className="text-4xl font-medium tracking-tight mb-6">
-          Autonomous Backlog.
+          Everything in one context.
         </h2>
         <p className="text-neutral-400 text-lg leading-relaxed max-w-md font-light">
-          Viper transforms vague requests into comprehensive PRDs, technical
-          specs, and Jira tickets instantly.
+          Viper connects product requirements, codebase architecture, and
+          development workflow into a single intelligent layer. Every part
+          of the system understands what you&apos;re building — and why.
         </p>
-      </div>
-      <div className="mt-12 space-y-4">
+      </motion.div>
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={isInView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.55, delay: 0.2, ease: [0.25, 0.4, 0.25, 1] }}
+        className="mt-12 space-y-4"
+      >
         <div className="flex items-center gap-4 text-sm text-neutral-400 group">
-          <span className="group-hover:text-white transition-colors">
-            <IconDocument />
-          </span>
-          <span className="group-hover:text-white transition-colors">
-            Instant PRD Generation
-          </span>
+          <span className="group-hover:text-white transition-colors"><IconLayers /></span>
+          <span className="group-hover:text-white transition-colors">Shared Context Layer</span>
         </div>
         <div className="flex items-center gap-4 text-sm text-neutral-400 group">
-          <span className="group-hover:text-white transition-colors">
-            <IconSync />
-          </span>
-          <span className="group-hover:text-white transition-colors">
-            Bilateral Sync: Jira &amp; Linear
-          </span>
+          <span className="group-hover:text-white transition-colors"><IconArrow /></span>
+          <span className="group-hover:text-white transition-colors">Requirements → Code Traceability</span>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }
 
-function Architecture() {
+function CodebaseIntelligence() {
+  const { ref, isInView } = useFadeIn()
   return (
-    <div className="bg-black p-12 md:p-20 flex flex-col justify-between">
-      <div>
+    <div ref={ref} className="bg-black p-12 md:p-20 flex flex-col justify-between">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={isInView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.55, ease: [0.25, 0.4, 0.25, 1] }}
+      >
         <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
-          02 / Architecture
+          02 / Codebase Intelligence
         </span>
         <h2 className="text-4xl font-medium tracking-tight mb-6">
-          Structural Integrity.
+          AI that reads the system.
         </h2>
         <p className="text-neutral-400 text-lg leading-relaxed max-w-md font-light">
-          Automatically visualize service dependencies and generate OpenAPI
-          documentation before writing a single line of code.
+          Viper maps your entire codebase before making a single change.
+          Dependencies traced. Architecture understood. Context never lost.
         </p>
-      </div>
-      <div className="mt-12 grid grid-cols-2 gap-4">
+      </motion.div>
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={isInView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.55, delay: 0.2, ease: [0.25, 0.4, 0.25, 1] }}
+        className="mt-12 grid grid-cols-2 gap-4"
+      >
         <div className="p-6 border border-border-muted hover:border-border-active transition-colors">
-          <span className="text-white mb-4 block">
-            <IconHub />
-          </span>
-          <h4 className="text-xs font-bold uppercase tracking-widest mb-1">
-            System Design
-          </h4>
-          <p className="text-[11px] text-neutral-500">Visual service mapping</p>
+          <span className="text-white mb-4 block"><IconGraph /></span>
+          <h4 className="text-xs font-bold uppercase tracking-widest mb-1">Deep Analysis</h4>
+          <p className="text-[11px] text-neutral-500">Full codebase indexing</p>
         </div>
         <div className="p-6 border border-border-muted hover:border-border-active transition-colors">
-          <span className="text-white mb-4 block">
-            <IconApi />
-          </span>
-          <h4 className="text-xs font-bold uppercase tracking-widest mb-1">
-            API Specs
-          </h4>
-          <p className="text-[11px] text-neutral-500">Auto-generated Swagger</p>
+          <span className="text-white mb-4 block"><IconDeps /></span>
+          <h4 className="text-xs font-bold uppercase tracking-widest mb-1">Multi-file Context</h4>
+          <p className="text-[11px] text-neutral-500">Dependency-aware reasoning</p>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }
 
-function Implementation() {
+function IntentToCode() {
+  const { ref, isInView } = useFadeIn()
   return (
-    <div className="bg-black p-12 md:p-20 md:col-span-2 border-t border-border-muted">
+    <div ref={ref} className="bg-black p-12 md:p-20 md:col-span-2 border-t border-border-muted">
       <div className="grid md:grid-cols-2 gap-12 items-end">
-        <div>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.55, ease: [0.25, 0.4, 0.25, 1] }}
+        >
           <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
-            03 / Implementation
+            03 / Intent to Code
           </span>
           <h2 className="text-5xl font-medium tracking-tight mb-6 leading-none">
-            Code that builds itself.
+            Describe it. Viper builds it.
           </h2>
           <p className="text-neutral-400 text-lg leading-relaxed max-w-lg font-light">
-            Viper agents don&apos;t just suggest. They navigate your codebase,
-            understand multi-file contexts, and execute complex feature work.
+            Write high-level intent. Viper understands the system, identifies
+            which files need to change, plans the implementation, and executes
+            it end-to-end — without losing context.
           </p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.55, delay: 0.25, ease: [0.25, 0.4, 0.25, 1] }}
+          className="grid grid-cols-1 sm:grid-cols-3 gap-6"
+        >
           {[
-            {
-              letter: 'A',
-              title: 'Agents',
-              desc: 'Multi-file context awareness',
-            },
-            {
-              letter: 'B',
-              title: 'Bug Fix',
-              desc: 'Auto-fix from Sentry logs',
-            },
-            {
-              letter: 'P',
-              title: 'PR Mgmt',
-              desc: 'Automated documentation',
-            },
+            { letter: 'A', title: 'Analyze', desc: 'Full system context before any change' },
+            { letter: 'P', title: 'Plan', desc: 'Architecture-aware implementation path' },
+            { letter: 'E', title: 'Execute', desc: 'Cross-file, end-to-end code changes' },
           ].map(({ letter, title, desc }) => (
             <div key={title} className="space-y-2">
               <div className="size-8 border border-border-muted flex items-center justify-center text-white text-sm">
@@ -176,85 +177,78 @@ function Implementation() {
               <p className="text-[11px] text-neutral-500 leading-tight">{desc}</p>
             </div>
           ))}
-        </div>
+        </motion.div>
       </div>
     </div>
   )
 }
 
-function SecurityReview() {
+const LOG_LINES = [
+  { tag: 'ANALYZE', color: 'text-[#bd93f9]', text: 'Codebase mapped. 8 services. 247 files indexed.' },
+  { tag: 'CONTEXT', color: 'text-[#bd93f9]', text: 'Requirements linked. 3 related tickets resolved.' },
+  { tag: 'PLAN   ', color: 'text-[#ffb86c]', text: 'Implementation path ready. 6 files to modify.' },
+  { tag: 'BUILD  ', color: 'text-[#50fa7b]', text: 'auth.service.ts → synthesized' },
+  { tag: 'BUILD  ', color: 'text-[#50fa7b]', text: 'session.provider.tsx → synthesized' },
+  { tag: 'REVIEW ', color: 'text-[#8be9fd]', text: 'PR #47 generated with full context diff' },
+  { tag: 'SHIP   ', color: 'text-[#50fa7b]', text: 'Pipeline green. Context preserved. ✓' },
+]
+
+function DevelopmentLoop() {
+  const { ref, isInView } = useFadeIn()
   return (
-    <div className="bg-black p-12 md:p-20 md:col-span-2 border-t border-border-muted">
+    <div ref={ref} className="bg-black p-12 md:p-20 md:col-span-2 border-t border-border-muted">
       <div className="grid md:grid-cols-5 gap-12">
-        {/* Left: copy */}
-        <div className="md:col-span-2">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.55, ease: [0.25, 0.4, 0.25, 1] }}
+          className="md:col-span-2"
+        >
           <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
-            04 / Security &amp; Review
+            04 / The Development Loop
           </span>
           <h2 className="text-4xl font-medium tracking-tight mb-6">
-            Automated Compliance.
+            Idea to production, connected.
           </h2>
           <p className="text-neutral-400 text-lg leading-relaxed font-light mb-10">
-            Continuous vulnerability scanning and performance auditing built
-            directly into your CI/CD pipeline.
+            The gap between product intent and shipping code is where context
+            dies. Viper closes that gap — keeping every layer aligned from
+            first prompt to last commit.
           </p>
-          <div className="space-y-6">
-            <div className="flex gap-4">
-              <span className="text-white mt-0.5 shrink-0">
-                <IconShield />
-              </span>
-              <div>
-                <h4 className="text-sm font-bold tracking-tight">
-                  Zero-Day Protection
-                </h4>
-                <p className="text-xs text-neutral-500 mt-1">
-                  Real-time dependency auditing.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-4">
-              <span className="text-white mt-0.5 shrink-0">
-                <IconSpeed />
-              </span>
-              <div>
-                <h4 className="text-sm font-bold tracking-tight">
-                  Performance Audits
-                </h4>
-                <p className="text-xs text-neutral-500 mt-1">
-                  Detect bottlenecks during CI.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+        </motion.div>
 
-        {/* Right: log window */}
-        <div className="md:col-span-3 border border-border-muted bg-[#050505] p-6 font-mono text-[12px]">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.55, delay: 0.15, ease: [0.25, 0.4, 0.25, 1] }}
+          className="md:col-span-3 border border-border-muted bg-[#050505] p-6 font-mono text-[12px]"
+        >
           <div className="flex items-center gap-2 mb-6 text-neutral-600">
             <IconTerminal />
-            <span>security-audit.log</span>
+            <span>viper.log</span>
           </div>
-          <div className="space-y-4">
-            <div className="flex items-start gap-3">
-              <span className="text-yellow-500/80 shrink-0">[WARN]</span>
-              <span className="text-neutral-300">
-                Potential SQL Injection in{' '}
-                <code className="text-white">user.service.ts:124</code>
-              </span>
-            </div>
-            <div className="ml-14 py-2 px-3 border-l border-white/20 text-neutral-500">
-              Applying automated patch... Fixed in PR #89
-            </div>
-            <div className="flex items-start gap-3 text-neutral-500">
-              <span className="text-green-500/80 shrink-0">[PASS]</span>
-              <span>Unit test coverage: 94.2%</span>
-            </div>
-            <div className="flex items-start gap-3 text-neutral-500">
-              <span className="text-green-500/80 shrink-0">[PASS]</span>
-              <span>Linting: 0 errors</span>
-            </div>
+          <div className="mb-5 flex gap-3">
+            <span className="text-[#6272a4]">$</span>
+            <span className="text-neutral-300">
+              viper run{' '}
+              <span className="text-[#f1fa8c]">&quot;Add user authentication&quot;</span>
+            </span>
           </div>
-        </div>
+          <div className="space-y-3">
+            {LOG_LINES.map(({ tag, color, text }, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, x: -8 }}
+                animate={isInView ? { opacity: 1, x: 0 } : {}}
+                transition={{ duration: 0.35, delay: 0.4 + i * 0.1, ease: 'easeOut' }}
+                className="flex items-start gap-3"
+              >
+                <span className={`${color} shrink-0 w-[4.5rem]`}>[{tag.trim()}]</span>
+                <span className="text-neutral-400">{text}</span>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
       </div>
     </div>
   )
@@ -267,10 +261,10 @@ export default function Features() {
     <section className="py-32 px-8 border-t border-border-muted">
       <div className="max-w-[1400px] mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border-muted border border-border-muted">
-          <ProductManagement />
-          <Architecture />
-          <Implementation />
-          <SecurityReview />
+          <UnifiedContext />
+          <CodebaseIntelligence />
+          <IntentToCode />
+          <DevelopmentLoop />
         </div>
       </div>
     </section>
