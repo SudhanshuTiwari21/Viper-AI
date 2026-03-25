@@ -1,9 +1,31 @@
 @import "tailwindcss";
 
+@keyframes orbit {
+  0% {
+    transform: rotate(0deg) translateY(calc(var(--radius) * 1px)) rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg) translateY(calc(var(--radius) * 1px)) rotate(-360deg);
+  }
+}
+
+@keyframes shimmer2 {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: -200% 0%;
+  }
+}
+
 @theme {
   --color-border-muted: #222222;
   --color-border-active: #444444;
   --font-sans: var(--font-inter), sans-serif;
+}
+
+@utility animate-orbit {
+  animation: orbit calc(var(--duration) * 1s) linear infinite;
 }
 
 @utility kerning-tight {
