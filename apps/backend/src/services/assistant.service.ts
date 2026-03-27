@@ -52,6 +52,7 @@ import {
 } from "@repo/workspace-tools";
 import { attachAnalysisGateForEdits } from "../lib/analysis-edit-gate.js";
 import { runPostEditValidationWithOptionalAutoRepair } from "../lib/post-edit-validation.js";
+import { getAllowedToolNames } from "../lib/mode-tool-policy.js";
 import {
   runAgenticLoop,
   buildAgenticSystemPrompt,
@@ -890,7 +891,7 @@ export async function runAssistantPipeline(
   messages: Array<{ role: "user" | "assistant"; content: string }> = [],
   chatMode: ChatMode = "agent",
 ): Promise<AssistantPipelineResult> {
-  if (DEBUG_ASSISTANT) log("Chat pipeline (B.11 mode — tool policy deferred to step 12)", { chatMode });
+  if (DEBUG_ASSISTANT) log("Chat pipeline (C.11 mode — tool policy in C.12)", { chatMode });
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
   const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
   const historyAwarePrompt =
@@ -1020,11 +1021,16 @@ export async function runAssistantPipeline(
     : historyAwarePrompt;
 
   // 5. Execute plan via Execution Engine
+  // C.12: block mutation steps in non-agent modes.
+  const blockedStepTypes = chatMode !== "agent"
+    ? new Set(["GENERATE_PATCH"])
+    : undefined;
   const executionResult = await executePlan(plan, {
     repo_id,
     query: syncEnrichedQuery,
     adapter,
     workspacePath,
+    blockedStepTypes,
   });
   if (DEBUG_ASSISTANT) executionResult.logs.forEach((l) => log(l));
 
@@ -1194,10 +1200,12 @@ async function runAgenticStreamPath(
   resumeState?: typeof pausedLoopStates extends Map<string, infer V> ? V : never,
   gateState?: { analysisReady: boolean },
   retrievalEditGate?: { overall: number; threshold: number; schemaVersion?: string },
+  chatMode: ChatMode = "agent",
 ): Promise<AssistantPipelineResult & { paused?: boolean }> {
   const client = getOpenAIClient();
   const discoveryToolsUsed = new Set<string>();
   const filesReadForGate = new Set<string>();
+  const allowedToolNames = getAllowedToolNames(chatMode);
   /**
    * Edit gate order in `canEdit` (B.7):
    * 1) Analysis readiness (VIPER_REQUIRE_ANALYSIS_FOR_EDITS)
@@ -1205,7 +1213,7 @@ async function runAgenticStreamPath(
    * 3) Minimum discovery tool usage
    * 4) Retrieval confidence floor (when VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS > 0)
    */
-  const tools = buildWorkspaceTools(workspacePath, {
+  const allTools = buildWorkspaceTools(workspacePath, {
     onCommandOutput: (chunk) => {
       onEvent({
         type: "command:output",
@@ -1377,6 +1385,9 @@ async function runAgenticStreamPath(
       return { allowed: true as const };
     },
   });
+  const tools = chatMode === "agent"
+    ? allTools
+    : allTools.filter((t) => allowedToolNames.has(t.definition.function.name));
 
   const memKey: SessionKey | null = conversationId
     ? { workspacePath, conversationId }
@@ -1433,6 +1444,7 @@ async function runAgenticStreamPath(
     temperature: 0.2,
     maxIterations: 12,
     signal,
+    allowedToolNames: chatMode !== "agent" ? allowedToolNames : undefined,
     onToken: (delta) => {
       if (!thinkingCompleted) {
         thinkingCompleted = true;
@@ -1501,6 +1513,22 @@ async function runAgenticStreamPath(
       }
     },
     onToolError: (name, error) => {
+      if (error.startsWith("Tool blocked by mode policy:")) {
+        onEvent({
+          type: "workflow:gate",
+          data: {
+            gate: "edit",
+            status: "blocked",
+            tool: name as "edit_file" | "create_file",
+            reason: "mode_tool_blocked",
+            metrics: {},
+          },
+        } as Parameters<OnStreamEvent>[0]);
+        workflowLog("mode:tool:blocked", identity, {
+          tool: name,
+          mode: chatMode,
+        });
+      }
       if (DEBUG_ASSISTANT) log(`Tool error: ${name}`, error);
     },
     onPause: (summary, pauseEditedFiles) => {
@@ -1683,6 +1711,40 @@ export async function runAssistantStreamPipeline(
       };
     }
 
+    // C.12 safety: if a paused state contains pending edits and the current mode
+    // is not `agent`, do not resume into a destructive loop — discard the paused
+    // state and return an explanation so the user knows to switch modes.
+    if (chatMode !== "agent" && resumeState.state.editedFiles.length > 0) {
+      onEvent({
+        type: "workflow:gate",
+        data: {
+          gate: "edit",
+          status: "blocked",
+          tool: "edit_file",
+          reason: "mode_tool_blocked",
+          metrics: {},
+        },
+      } as Parameters<OnStreamEvent>[0]);
+      workflowLog("workflow:gate", identity, {
+        gate: "edit",
+        status: "blocked",
+        reason: "mode_tool_blocked_resume",
+        mode: chatMode,
+        pendingEdits: resumeState.state.editedFiles,
+      });
+      const explanation =
+        `Cannot resume an edit session in "${chatMode}" mode. ` +
+        `Switch to "agent" mode to continue this multi-step implementation, ` +
+        `or start a new conversation in the current mode.`;
+      onEvent({ type: "result", data: { intent: resumeState.intentSummary, context: { files: [], functions: [], snippets: [explanation], estimatedTokens: Math.ceil(explanation.length / 4) } } });
+      onEvent({ type: "done", data: {} });
+      workflowLog("request:complete", identity, {
+        latency_ms: Date.now() - requestStart,
+        mode: chatMode,
+      });
+      return;
+    }
+
     const agenticResult = await withAbort(
       runAgenticStreamPath(
         prompt,
@@ -1696,6 +1758,7 @@ export async function runAssistantStreamPipeline(
         resumeState,
         gateStateResume,
         retrievalEditGateResume,
+        chatMode,
       ),
       signal,
     );
@@ -1865,6 +1928,7 @@ export async function runAssistantStreamPipeline(
       undefined,
       gateState,
       retrievalEditGate,
+      chatMode,
     ),
     signal,
   );

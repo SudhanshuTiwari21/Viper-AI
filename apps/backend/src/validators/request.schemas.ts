@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** B.11 chat / interaction mode (tool policy enforcement is step 12 — schema only here). */
+/** C.11 chat / interaction mode (tool policy enforcement is C.12 — schema only here). */
 export const ChatModeSchema = z.enum(["ask", "plan", "debug", "agent"]);
 export type ChatMode = z.infer<typeof ChatModeSchema>;
 
@@ -42,7 +42,7 @@ export const ChatRequestSchema = z.preprocess(
       )
       .max(10)
       .optional(),
-    /** Omitted → `agent` (backward compatible with pre–B.11 clients). Trimmed + lowercased before enum check. */
+    /** Omitted → `agent` (backward compatible with pre–C.11 clients). Trimmed + lowercased before enum check. */
     mode: z.preprocess((raw) => {
       if (raw === undefined || raw === null || raw === "") return "agent";
       return String(raw).trim().toLowerCase();

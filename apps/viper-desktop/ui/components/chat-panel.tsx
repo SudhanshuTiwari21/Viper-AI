@@ -326,6 +326,8 @@ export function ChatPanel() {
                             ? `Run discovery first (${d.metrics?.discoveryCount ?? 0}/${d.metrics?.requiredDiscovery ?? 0}).`
                             : d.reason === "insufficient_retrieval_confidence"
                               ? `Retrieval confidence too low (${(d.metrics?.retrievalOverall ?? 0).toFixed(2)} / required ${(d.metrics?.retrievalThreshold ?? 0).toFixed(2)}). Read or search more targeted files and retry.`
+                            : d.reason === "mode_tool_blocked"
+                              ? "This tool is not available in the current mode."
                             : "Edit is currently blocked by workflow policy.";
                     setActionNarration(sid, assistantId, label);
                   } else {

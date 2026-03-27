@@ -131,22 +131,27 @@ export async function runAgenticLoop(
 
       let resultText: string;
       try {
-        const tool = toolMap.get(tc.name);
-        if (!tool) {
-          resultText = `Unknown tool: ${tc.name}`;
+        if (opts.allowedToolNames && !opts.allowedToolNames.has(tc.name)) {
+          resultText = `Tool blocked by mode policy: ${tc.name} is not permitted in this mode.`;
+          opts.onToolError?.(tc.name, resultText);
         } else {
-          resultText = await tool.execute(args);
+          const tool = toolMap.get(tc.name);
+          if (!tool) {
+            resultText = `Unknown tool: ${tc.name}`;
+          } else {
+            resultText = await tool.execute(args);
 
-          if (tool.pausesLoop || isEditTool) {
-            shouldPause = true;
-            if (filePath && !editedFiles.includes(filePath)) {
-              editedFiles.push(filePath);
-            }
-            editSummary = resultText.split("\n")[0] ?? `Edited ${filePath}`;
+            if (tool.pausesLoop || isEditTool) {
+              shouldPause = true;
+              if (filePath && !editedFiles.includes(filePath)) {
+                editedFiles.push(filePath);
+              }
+              editSummary = resultText.split("\n")[0] ?? `Edited ${filePath}`;
 
-            if (filePath && opts.workspacePath) {
-              const afterContent = await safeReadFile(opts.workspacePath, filePath);
-              fileSnapshots.push({ filePath, beforeContent, afterContent });
+              if (filePath && opts.workspacePath) {
+                const afterContent = await safeReadFile(opts.workspacePath, filePath);
+                fileSnapshots.push({ filePath, beforeContent, afterContent });
+              }
             }
           }
         }

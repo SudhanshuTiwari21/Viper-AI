@@ -47,6 +47,11 @@ export interface ExecutionContext {
    * Tools can use this for deeper search / fallback behavior on retries.
    */
   iteration?: number;
+  /**
+   * C.12: Mutation step types blocked by the current chat mode.
+   * If the step type is in this set, `runStep` will skip it with a policy reason.
+   */
+  blockedStepTypes?: ReadonlySet<string>;
 }
 
 export interface StepOutput {

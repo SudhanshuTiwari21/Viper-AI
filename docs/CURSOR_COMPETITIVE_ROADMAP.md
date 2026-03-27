@@ -653,15 +653,24 @@ This is the strict execution sequence to minimize rework and de-risk production 
 
 ### Step Group C — Mode contract and UX
 
+Milestones in this group use the **C** series (**C.11**–**C.15**) alongside the §8.1 step numbers **11–15** (Step Group **B** above remains **B.6**–**B.10**).
+
 11. ~~Add mode enum to request schema (`ask|plan|debug|agent`).~~ **COMPLETE**
 
-#### B.11 Status: COMPLETE
+#### C.11 Status: COMPLETE
 
-- **Implemented:** `ChatModeSchema` / `ChatMode` and `mode` on `ChatRequestSchema` (`request.schemas.ts`): trim + lowercase then `ask|plan|debug|agent`; omitted/`""`/`null` → **`agent`** (inferred output always includes `mode`). `postChat` / `postChatStream` pass `chatMode` into `runAssistantPipeline` / `runAssistantStreamPipeline` (final param, default `"agent"`). Stream path: `workflowLog` for `request:start`, `request:resume`, `request:complete` includes `{ mode: chatMode }` when **`VIPER_DEBUG_ASSISTANT=1` or `VIPER_DEBUG_WORKFLOW=1`** (same gate as other `workflowLog` lines); non-stream: `DEBUG_ASSISTANT` one-line log only. **Tool allow/deny lists and routing by mode — deferred to step 12** (no policy enforcement in this change).
+- **Implemented:** `ChatModeSchema` / `ChatMode` and `mode` on `ChatRequestSchema` (`request.schemas.ts`): trim + lowercase then `ask|plan|debug|agent`; omitted/`""`/`null` → **`agent`** (inferred output always includes `mode`). `postChat` / `postChatStream` pass `chatMode` into `runAssistantPipeline` / `runAssistantStreamPipeline` (final param, default `"agent"`). Stream path: `workflowLog` for `request:start`, `request:resume`, `request:complete` includes `{ mode: chatMode }` when **`VIPER_DEBUG_ASSISTANT=1` or `VIPER_DEBUG_WORKFLOW=1`** (same gate as other `workflowLog` lines); non-stream: `DEBUG_ASSISTANT` one-line log only. **Tool allow/deny lists and routing by mode — deferred to C.12** (step 12; no policy enforcement in this change).
 - **Evidence:** `apps/backend/src/validators/request.schemas.test.ts`; `cd apps/backend && npx vitest run src/validators/request.schemas.test.ts && npm run check-types`.
 - **Rollback:** Remove `mode` from schema, controller destructuring, assistant params/log fields, Fastify body `mode`, and this roadmap subsection.
 
-12. Implement backend mode policy enforcement for tool permissions.
+12. ~~Implement backend mode policy enforcement for tool permissions.~~ **COMPLETE**
+
+#### C.12 Status: COMPLETE
+
+- **Implemented:** Single source of truth `getAllowedToolNames(mode)` / `isToolAllowedByMode(mode, tool)` in `apps/backend/src/lib/mode-tool-policy.ts`. Maps `ChatMode` → allowed OpenAI tool names: **ask/plan** = read-only (`read_file`, `list_directory`, `search_text`, `search_files`); **debug** = read-only + `run_command`; **agent** = full set (unchanged behavior). **Primary enforcement:** tool definitions are filtered before `runAgenticLoop` — disallowed tools are omitted so the LLM cannot select them. **Defense in depth:** `allowedToolNames` on `AgenticLoopOptions` (`agentic-loop.types.ts`) + execution guard in `run-agentic-loop.ts` — if a blocked tool call arrives despite filtering, it returns `"Tool blocked by mode policy: <name>"` without calling `execute`. **Observability:** `workflow:gate` SSE event with `reason: "mode_tool_blocked"` + `workflowLog("mode:tool:blocked", ...)` stage (added to `VALID_WORKFLOW_STAGES`). **Desktop:** `chat-panel.tsx` handles `mode_tool_blocked` reason gracefully. **Non-streaming path:** `ExecutionContext.blockedStepTypes` blocks `GENERATE_PATCH` steps in `step-runner.ts` for non-agent modes. **Resume safety:** if a paused agentic state has pending edits and `chatMode ≠ agent`, resume is refused with an explanation (user must switch to agent mode).
+- **Evidence:** `npx vitest run src/lib/mode-tool-policy.test.ts src/lib/mode-tool-filtering.test.ts src/lib/mode-execution-guard.test.ts` (from `apps/backend`); `cd apps/backend && npm run check-types`; `cd packages/agents/agentic-loop && npm run check-types`.
+- **Rollback:** Remove `mode-tool-policy.ts` + tests, revert `agentic-loop.types.ts` / `run-agentic-loop.ts` guard, remove `allowedToolNames` from `runAgenticLoop` calls, remove tool filtering in `runAgenticStreamPath`, remove `blockedStepTypes` from `ExecutionContext` / `step-runner.ts` / `execute-plan.ts`, remove `mode:tool:blocked` from `VALID_WORKFLOW_STAGES`, remove `mode_tool_blocked` handling in `chat-panel.tsx`, revert roadmap block. Desktop mode selector = **step 13**.
+
 13. Add mode selector in desktop chat UI.
 14. Add mode-aware narration and output contract.
 15. Add mode-specific integration tests.

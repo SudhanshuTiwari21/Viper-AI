@@ -162,6 +162,7 @@ declare module "@repo/execution-engine" {
       memory?: EngineMemorySnapshot;
       recordStep?: RecordStepFn;
       iteration?: number;
+      blockedStepTypes?: ReadonlySet<string>;
     },
   ): Promise<ExecutionResult>;
 }

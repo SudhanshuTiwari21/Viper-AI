@@ -30,6 +30,13 @@ export interface AgenticLoopOptions {
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
   temperature?: number;
+  /**
+   * C.12 defense-in-depth: if provided, any tool call whose name is **not** in
+   * this set is blocked at execution time (returns a policy message to the LLM
+   * instead of running `tool.execute`). Primary filtering should happen by
+   * omitting tool definitions; this is the runtime safety net.
+   */
+  allowedToolNames?: ReadonlySet<string>;
 }
 
 export interface AgenticLoopResult {

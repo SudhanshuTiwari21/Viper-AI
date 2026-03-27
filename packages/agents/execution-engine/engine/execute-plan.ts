@@ -18,10 +18,13 @@ export async function executePlan(
     recordStep?: RecordStepFn;
     /** Autonomous loop pass index (default 0). Threaded into ctx for tools. */
     iteration?: number;
+    /** C.12: step types to skip due to mode policy. */
+    blockedStepTypes?: ReadonlySet<string>;
   },
 ): Promise<ExecutionResult> {
   const iteration = opts.iteration ?? 0;
   const ctx = createExecutionContext({ ...opts, plan, iteration });
+  if (opts.blockedStepTypes) ctx.blockedStepTypes = opts.blockedStepTypes;
 
   for (const step of plan.steps) {
     const start = Date.now();

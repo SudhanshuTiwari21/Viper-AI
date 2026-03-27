@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ChatRequestSchema, ChatModeSchema } from "./request.schemas.js";
 
-describe("ChatRequestSchema (B.11 mode)", () => {
+describe("ChatRequestSchema (C.11 mode)", () => {
   it("omitted mode → parses as agent", () => {
     const r = ChatRequestSchema.safeParse({
       prompt: "hi",
