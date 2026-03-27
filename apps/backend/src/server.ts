@@ -7,8 +7,14 @@ import { analysisRoutes } from "./routes/analysis.routes.js";
 import { chatRoutes } from "./routes/chat.routes.js";
 import { contextRoutes } from "./routes/context.routes.js";
 import { patchRoutes } from "./routes/patch.routes.js";
+import { debugRoutes } from "./routes/debug.routes.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  /** Long chat/analysis streams; Node/Fastify defaults can close idle sockets too aggressively for SSE. */
+  requestTimeout: 0,
+  connectionTimeout: 0,
+});
 
 if (process.env.DATABASE_URL) {
   try {
@@ -26,6 +32,7 @@ await app.register(cors, {
 });
 
 await app.register(healthRoutes);
+await app.register(debugRoutes);
 await app.register(analysisRoutes);
 await app.register(chatRoutes);
 await app.register(contextRoutes);

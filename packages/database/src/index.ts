@@ -14,3 +14,10 @@ export {
   insertRepositoryFiles,
 } from "./repository-files.repository";
 export type { RepositoryFileRow, RepositoryFileType, RepositoryRow } from "./types";
+export {
+  insertMemoryEntry,
+  getMemoryEntriesBySession,
+  getRecentMemoryByWorkspace,
+  searchMemoryByKeywords,
+  type ConversationMemoryRow,
+} from "./conversation-memory.repository";

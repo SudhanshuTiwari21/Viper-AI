@@ -2,21 +2,20 @@ import { describe, expect, it } from "vitest";
 import { buildExecutionPlan } from "./build-plan";
 
 describe("buildExecutionPlan", () => {
-  it("builds 6 ordered steps for CODE_FIX", () => {
+  it("builds ordered steps for CODE_FIX", () => {
     const plan = buildExecutionPlan("CODE_FIX", ["login API"]);
 
     expect(plan.intent).toBe("CODE_FIX");
-    expect(plan.steps).toHaveLength(6);
+    expect(plan.steps).toHaveLength(5);
     expect(plan.steps.map((step) => step.type)).toEqual([
       "SEARCH_SYMBOL",
       "SEARCH_EMBEDDING",
       "FETCH_DEPENDENCIES",
-      "ANALYZE_CODE",
       "IDENTIFY_ISSUE",
       "GENERATE_PATCH",
     ]);
     expect(plan.steps[0]?.id).toBe("0-SEARCH_SYMBOL");
-    expect(plan.steps[5]?.id).toBe("5-GENERATE_PATCH");
+    expect(plan.steps[4]?.id).toBe("4-GENERATE_PATCH");
   });
 
   it("maps GENERIC to NO_OP", () => {

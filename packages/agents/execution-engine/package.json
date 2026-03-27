@@ -18,7 +18,8 @@
     "@repo/planner-agent": "*",
     "@repo/context-builder": "*",
     "@repo/context-ranking": "*",
-    "@repo/implementation-agent": "*"
+    "@repo/implementation-agent": "*",
+    "@repo/workspace-tools": "*"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",

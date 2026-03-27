@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { MonacoEditor } from "./monaco-editor";
+import { MonacoDiffEditor, UndoAIBar } from "./monaco-diff-editor";
 import { EditorWelcome } from "./editor-welcome";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useCurrentFile } from "../contexts/current-file-context";
 import { useStatusBar } from "../contexts/status-bar-context";
 import { useDiagnostics } from "../contexts/diagnostics-context";
+import { usePendingEdits } from "../contexts/pending-edits-context";
 import { fsApi } from "../services/filesystem";
 import { useEditorTabs } from "../hooks/useEditor";
 import type { CodePatch } from "../lib/patch-types";
@@ -20,6 +22,13 @@ export function EditorContainer() {
   const { setFileErrors } = useDiagnostics();
   const { tabs, activeId, openTab, closeTab, setActiveId, updateContent, markSaved } =
     useEditorTabs();
+  const {
+    getPendingEditForFile,
+    removePendingEdit,
+    pushAccepted,
+    acceptedStack,
+    popAccepted,
+  } = usePendingEdits();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -240,18 +249,70 @@ export function EditorContainer() {
       {/* Editor body or welcome */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {!activeTab && <EditorWelcome />}
-        {activeTab && (
-          <MonacoEditor
-            key={activeTab.id}
-            language={activeTab.language}
-            value={activeTab.content}
-            onChange={(val) => updateContent(activeTab.id, val)}
-            onCursorChange={handleCursorChange}
-            currentFilePath={activeTab.path}
-            onDiagnosticsChange={setFileErrors}
-          />
-        )}
+        {activeTab && (() => {
+          const pendingEdit = getPendingEditForFile(activeTab.path);
+          if (pendingEdit) {
+            return (
+              <MonacoDiffEditor
+                key={`diff-${activeTab.id}-${pendingEdit.id}`}
+                originalContent={pendingEdit.originalContent}
+                modifiedContent={pendingEdit.modifiedContent}
+                language={activeTab.language}
+                filePath={activeTab.path}
+                description={pendingEdit.description}
+                onAccept={() => {
+                  updateContent(activeTab.id, pendingEdit.modifiedContent);
+                  pushAccepted({
+                    id: pendingEdit.id,
+                    filePath: pendingEdit.filePath,
+                    beforeContent: pendingEdit.originalContent,
+                    afterContent: pendingEdit.modifiedContent,
+                    description: pendingEdit.description,
+                    timestamp: Date.now(),
+                  });
+                  removePendingEdit(pendingEdit.id);
+                  if (workspace) {
+                    void fsApi.writeFile(workspace.root, activeTab.path, pendingEdit.modifiedContent)
+                      .then(() => markSaved(activeTab.id));
+                  }
+                }}
+                onReject={() => {
+                  removePendingEdit(pendingEdit.id);
+                }}
+              />
+            );
+          }
+          return (
+            <MonacoEditor
+              key={activeTab.id}
+              language={activeTab.language}
+              value={activeTab.content}
+              onChange={(val) => updateContent(activeTab.id, val)}
+              onCursorChange={handleCursorChange}
+              currentFilePath={activeTab.path}
+              onDiagnosticsChange={setFileErrors}
+            />
+          );
+        })()}
       </div>
+
+      {acceptedStack.length > 0 && (
+        <UndoAIBar
+          lastFile={acceptedStack[acceptedStack.length - 1]!.filePath}
+          onUndo={() => {
+            const last = popAccepted();
+            if (!last) return;
+            const tab = tabs.find((t) => t.path === last.filePath);
+            if (tab) {
+              updateContent(tab.id, last.beforeContent);
+              if (workspace) {
+                void fsApi.writeFile(workspace.root, last.filePath, last.beforeContent)
+                  .then(() => markSaved(tab.id));
+              }
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

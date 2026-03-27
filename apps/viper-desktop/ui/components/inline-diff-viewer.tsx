@@ -151,7 +151,7 @@ function FileDiffBlock({
       <div className="flex items-stretch border-b border-v-border min-h-[2.25rem]">
         <button
           type="button"
-          className="v-press flex-1 px-3 py-1.5 text-xs font-mono text-v-text flex items-center gap-2 hover:bg-white/[0.02] transition-colors text-left min-w-0"
+          className="v-press flex-1 cursor-pointer px-3 py-1.5 text-xs font-mono text-v-text flex items-center gap-2 hover:bg-white/[0.04] transition-colors text-left min-w-0"
           onClick={() => setExpanded((v) => !v)}
         >
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

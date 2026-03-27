@@ -5,10 +5,13 @@ export type MemoryEntryType =
   | "error"
   | "context"
   | "execution-step"
-  | "reflection";
+  | "reflection"
+  | "tool-result"
+  | "analysis"
+  | "turn-summary";
 
 // ---------------------------------------------------------------------------
-// Structured metadata per entry type (discriminated by `type`)
+// Structured metadata per entry type (discriminated by `_kind`)
 // ---------------------------------------------------------------------------
 
 export interface IntentMeta {
@@ -49,6 +52,30 @@ export interface ReflectionLoopMeta {
   shouldRetry: boolean;
 }
 
+/** A single tool call + result from the agentic loop. */
+export interface ToolResultMeta {
+  toolName: string;
+  args: Record<string, string>;
+  resultSummary: string;
+  durationMs?: number;
+}
+
+/** Structured findings from a codebase analysis turn. */
+export interface AnalysisMeta {
+  issuesFound: string[];
+  filesExamined: string[];
+}
+
+/** Summary of an entire agentic loop turn (user prompt → tool calls → response). */
+export interface TurnSummaryMeta {
+  userPrompt: string;
+  toolsUsed: string[];
+  filesRead: string[];
+  filesEdited: string[];
+  responseSummary: string;
+  toolCallCount: number;
+}
+
 /** Type-safe metadata union */
 export type MemoryMetadata =
   | ({ _kind: "intent" } & IntentMeta)
@@ -57,7 +84,10 @@ export type MemoryMetadata =
   | ({ _kind: "error" } & ErrorMeta)
   | ({ _kind: "decision" } & DecisionMeta)
   | ({ _kind: "reflection" } & ReflectionLoopMeta)
-  | ({ _kind: "context" });
+  | ({ _kind: "context" })
+  | ({ _kind: "tool-result" } & ToolResultMeta)
+  | ({ _kind: "analysis" } & AnalysisMeta)
+  | ({ _kind: "turn-summary" } & TurnSummaryMeta);
 
 export interface MemoryEntry {
   id: string;

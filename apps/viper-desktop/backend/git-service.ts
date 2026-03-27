@@ -33,4 +33,64 @@ export function setupGitService() {
       return [];
     }
   });
+
+  ipcMain.handle("git:status", async (_e, root: string) => {
+    try {
+      const out = await runGit(root, ["status", "--porcelain=v1"]);
+      if (!out) return [];
+      return out.split("\n").filter(Boolean).map((line) => {
+        const status = line.slice(0, 2);
+        const file = line.slice(3);
+        return { status: status.trim(), file };
+      });
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle("git:diff", async (_e, root: string, filePath?: string) => {
+    try {
+      const args = ["diff"];
+      if (filePath) args.push("--", filePath);
+      return await runGit(root, args);
+    } catch {
+      return "";
+    }
+  });
+
+  ipcMain.handle("git:stage", async (_e, root: string, filePath: string) => {
+    try {
+      await runGit(root, ["add", filePath]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle("git:unstage", async (_e, root: string, filePath: string) => {
+    try {
+      await runGit(root, ["reset", "HEAD", filePath]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle("git:commit", async (_e, root: string, message: string) => {
+    try {
+      await runGit(root, ["commit", "-m", message]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle("git:discard", async (_e, root: string, filePath: string) => {
+    try {
+      await runGit(root, ["checkout", "--", filePath]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }

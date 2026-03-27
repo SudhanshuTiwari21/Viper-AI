@@ -25,6 +25,8 @@ function getReasoningInstruction(intentType: IntentType): string {
       return "Focus on test coverage gaps and what tests to add.";
     case "SECURITY_ANALYSIS":
       return "Focus on security issues and vulnerabilities.";
+    case "CODE_GUIDANCE":
+      return "Focus on practical next steps, tradeoffs, and priorities grounded in the codebase context.";
     case "FILE_EDIT":
     case "PROJECT_SETUP":
     case "GENERIC":

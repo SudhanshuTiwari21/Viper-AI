@@ -7,6 +7,7 @@ interface ThinkingIndicatorProps {
 const PHASE_LABELS: Record<string, string> = {
   intent: "Understanding intent\u2026",
   planning: "Planning approach\u2026",
+  indexing: "Indexing workspace\u2026",
   executing: "Executing steps\u2026",
   reasoning: "Analyzing context\u2026",
   generating: "Generating solution\u2026",

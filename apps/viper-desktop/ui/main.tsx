@@ -6,6 +6,7 @@ import { OutputProvider } from "./contexts/output-context";
 import { StatusBarProvider } from "./contexts/status-bar-context";
 import { ChatProvider } from "./contexts/chat-context";
 import { DiagnosticsProvider } from "./contexts/diagnostics-context";
+import { PendingEditsProvider } from "./contexts/pending-edits-context";
 import { Layout } from "./app/layout";
 import { Page } from "./app/page";
 import "./styles/globals.css";
@@ -60,9 +61,11 @@ function App() {
           <StatusBarProvider>
             <DiagnosticsProvider>
               <ChatProvider>
-                <Layout>
-                  <Page />
-                </Layout>
+                <PendingEditsProvider>
+                  <Layout>
+                    <Page />
+                  </Layout>
+                </PendingEditsProvider>
               </ChatProvider>
             </DiagnosticsProvider>
           </StatusBarProvider>

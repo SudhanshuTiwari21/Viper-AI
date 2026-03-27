@@ -7,6 +7,25 @@ const BACKEND_URL =
   (typeof import.meta !== "undefined" && (import.meta as { env?: { VITE_AGENT_API_URL?: string } }).env?.VITE_AGENT_API_URL) ||
   "http://localhost:4000";
 
+/** Chromium/Electron surfaces dropped SSE/TCP as "Failed to fetch" — explain what that usually means. */
+function humanizeNetworkError(err: unknown): Error {
+  if (!(err instanceof Error)) return new Error("Request failed");
+  const m = err.message;
+  if (m === "Failed to fetch" || m.includes("NetworkError") || m.includes("Load failed")) {
+    return new Error(
+      [
+        `Connection to ${BACKEND_URL} dropped mid-stream (Failed to fetch).`,
+        `Common causes: two chats at once, closing the window, Wi‑Fi sleep, or the browser idling out a long silent phase (backend may still log work—check the terminal).`,
+        `Wait for one reply to finish; one window; keep the backend running; try http://127.0.0.1:4000 if localhost is flaky.`,
+      ].join(" "),
+    );
+  }
+  if (err.name === "AbortError" || m.toLowerCase().includes("timeout")) {
+    return new Error("Request timed out. The assistant may still be working — try again.");
+  }
+  return err;
+}
+
 export interface ChatResponse {
   intent: { intent: string; summary: string };
   context: {
@@ -22,6 +41,8 @@ export interface ChatResponse {
     potentialIssues: string[];
     recommendedNextStep?: string;
   };
+  /** Short LLM recap of the proposed patch (preferred over raw JSON / reflection dumps). */
+  proposalSummary?: string;
 }
 
 /** POST /chat — run assistant pipeline (intent + context ranking). Returns intent + context. */
@@ -31,12 +52,17 @@ export async function sendChat(
   conversationId?: string,
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
 ): Promise<ChatResponse> {
-  const res = await fetch(`${BACKEND_URL}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
-    signal: AbortSignal.timeout(120_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((err as { error?: string }).error ?? `Chat failed: ${res.status}`);
@@ -62,12 +88,17 @@ export async function sendChatStream(
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(`${BACKEND_URL}/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
-    signal: signal ?? AbortSignal.timeout(300_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
+      signal: signal ?? AbortSignal.timeout(300_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -81,7 +112,13 @@ export async function sendChatStream(
   let buffer = "";
 
   while (true) {
-    const { done, value } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (e) {
+      throw humanizeNetworkError(e);
+    }
+    const { done, value } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
@@ -107,51 +144,183 @@ export async function sendChatStream(
   }
 }
 
-/** Format assistant response for display in chat. */
+/**
+ * Strip markdown / noisy punctuation so chat reads like plain prose (no **, bullets as ASCII art, etc.).
+ * Exported for use in the chat UI on streamed or final text.
+ */
+export function stripMarkdownForChat(s: string): string {
+  let t = s.trim();
+  if (!t) return t;
+
+  // Unwrap **bold** and *italic* repeatedly (handles nested-ish cases)
+  for (let i = 0; i < 10; i++) {
+    const next = t
+      .replace(/\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, "$1")
+      .replace(/(?<!\*)\*((?:[^*\n])+?)\*(?!\*)/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/_([^_\n]+)_/g, "$1");
+    if (next === t) break;
+    t = next;
+  }
+
+  // Any leftover emphasis markers
+  t = t.replace(/\*\*/g, "");
+  t = t.replace(/\*/g, "");
+
+  // ATX headings
+  t = t.replace(/^#{1,6}\s+/gm, "");
+
+  // Horizontal rules
+  t = t.replace(/^---+$/gm, "");
+
+  // Inline code ticks
+  t = t.replace(/`([^`]+)`/g, "$1");
+
+  // Markdown bullets → simple bullet character
+  t = t.replace(/^(\s*)[-*+]\s+/gm, "$1• ");
+
+  // Collapse excessive blank lines / spaces
+  t = t.replace(/[ \t]+\n/g, "\n");
+  t = t.replace(/\n{3,}/g, "\n\n");
+  return t.trim();
+}
+
+/** @deprecated use stripMarkdownForChat */
+function stripInlineMarkdownNoise(s: string): string {
+  return stripMarkdownForChat(s);
+}
+
+/** Matches backend `FALLBACK_NO_CONTEXT`. */
+const FALLBACK_SNIPPET = "No relevant code found in repository.";
+
+function humanizeIntentName(intent: string): string {
+  return intent.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Intent classifier + memory sometimes produce huge “Entities: a,b,c,…” strings — never show raw. */
+function isGarbageIntentSummary(summary: string): boolean {
+  const t = summary.trim();
+  if (t.length < 120) return false;
+  if (/Entities:\s*/i.test(t) && t.length > 200) return true;
+  if (t.split(/\s+/).length > 70) return true;
+  return false;
+}
+
+function hasReasoningBlocks(r?: ChatResponse["reasoning"]): boolean {
+  if (!r) return false;
+  return (
+    Boolean(r.recommendedNextStep?.trim()) ||
+    (r.detectedComponents?.length ?? 0) > 0 ||
+    (r.missingComponents?.length ?? 0) > 0 ||
+    (r.potentialIssues?.length ?? 0) > 0
+  );
+}
+
+/** Direct LLM stream: one prose answer — show only the reply (incl. PROJECT_SETUP with retrieved file paths). */
+function isDirectStreamingAnswer(data: ChatResponse): boolean {
+  if (data.proposalSummary?.trim()) return false;
+  if (hasReasoningBlocks(data.reasoning)) return false;
+  const snips = data.context.snippets;
+  if (snips.length !== 1) return false;
+  const s = snips[0]?.trim() ?? "";
+  if (!s || s === FALLBACK_SNIPPET) return false;
+  if (
+    data.intent.intent === "PROJECT_SETUP" ||
+    data.intent.intent === "CODE_GUIDANCE" ||
+    data.intent.intent === "GENERIC"
+  ) {
+    return true;
+  }
+  return data.context.files.length === 0 && data.context.functions.length === 0;
+}
+
+/**
+ * Format assistant response for display in chat.
+ * When a patch was proposed (`proposalSummary`), show only human copy + files — no intent taxonomy or reasoning dumps.
+ */
 export function formatChatResponse(data: ChatResponse): string {
+  if (data.proposalSummary?.trim()) {
+    const body = stripInlineMarkdownNoise(data.proposalSummary.trim());
+    const lines: string[] = [body];
+    const files = [...new Set(data.context.files.filter(Boolean))];
+    if (files.length) {
+      lines.push("");
+      lines.push(`Files: ${files.join(", ")}`);
+    }
+    return lines.join("\n");
+  }
+
+  if (isDirectStreamingAnswer(data)) {
+    return stripInlineMarkdownNoise(data.context.snippets[0] ?? "");
+  }
+
   const lines: string[] = [];
-  lines.push(`**Intent:** ${data.intent.intent}`);
-  lines.push(`**Summary:** ${data.intent.summary}`);
+
+  const summary = data.intent.summary?.trim() ?? "";
+  if (summary && !isGarbageIntentSummary(summary)) {
+    lines.push(summary);
+  } else {
+    lines.push(`Answering in context of ${humanizeIntentName(data.intent.intent)}.`);
+  }
   lines.push("");
 
-  if (data.reasoning && (data.reasoning.detectedComponents?.length || data.reasoning.missingComponents?.length || data.reasoning.potentialIssues?.length || data.reasoning.recommendedNextStep)) {
-    if (data.reasoning.detectedComponents?.length) {
-      lines.push("**What's in place:**");
-      data.reasoning.detectedComponents.forEach((c) => lines.push(`- ${c}`));
+  if (hasReasoningBlocks(data.reasoning) && data.reasoning) {
+    const r = data.reasoning;
+    if (r.detectedComponents?.length) {
+      lines.push("In the codebase:");
+      r.detectedComponents.forEach((c) => lines.push(`- ${c}`));
       lines.push("");
     }
-    if (data.reasoning.missingComponents?.length) {
-      lines.push("**What needs to be done:**");
-      data.reasoning.missingComponents.forEach((c) => lines.push(`- ${c}`));
+    if (r.missingComponents?.length) {
+      lines.push("Gaps:");
+      r.missingComponents.forEach((c) => lines.push(`- ${c}`));
       lines.push("");
     }
-    if (data.reasoning.potentialIssues?.length) {
-      lines.push("**Potential issues:**");
-      data.reasoning.potentialIssues.forEach((c) => lines.push(`- ${c}`));
+    if (r.potentialIssues?.length) {
+      lines.push("Watch outs:");
+      r.potentialIssues.forEach((c) => lines.push(`- ${c}`));
       lines.push("");
     }
-    if (data.reasoning.recommendedNextStep) {
-      lines.push(`**Suggested next step:** ${data.reasoning.recommendedNextStep}`);
+    if (r.recommendedNextStep) {
+      lines.push(`Next step: ${r.recommendedNextStep}`);
       lines.push("");
     }
   }
 
-  lines.push(`**Context** (${data.context.estimatedTokens} tokens):`);
-  if (data.context.files.length) {
-    lines.push(`Files: ${data.context.files.join(", ")}`);
+  const onlyFallback =
+    data.context.snippets.length === 1 &&
+    data.context.snippets[0]?.trim() === FALLBACK_SNIPPET &&
+    data.context.files.length === 0;
+
+  if (onlyFallback && !hasReasoningBlocks(data.reasoning)) {
+    lines.push(
+      "No indexed code matched this query yet. Try running codebase analysis, or ask a general question (setup, commands, concepts).",
+    );
+    return stripMarkdownForChat(lines.join("\n").trim());
   }
-  if (data.context.functions.length) {
-    lines.push(`Functions: ${data.context.functions.join(", ")}`);
-  }
-  if (data.context.snippets.length) {
+
+  if (data.context.files.length || data.context.functions.length) {
+    lines.push(
+      `Referenced context (${data.context.estimatedTokens} tokens):`,
+    );
+    if (data.context.files.length) {
+      lines.push(`Files: ${data.context.files.join(", ")}`);
+    }
+    if (data.context.functions.length) {
+      lines.push(`Functions: ${data.context.functions.join(", ")}`);
+    }
     lines.push("");
+  }
+
+  if (data.context.snippets.length && !onlyFallback) {
     lines.push("Snippets:");
     data.context.snippets.forEach((s, i) => {
       lines.push(`--- ${i + 1} ---`);
       lines.push(s);
     });
   }
-  return lines.join("\n");
+
+  return stripMarkdownForChat(lines.join("\n").trim());
 }
 
 /** POST /analysis/scan — run Repo Scanner only; returns files, sourceFiles, jobs (for testing with IDE workspace). */

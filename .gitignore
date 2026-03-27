@@ -27,6 +27,8 @@ out/
 build
 dist
 
+# Electron desktop packaged apps (large binaries; do not commit)
+apps/viper-desktop/release/
 
 # Debug
 npm-debug.log*

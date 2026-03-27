@@ -92,6 +92,10 @@ Run backend only:
 npm run dev --workspace=@repo/backend
 ```
 
+## Build & run (per package)
+
+See **[docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)** for separate build commands (every agent, context packages, database, apps) and run instructions.
+
 ## Useful Commands
 
 From repo root:

@@ -1,15 +1,18 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus,
   Clock,
   MoreHorizontal,
   Scan,
+  Code2,
+  Sparkles,
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
 import { useChat } from "../contexts/chat-context";
 import type { ExecutionStep, PendingDiff } from "../contexts/chat-context";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+import { usePendingEdits } from "../contexts/pending-edits-context";
 import {
   sendChatStream,
   formatChatResponse,
@@ -22,6 +25,7 @@ import {
 } from "../services/agent-api";
 import { filterPatchByHunks, buildInitialHunkStatuses } from "../lib/filter-patch";
 import { buildFileDiffWithHunks } from "../lib/hunk-model";
+import { useSmartScroll } from "../hooks/use-smart-scroll";
 
 function formatTimeAgo(ts: number): string {
   const d = Date.now() - ts;
@@ -30,6 +34,15 @@ function formatTimeAgo(ts: number): string {
   if (d < 86400_000) return `${Math.floor(d / 3600_000)}h`;
   return `${Math.floor(d / 86400_000)}d`;
 }
+
+const STEP_NARRATIONS: Record<string, string> = {
+  SEARCH_SYMBOL: "Searching the codebase for relevant symbols\u2026",
+  SEARCH_EMBEDDING: "Running semantic search across your project\u2026",
+  READ_FILE: "Reading and analyzing source files\u2026",
+  IMPLEMENT: "Generating and refining the proposed changes\u2026",
+  VALIDATE: "Validating edits against the current workspace\u2026",
+  ANALYZE: "Tracing structure and dependencies\u2026",
+};
 
 export function ChatPanel() {
   const {
@@ -40,6 +53,7 @@ export function ChatPanel() {
     addMessage,
     updateMessage,
     appendTokens,
+    finalizeTokenBuffer,
     updateSteps,
     setStreamingPhase,
     setPendingPatch,
@@ -49,22 +63,31 @@ export function ChatPanel() {
     setPendingPatchApplySummary,
     setPlanSteps,
     setExploredFiles,
+    setExplorationPhase,
+    setActionNarration,
     setErrorMessage,
+    appendThinkingTokens,
+    clearThinkingBuffer,
+    appendPlanNarrativeTokens,
+    clearPlanNarrativeBuffer,
+    appendToolCall,
+    completeToolCall,
+    appendCommandOutput,
+    setAwaitingApproval,
   } = useChat();
   const { workspace } = useWorkspaceContext();
+  const { addPendingEdit } = usePendingEdits();
   const [streaming, setStreaming] = useState(false);
   const [analysing, setAnalysing] = useState(false);
   const [pastChatsOpen, setPastChatsOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  /** Synchronous guard — two rapid sends can both see streaming===false before re-render (duplicate /chat/stream). */
+  const streamInFlightRef = useRef(false);
+
+  const { scrollContainerRef, bottomRef, scrollToBottom } = useSmartScroll();
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages ?? [];
-
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
 
   useEffect(() => {
     scrollToBottom();
@@ -75,9 +98,12 @@ export function ChatPanel() {
   const handleSend = useCallback(
     async (prompt: string) => {
       if (!prompt.trim() || streaming || !activeSessionId) return;
+      if (streamInFlightRef.current) return;
+      streamInFlightRef.current = true;
 
       const workspacePath = workspace?.root ?? "";
       if (!workspacePath) {
+        streamInFlightRef.current = false;
         addMessage(activeSessionId, {
           role: "assistant",
           content: "Open a workspace folder first so the agent can use your codebase context.",
@@ -85,10 +111,11 @@ export function ChatPanel() {
         return;
       }
 
+      // Drop empty entries — API requires content.min(1); failed/aborted streams can leave "" assistant rows.
       const lastMessages = messages
-        .filter((m) => !m.streaming)
+        .filter((m) => !m.streaming && m.content.trim().length > 0)
         .slice(-10)
-        .map((m) => ({ role: m.role, content: m.content }));
+        .map((m) => ({ role: m.role, content: m.content.trim() }));
 
       addMessage(activeSessionId, {
         role: "user",
@@ -115,6 +142,40 @@ export function ChatPanel() {
                 setStreamingPhase(sid, assistantId, "intent");
                 break;
 
+              case "workspace:preparing": {
+                setStreamingPhase(sid, assistantId, "indexing");
+                setExplorationPhase(sid, assistantId, "exploring");
+                break;
+              }
+
+              case "thinking:start":
+                setStreamingPhase(sid, assistantId, "indexing");
+                break;
+
+              case "thinking:delta": {
+                const d = event.data as { content: string };
+                appendThinkingTokens(sid, assistantId, d.content);
+                break;
+              }
+
+              case "thinking:complete":
+                break;
+
+              case "plan:narrative:start":
+                clearPlanNarrativeBuffer(sid, assistantId);
+                clearThinkingBuffer(sid, assistantId);
+                setStreamingPhase(sid, assistantId, "planning");
+                break;
+
+              case "plan:narrative:delta": {
+                const d = event.data as { content: string };
+                appendPlanNarrativeTokens(sid, assistantId, d.content);
+                break;
+              }
+
+              case "plan:narrative:complete":
+                break;
+
               case "plan": {
                 setStreamingPhase(sid, assistantId, "planning");
                 const planData = event.data as { steps?: Array<{ id: string; type: string; description?: string }> };
@@ -126,9 +187,25 @@ export function ChatPanel() {
 
               case "step:start": {
                 const d = event.data as { stepId: string; stepType: string };
-                steps.push({ stepId: d.stepId, stepType: d.stepType, status: "running" });
+                // Autonomous loop re-runs the same plan step IDs across iterations — upsert, don’t append duplicates
+                // or step:complete only updates the first row and the rest spin forever.
+                const idx = steps.findIndex((s) => s.stepId === d.stepId);
+                if (idx >= 0) {
+                  steps[idx] = {
+                    stepId: d.stepId,
+                    stepType: d.stepType,
+                    status: "running",
+                    durationMs: undefined,
+                  };
+                } else {
+                  steps.push({ stepId: d.stepId, stepType: d.stepType, status: "running" });
+                }
                 updateSteps(sid, assistantId, [...steps]);
                 setStreamingPhase(sid, assistantId, "executing");
+                const narration = STEP_NARRATIONS[d.stepType];
+                if (narration) {
+                  setActionNarration(sid, assistantId, narration);
+                }
                 break;
               }
 
@@ -140,23 +217,149 @@ export function ChatPanel() {
                   step.durationMs = d.durationMs;
                 }
                 updateSteps(sid, assistantId, [...steps]);
+                setActionNarration(sid, assistantId, "");
                 break;
               }
 
               case "step:skip": {
                 const d = event.data as { stepId: string; stepType: string };
-                steps.push({ stepId: d.stepId, stepType: d.stepType, status: "skipped" });
+                const skipIdx = steps.findIndex((s) => s.stepId === d.stepId);
+                if (skipIdx >= 0) {
+                  steps[skipIdx] = {
+                    stepId: d.stepId,
+                    stepType: d.stepType,
+                    status: "skipped",
+                  };
+                } else {
+                  steps.push({ stepId: d.stepId, stepType: d.stepType, status: "skipped" });
+                }
                 updateSteps(sid, assistantId, [...steps]);
                 break;
               }
 
               case "context:retrieved": {
                 const d = event.data as {
-                  files?: string[];
+                  files?: string[] | number;
                   counts?: { files: number; functions: number; tokens: number };
                 };
-                if (d.files) {
+                if (Array.isArray(d.files)) {
                   setExploredFiles(sid, assistantId, d.files, d.counts);
+                  setExplorationPhase(sid, assistantId, "done");
+                }
+                break;
+              }
+
+              case "context:explored": {
+                const d = event.data as {
+                  files: string[];
+                  counts?: { files: number; functions: number; tokens: number };
+                };
+                if (d.files?.length) {
+                  setExploredFiles(sid, assistantId, d.files, d.counts);
+                  setExplorationPhase(sid, assistantId, "done");
+                }
+                break;
+              }
+
+              case "context:searching":
+                setExplorationPhase(sid, assistantId, "exploring");
+                break;
+
+              case "tool:start": {
+                const d = event.data as { tool: string; args: Record<string, string> };
+                const tcId = `${d.tool}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                appendToolCall(sid, assistantId, {
+                  id: tcId,
+                  tool: d.tool,
+                  args: d.args,
+                  status: "running",
+                });
+                break;
+              }
+
+              case "tool:result": {
+                const d = event.data as { tool: string; summary: string; durationMs: number };
+                completeToolCall(sid, assistantId, d.tool, d.summary, d.durationMs);
+                break;
+              }
+
+              case "workflow:gate": {
+                const d = event.data as {
+                  gate: "edit";
+                  status: "blocked" | "passed";
+                  reason?: string;
+                  metrics?: {
+                    filesRead?: number;
+                    requiredFilesRead?: number;
+                    discoveryCount?: number;
+                    requiredDiscovery?: number;
+                    analysisReady?: boolean;
+                  };
+                };
+                if (d.gate === "edit") {
+                  if (d.status === "blocked") {
+                    const label =
+                      d.reason === "analysis_not_ready"
+                        ? "Edit is waiting for analysis warmup."
+                        : d.reason === "insufficient_files_read"
+                          ? `Read more files before editing (${d.metrics?.filesRead ?? 0}/${d.metrics?.requiredFilesRead ?? 0}).`
+                          : d.reason === "insufficient_discovery"
+                            ? `Run discovery first (${d.metrics?.discoveryCount ?? 0}/${d.metrics?.requiredDiscovery ?? 0}).`
+                            : "Edit is currently blocked by workflow policy.";
+                    setActionNarration(sid, assistantId, label);
+                  } else {
+                    setActionNarration(sid, assistantId, "Edit gate passed. Applying change...");
+                  }
+                }
+                break;
+              }
+
+              case "command:output": {
+                const d = event.data as { content: string };
+                appendCommandOutput(sid, assistantId, d.content);
+                break;
+              }
+
+              case "step:awaiting_approval": {
+                const d = event.data as {
+                  summary: string;
+                  editedFiles: string[];
+                  stepNumber: number;
+                  fileSnapshots?: Array<{
+                    filePath: string;
+                    beforeContent: string;
+                    afterContent: string;
+                  }>;
+                };
+                setAwaitingApproval(sid, assistantId, {
+                  summary: d.summary,
+                  editedFiles: d.editedFiles,
+                  stepNumber: d.stepNumber,
+                });
+
+                if (d.fileSnapshots?.length) {
+                  for (const snap of d.fileSnapshots) {
+                    addPendingEdit({
+                      id: `edit-${snap.filePath}-${Date.now()}`,
+                      filePath: snap.filePath,
+                      originalContent: snap.beforeContent,
+                      modifiedContent: snap.afterContent,
+                      description: d.summary,
+                      timestamp: Date.now(),
+                    });
+
+                    if (workspace?.root) {
+                      window.dispatchEvent(
+                        new CustomEvent("viper:open-file", {
+                          detail: {
+                            root: workspace.root,
+                            path: snap.filePath,
+                            content: snap.afterContent,
+                          },
+                        }),
+                      );
+                    }
+                  }
                 }
                 break;
               }
@@ -167,6 +370,8 @@ export function ChatPanel() {
 
               case "token": {
                 const d = event.data as { content: string };
+                setStreamingPhase(sid, assistantId, "generating");
+                clearThinkingBuffer(sid, assistantId);
                 appendTokens(sid, assistantId, d.content);
                 break;
               }
@@ -197,10 +402,8 @@ export function ChatPanel() {
                 break;
 
               case "reflection": {
-                const d = event.data as { summary?: string };
-                if (d.summary) {
-                  appendTokens(sid, assistantId, `\n\n**Reflection:** ${d.summary}`);
-                }
+                // Reflection is for timeline / logs only — do not append diagnostics into the reply
+                // (avoids raw JSON + issue lists next to the diff preview).
                 break;
               }
 
@@ -219,7 +422,11 @@ export function ChatPanel() {
               }
 
               case "done":
-                setStreamingPhase(sid, assistantId, "done");
+                finalizeTokenBuffer(sid, assistantId);
+                window.setTimeout(() => {
+                  setStreamingPhase(sid, assistantId, "done");
+                  setActionNarration(sid, assistantId, "");
+                }, 120);
                 break;
             }
           },
@@ -231,6 +438,8 @@ export function ChatPanel() {
         setErrorMessage(sid, assistantId, errorText);
         updateMessage(sid, assistantId, "", false);
       } finally {
+        finalizeTokenBuffer(sid, assistantId);
+        streamInFlightRef.current = false;
         setStreaming(false);
       }
     },
@@ -242,12 +451,24 @@ export function ChatPanel() {
       addMessage,
       updateMessage,
       appendTokens,
+      finalizeTokenBuffer,
       updateSteps,
       setStreamingPhase,
       setPendingPatch,
       setPlanSteps,
       setExploredFiles,
+      setExplorationPhase,
+      setActionNarration,
       setErrorMessage,
+      appendThinkingTokens,
+      clearThinkingBuffer,
+      appendPlanNarrativeTokens,
+      clearPlanNarrativeBuffer,
+      appendToolCall,
+      completeToolCall,
+      appendCommandOutput,
+      setAwaitingApproval,
+      addPendingEdit,
     ],
   );
 
@@ -434,6 +655,16 @@ export function ChatPanel() {
     }
   }, [activeSessionId, analysing, workspace?.root, addMessage, updateMessage, setErrorMessage]);
 
+  const handleContinueStep = useCallback(() => {
+    if (streaming) return;
+    handleSend("Yes, continue with the next step.");
+  }, [streaming, handleSend]);
+
+  const handleStopStep = useCallback(() => {
+    if (streaming) return;
+    handleSend("Stop here, that's enough for now.");
+  }, [streaming, handleSend]);
+
   const pastChats = sessions.slice(0, 10).sort((a, b) => b.createdAt - a.createdAt);
 
   return (
@@ -443,7 +674,6 @@ export function ChatPanel() {
         <span className="text-sm font-medium text-v-text">Viper AI</span>
         <div className="flex-1 min-w-0" />
 
-        {/* Past chats toggle */}
         <button
           type="button"
           className="v-press p-1.5 rounded-lg text-v-text3 hover:bg-white/[0.04] hover:text-v-text transition-colors"
@@ -453,7 +683,6 @@ export function ChatPanel() {
           <Clock size={15} />
         </button>
 
-        {/* Actions menu */}
         <div className="relative">
           <button
             type="button"
@@ -506,7 +735,7 @@ export function ChatPanel() {
                 <li key={s.id}>
                   <button
                     type="button"
-                    className={`v-press w-full text-left px-2.5 py-1.5 rounded-lg text-xs truncate flex items-center justify-between gap-2 transition-colors ${
+                    className={`v-press w-full text-left px-2 py-1.5 rounded-lg text-xs truncate flex items-center justify-between gap-2 transition-colors ${
                       s.id === activeSessionId
                         ? "bg-v-accent/10 text-v-text"
                         : "text-v-text2 hover:bg-white/[0.03] hover:text-v-text"
@@ -530,17 +759,44 @@ export function ChatPanel() {
 
       {/* ─── Message stream ─── */}
       <div
-        ref={scrollRef}
+        ref={scrollContainerRef}
         className="flex-1 overflow-y-auto overflow-x-hidden min-h-0"
       >
-        <div className="flex flex-col gap-5 p-4 max-w-3xl mx-auto">
+        <div className="flex flex-col gap-3 p-2 max-w-3xl mx-auto">
+          {/* ─── Empty state ─── */}
           {messages.length === 0 && (
-            <div className="flex-1 flex items-center justify-center text-center py-20">
-              <p className="text-sm text-v-text3">
-                Ask anything about your code.
-              </p>
+            <div className="flex flex-col items-center justify-center py-24 gap-4 animate-v-fade-in">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-v-bg2 border border-v-border">
+                <Sparkles size={24} className="text-v-accent" />
+              </div>
+              <div className="text-center space-y-1.5">
+                <h2 className="text-base font-medium text-v-text">
+                  Ask anything about your codebase
+                </h2>
+                <p className="text-sm text-v-text3 max-w-sm">
+                  Viper can search, understand, modify, and explain your code.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center mt-2">
+                {[
+                  "Explain the auth flow",
+                  "Find unused exports",
+                  "Refactor this function",
+                ].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    className="v-press px-3 py-1.5 rounded-lg text-xs text-v-text2 border border-v-border hover:bg-white/[0.03] hover:text-v-text transition-colors"
+                    onClick={() => handleSend(q)}
+                  >
+                    <Code2 size={12} className="inline mr-1.5 -mt-px" />
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
+
           {messages.map((m) => (
             <ChatMessage
               key={m.id}
@@ -552,14 +808,16 @@ export function ChatPanel() {
               onHunkReject={handleHunkReject}
               onFileAcceptAll={handleFileAcceptAll}
               onFileRejectAll={handleFileRejectAll}
+              onContinueStep={handleContinueStep}
+              onStopStep={handleStopStep}
             />
           ))}
-          <div ref={messagesEndRef} />
+          <div ref={bottomRef} />
         </div>
       </div>
 
       {/* ─── Sticky input ─── */}
-      <div className="shrink-0 border-t border-v-border bg-v-bg p-3 max-w-3xl mx-auto w-full">
+      <div className="shrink-0 border-t border-v-border bg-v-bg px-3 py-1.5 max-w-3xl mx-auto w-full">
         <ChatInput onSend={handleSend} disabled={streaming} />
       </div>
     </div>

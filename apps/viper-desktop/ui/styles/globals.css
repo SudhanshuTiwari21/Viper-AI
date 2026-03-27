@@ -123,6 +123,26 @@ body {
   }
 }
 
+@keyframes v-slide-up-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes v-subtle-pulse {
+  0% {
+    opacity: 0.88;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
 .animate-v-thinking-dot {
   animation: v-thinking-dot 1.4s infinite ease-in-out both;
 }
@@ -133,6 +153,14 @@ body {
 
 .animate-v-fade-in {
   animation: v-fade-in 150ms ease-out forwards;
+}
+
+.animate-v-slide-up {
+  animation: v-slide-up-in 200ms ease-out forwards;
+}
+
+.animate-v-subtle-pulse {
+  animation: v-subtle-pulse 320ms ease-out forwards;
 }
 
 .animate-v-spin {

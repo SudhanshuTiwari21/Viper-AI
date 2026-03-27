@@ -14,5 +14,15 @@ export const INTENT_KEYWORD_RULES: IntentKeywordRules = {
   SECURITY_ANALYSIS: ["security", "vulnerability", "secure"],
   FILE_EDIT: ["edit", "modify", "change"],
   PROJECT_SETUP: ["setup", "configure", "install", "initialize"],
+  CODE_GUIDANCE: [
+    "next steps",
+    "next step",
+    "what should",
+    "prioritize",
+    "roadmap",
+    "advice",
+    "recommend",
+    "planning",
+  ],
 };
 

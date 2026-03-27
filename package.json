@@ -3,6 +3,10 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "build:backend": "npm run build -w @repo/backend",
+    "build:desktop": "npm run build -w viper-desktop",
+    "build:desktop:vite": "npm run build:vite -w viper-desktop",
+    "build:web": "npm run build -w web-app",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",

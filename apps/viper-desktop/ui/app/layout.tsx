@@ -11,7 +11,7 @@ function getWorkspaceName(root: string | undefined): string {
   if (!root) return "Viper AI";
   const normalized = root.replace(/\/$/, "");
   const name = normalized.split("/").pop() ?? "Workspace";
-  return `${name} — Viper AI`;
+  return `${name}`;
 }
 
 export function Layout({ children }: LayoutProps) {

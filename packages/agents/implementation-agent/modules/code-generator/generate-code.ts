@@ -85,7 +85,9 @@ export async function generateCode(
   prompt: string,
   logs: string[],
   onEvent?: StreamCallback,
+  options?: { streamTokens?: boolean },
 ): Promise<GeneratedPatchPayload> {
+  const streamTokens = options?.streamTokens !== false;
   const model = process.env.IMPLEMENTATION_MODEL ?? "gpt-4o-mini";
   const client = getOpenAIClient();
 
@@ -115,7 +117,9 @@ export async function generateCode(
           const delta = chunk.choices[0]?.delta?.content ?? "";
           if (delta) {
             raw += delta;
-            onEvent({ type: "token", data: { content: delta } });
+            if (streamTokens) {
+              onEvent({ type: "token", data: { content: delta } });
+            }
           }
         }
 

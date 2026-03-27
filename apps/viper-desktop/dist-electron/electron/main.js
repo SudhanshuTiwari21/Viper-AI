@@ -11,6 +11,8 @@ const file_service_1 = require("../backend/file-service");
 const terminal_service_1 = require("../backend/terminal-service");
 const git_service_1 = require("../backend/git-service");
 const diagnostics_service_1 = require("../diagnostics/diagnostics-service");
+const extension_service_1 = require("../backend/extension-service");
+const debug_service_1 = require("../backend/debug-service");
 let mainWindow = null;
 const isDev = process.env.NODE_ENV === "development" || !electron_1.app.isPackaged;
 // Ensure the macOS app name (menu bar, Cmd+Tab, etc.) says "Viper AI" instead of "Electron".
@@ -24,6 +26,8 @@ function init() {
     (0, terminal_service_1.setupTerminalService)();
     (0, git_service_1.setupGitService)();
     (0, diagnostics_service_1.setupDiagnosticsService)();
+    (0, extension_service_1.setupExtensionService)();
+    (0, debug_service_1.setupDebugService)();
     electron_1.ipcMain.handle("shell:revealInFolder", (_e, workspaceRoot, relPath) => {
         const full = path_1.default.isAbsolute(relPath) ? relPath : path_1.default.join(workspaceRoot, relPath);
         electron_1.shell.showItemInFolder(full);

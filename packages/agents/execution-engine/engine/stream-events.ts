@@ -1,6 +1,8 @@
 import type { ExecutionPlan } from "@repo/planner-agent";
 
 export type StreamEvent =
+  | { type: "stream:open"; data: Record<string, never> }
+  | { type: "keepalive"; data: Record<string, never> }
   | { type: "intent"; data: { intent: string; summary: string } }
   | {
       type: "plan";
@@ -9,6 +11,9 @@ export type StreamEvent =
         steps: Array<{ id: string; type: string }>;
       };
     }
+  | { type: "plan:narrative:start"; data: Record<string, never> }
+  | { type: "plan:narrative:delta"; data: { content: string } }
+  | { type: "plan:narrative:complete"; data: Record<string, never> }
   | {
       type: "step:start";
       data: { stepId: string; stepType: string; iteration?: number };
@@ -25,6 +30,18 @@ export type StreamEvent =
       type: "context:retrieved";
       data: { files: number; functions: number; tokens: number };
     }
+  /** File paths + counts for IDE exploration UI (project setup / retrieval). */
+  | {
+      type: "context:explored";
+      data: {
+        files: string[];
+        counts?: { files: number; functions: number; tokens: number };
+      };
+    }
+  | { type: "workspace:preparing"; data: { phase: string } }
+  | { type: "thinking:start"; data: Record<string, never> }
+  | { type: "thinking:delta"; data: { content: string } }
+  | { type: "thinking:complete"; data: Record<string, never> }
   | { type: "patch:start"; data: Record<string, never> }
   | { type: "token"; data: { content: string } }
   | {
@@ -50,6 +67,26 @@ export type StreamEvent =
         rollbackId?: string;
       };
     }
+  | { type: "tool:start"; data: { tool: string; args: Record<string, string> } }
+  | { type: "tool:result"; data: { tool: string; summary: string; durationMs: number } }
+  | {
+      type: "workflow:gate";
+      data: {
+        gate: "edit";
+        status: "blocked" | "passed";
+        tool: "edit_file" | "create_file";
+        path?: string;
+        reason?: string;
+        metrics?: {
+          filesRead?: number;
+          requiredFilesRead?: number;
+          discoveryCount?: number;
+          requiredDiscovery?: number;
+          analysisReady?: boolean;
+        };
+      };
+    }
+  | { type: "step:awaiting_approval"; data: { summary: string; editedFiles: string[]; stepNumber: number } }
   | { type: "reasoning:start"; data: Record<string, never> }
   | { type: "reasoning:complete"; data: Record<string, never> }
   | { type: "result"; data: unknown }

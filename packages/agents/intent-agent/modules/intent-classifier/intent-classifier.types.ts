@@ -9,7 +9,9 @@ export type IntentType =
   | "TEST_GENERATION"
   | "SECURITY_ANALYSIS"
   | "FILE_EDIT"
-  | "PROJECT_SETUP";
+  | "PROJECT_SETUP"
+  /** Advice / next steps / priorities — answer with context, do not run patch generation. */
+  | "CODE_GUIDANCE";
 
 export interface IntentClassification {
   intentType: IntentType;

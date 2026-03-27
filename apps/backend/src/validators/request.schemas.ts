@@ -1,19 +1,45 @@
 import { z } from "zod";
 
-export const ChatRequestSchema = z.object({
-  prompt: z.string().min(1),
-  workspacePath: z.string().min(1),
-  conversationId: z.string().min(1).optional(),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(["user", "assistant"]),
-        content: z.string().min(1),
-      }),
-    )
-    .max(10)
-    .optional(),
-});
+/** Strip empty history rows so clients don’t 400 after failed streams leave content: "". */
+function sanitizeChatMessages(data: unknown): unknown {
+  if (typeof data !== "object" || data === null) return data;
+  const o = data as Record<string, unknown>;
+  if (!Array.isArray(o.messages)) return data;
+  const cleaned = o.messages
+    .flatMap((entry): { role: "user" | "assistant"; content: string }[] => {
+      if (entry === null || typeof entry !== "object") return [];
+      const role = (entry as { role?: unknown }).role;
+      const content = (entry as { content?: unknown }).content;
+      if (role !== "user" && role !== "assistant") return [];
+      if (typeof content !== "string") return [];
+      const c = content.trim();
+      if (!c) return [];
+      return [{ role, content: c }];
+    })
+    .slice(-10);
+  return {
+    ...o,
+    messages: cleaned.length > 0 ? cleaned : undefined,
+  };
+}
+
+export const ChatRequestSchema = z.preprocess(
+  sanitizeChatMessages,
+  z.object({
+    prompt: z.string().min(1),
+    workspacePath: z.string().min(1),
+    conversationId: z.string().min(1).optional(),
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(["user", "assistant"]),
+          content: z.string().min(1),
+        }),
+      )
+      .max(10)
+      .optional(),
+  }),
+);
 
 export const AnalysisRequestSchema = z.object({
   workspacePath: z.string().min(1),

@@ -11,7 +11,7 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const MAX_ROWS = 8;
-  const LINE_HEIGHT = 24;
+  const LINE_HEIGHT = 20;
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -53,7 +53,7 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   const canSend = value.trim().length > 0 && !disabled;
 
   return (
-    <div className="relative flex items-end gap-2 rounded-xl border border-v-border bg-v-bg2 px-4 py-3 transition-colors focus-within:border-v-accent/40">
+    <div className="relative flex items-end gap-1.5 rounded-lg border border-v-border bg-v-bg2 px-2.5 py-1.5 transition-colors focus-within:border-v-accent/40">
       <textarea
         ref={ref}
         value={value}
@@ -62,16 +62,16 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
         disabled={disabled}
         rows={1}
         placeholder={placeholder ?? "Ask anything about your code..."}
-        className="flex-1 resize-none bg-transparent text-input text-v-text placeholder:text-v-text3 outline-none"
+        className="flex-1 resize-none bg-transparent text-sm leading-5 text-v-text placeholder:text-v-text3 outline-none min-h-[20px] py-0.5"
         style={{ lineHeight: `${LINE_HEIGHT}px`, maxHeight: LINE_HEIGHT * MAX_ROWS }}
       />
       <button
         onClick={submit}
         disabled={!canSend}
         aria-label="Send message"
-        className="v-press flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-v-text3 transition-colors hover:text-v-accent disabled:opacity-30 disabled:pointer-events-none"
+        className="v-press flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-v-text3 transition-colors hover:text-v-accent disabled:opacity-30 disabled:pointer-events-none mb-px"
       >
-        <Send size={18} />
+        <Send size={15} />
       </button>
     </div>
   );

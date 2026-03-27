@@ -27,7 +27,10 @@ export async function runImplementation(
   logs.push("[Viper] Implementation prompt built");
 
   // 2. Generate code via LLM
-  const generated = await generateCode(prompt, logs, input.onEvent);
+  const generated = await generateCode(prompt, logs, input.onEvent, {
+    /** Preview mode streams patch via `patch:preview`; raw JSON tokens clutter the chat. */
+    streamTokens: input.mode !== "preview",
+  });
 
   // 3. Create structured patch
   const patch = generatePatch(generated);

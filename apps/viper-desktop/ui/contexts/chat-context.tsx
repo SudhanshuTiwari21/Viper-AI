@@ -14,6 +14,7 @@ export interface ExecutionStep {
 export type StreamingPhase =
   | "intent"
   | "planning"
+  | "indexing"
   | "executing"
   | "reasoning"
   | "generating"
@@ -50,6 +51,8 @@ export interface PendingPatchData {
   applySummary?: { applied: number; skipped: number };
 }
 
+export type ExplorationPhase = "exploring" | "done";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -61,9 +64,34 @@ export interface ChatMessage {
   tokenBuffer?: string;
   pendingPatch?: PendingPatchData;
   planSteps?: PlanStep[];
+  /** Streamed human plan (replaces raw SEARCH_* step list in UI). */
+  planNarrativeBuffer?: string;
   exploredFiles?: string[];
   exploredCounts?: ExploredCounts;
+  explorationPhase?: ExplorationPhase;
+  actionNarration?: string;
   errorMessage?: string;
+  /** Short LLM “thinking” narration (e.g. while workspace is indexed). */
+  thinkingBuffer?: string;
+  /** Workspace tool calls (read_file, list_directory, etc.) */
+  toolCalls?: ToolCallEntry[];
+  /** Set when the agentic loop pauses for user confirmation after an edit step. */
+  awaitingApproval?: {
+    summary: string;
+    editedFiles: string[];
+    stepNumber: number;
+  };
+}
+
+export interface ToolCallEntry {
+  id: string;
+  tool: string;
+  args: Record<string, string>;
+  summary?: string;
+  durationMs?: number;
+  status: "running" | "done";
+  /** Live streaming output for run_command */
+  commandOutput?: string;
 }
 
 export interface ChatSession {
@@ -85,6 +113,11 @@ interface ChatContextValue {
   addAttachedPath: (sessionId: string, path: string) => void;
   addAttachedPathToNewSession: (path: string) => string;
   appendTokens: (sessionId: string, messageId: string, tokens: string) => void;
+  finalizeTokenBuffer: (sessionId: string, messageId: string) => void;
+  appendThinkingTokens: (sessionId: string, messageId: string, tokens: string) => void;
+  clearThinkingBuffer: (sessionId: string, messageId: string) => void;
+  appendPlanNarrativeTokens: (sessionId: string, messageId: string, tokens: string) => void;
+  clearPlanNarrativeBuffer: (sessionId: string, messageId: string) => void;
   updateSteps: (sessionId: string, messageId: string, steps: ExecutionStep[]) => void;
   setStreamingPhase: (sessionId: string, messageId: string, phase: StreamingPhase) => void;
   setPendingPatch: (sessionId: string, messageId: string, data: PendingPatchData) => void;
@@ -94,7 +127,13 @@ interface ChatContextValue {
   setPendingPatchApplySummary: (sessionId: string, messageId: string, summary: { applied: number; skipped: number }) => void;
   setPlanSteps: (sessionId: string, messageId: string, steps: PlanStep[]) => void;
   setExploredFiles: (sessionId: string, messageId: string, files: string[], counts?: ExploredCounts) => void;
+  setExplorationPhase: (sessionId: string, messageId: string, phase: ExplorationPhase) => void;
+  setActionNarration: (sessionId: string, messageId: string, narration: string) => void;
   setErrorMessage: (sessionId: string, messageId: string, error: string) => void;
+  appendToolCall: (sessionId: string, messageId: string, entry: ToolCallEntry) => void;
+  completeToolCall: (sessionId: string, messageId: string, toolName: string, summary: string, durationMs: number) => void;
+  appendCommandOutput: (sessionId: string, messageId: string, chunk: string) => void;
+  setAwaitingApproval: (sessionId: string, messageId: string, data: ChatMessage["awaitingApproval"]) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -250,6 +289,53 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const finalizeTokenBuffer = useCallback((sessionId: string, messageId: string) => {
+    setSessions((prev) =>
+      updateMsg(prev, sessionId, messageId, (m) => {
+        const buffered = m.tokenBuffer ?? "";
+        if (!buffered) return m;
+        const nextContent = m.content && m.content.trim().length > 0 ? m.content : buffered;
+        return { ...m, content: nextContent, tokenBuffer: "" };
+      }),
+    );
+  }, []);
+
+  const appendThinkingTokens = useCallback(
+    (sessionId: string, messageId: string, tokens: string) => {
+      setSessions((prev) =>
+        updateMsg(prev, sessionId, messageId, (m) => ({
+          ...m,
+          thinkingBuffer: (m.thinkingBuffer ?? "") + tokens,
+        })),
+      );
+    },
+    [],
+  );
+
+  const clearThinkingBuffer = useCallback((sessionId: string, messageId: string) => {
+    setSessions((prev) =>
+      updateMsg(prev, sessionId, messageId, (m) => ({ ...m, thinkingBuffer: "" })),
+    );
+  }, []);
+
+  const appendPlanNarrativeTokens = useCallback(
+    (sessionId: string, messageId: string, tokens: string) => {
+      setSessions((prev) =>
+        updateMsg(prev, sessionId, messageId, (m) => ({
+          ...m,
+          planNarrativeBuffer: (m.planNarrativeBuffer ?? "") + tokens,
+        })),
+      );
+    },
+    [],
+  );
+
+  const clearPlanNarrativeBuffer = useCallback((sessionId: string, messageId: string) => {
+    setSessions((prev) =>
+      updateMsg(prev, sessionId, messageId, (m) => ({ ...m, planNarrativeBuffer: "" })),
+    );
+  }, []);
+
   const updateSteps = useCallback(
     (sessionId: string, messageId: string, steps: ExecutionStep[]) => {
       setSessions((prev) => updateMsg(prev, sessionId, messageId, (m) => ({ ...m, steps })));
@@ -347,9 +433,83 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const setExplorationPhase = useCallback(
+    (sessionId: string, messageId: string, phase: ExplorationPhase) => {
+      setSessions((prev) => updateMsg(prev, sessionId, messageId, (m) => ({ ...m, explorationPhase: phase })));
+    },
+    [],
+  );
+
+  const setActionNarration = useCallback(
+    (sessionId: string, messageId: string, narration: string) => {
+      setSessions((prev) => updateMsg(prev, sessionId, messageId, (m) => ({ ...m, actionNarration: narration })));
+    },
+    [],
+  );
+
   const setErrorMessage = useCallback(
     (sessionId: string, messageId: string, error: string) => {
       setSessions((prev) => updateMsg(prev, sessionId, messageId, (m) => ({ ...m, errorMessage: error })));
+    },
+    [],
+  );
+
+  const appendToolCall = useCallback(
+    (sessionId: string, messageId: string, entry: ToolCallEntry) => {
+      setSessions((prev) =>
+        updateMsg(prev, sessionId, messageId, (m) => ({
+          ...m,
+          toolCalls: [...(m.toolCalls ?? []), entry],
+        })),
+      );
+    },
+    [],
+  );
+
+  const completeToolCall = useCallback(
+    (sessionId: string, messageId: string, toolName: string, summary: string, durationMs: number) => {
+      setSessions((prev) =>
+        updateMsg(prev, sessionId, messageId, (m) => {
+          const calls = [...(m.toolCalls ?? [])];
+          const idx = calls.findIndex((tc) => tc.tool === toolName && tc.status === "running");
+          if (idx >= 0) {
+            calls[idx] = { ...calls[idx]!, status: "done", summary, durationMs };
+          }
+          return { ...m, toolCalls: calls };
+        }),
+      );
+    },
+    [],
+  );
+
+  const appendCommandOutput = useCallback(
+    (sessionId: string, messageId: string, chunk: string) => {
+      setSessions((prev) =>
+        updateMsg(prev, sessionId, messageId, (m) => {
+          const calls = [...(m.toolCalls ?? [])];
+          const idx = calls.findIndex((tc) => tc.tool === "run_command" && tc.status === "running");
+          if (idx >= 0) {
+            calls[idx] = {
+              ...calls[idx]!,
+              commandOutput: (calls[idx]!.commandOutput ?? "") + chunk,
+            };
+          }
+          return { ...m, toolCalls: calls };
+        }),
+      );
+    },
+    [],
+  );
+
+  const setAwaitingApproval = useCallback(
+    (sessionId: string, messageId: string, data: ChatMessage["awaitingApproval"]) => {
+      setSessions((prev) =>
+        updateMsg(prev, sessionId, messageId, (m) => ({
+          ...m,
+          awaitingApproval: data,
+          streamingPhase: "awaiting_approval" as StreamingPhase,
+        })),
+      );
     },
     [],
   );
@@ -365,6 +525,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     addAttachedPath,
     addAttachedPathToNewSession,
     appendTokens,
+    finalizeTokenBuffer,
+    appendThinkingTokens,
+    clearThinkingBuffer,
+    appendPlanNarrativeTokens,
+    clearPlanNarrativeBuffer,
     updateSteps,
     setStreamingPhase,
     setPendingPatch,
@@ -374,7 +539,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setPendingPatchApplySummary,
     setPlanSteps,
     setExploredFiles,
+    setExplorationPhase,
+    setActionNarration,
     setErrorMessage,
+    appendToolCall,
+    completeToolCall,
+    appendCommandOutput,
+    setAwaitingApproval,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

@@ -18,6 +18,7 @@ const INTENT_TYPES: IntentType[] = [
   "SECURITY_ANALYSIS",
   "FILE_EDIT",
   "PROJECT_SETUP",
+  "CODE_GUIDANCE",
 ];
 
 const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
@@ -41,6 +42,7 @@ const SYSTEM_PROMPT = `You are an intent classifier for a coding assistant. Give
 - SECURITY_ANALYSIS: User asks about security or vulnerabilities.
 - FILE_EDIT: User wants to edit, modify, or change a file.
 - PROJECT_SETUP: User asks about setup, configuration, or installation.
+- CODE_GUIDANCE: User wants advice, priorities, roadmap, or "what to do next" WITHOUT asking you to implement, change code, or generate patches now (e.g. "What are the next implementation steps?", "What should I work on first?", "How should I prioritize?"). If they ask you to add/build/fix code, prefer FEATURE_IMPLEMENTATION or CODE_FIX instead.
 
 Respond with only the label, nothing else. No punctuation, no explanation.`;
 

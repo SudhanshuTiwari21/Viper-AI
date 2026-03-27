@@ -82,6 +82,29 @@ describe("routeTools", () => {
     expect(d.runRanking).toBe(false);
   });
 
+  it("CODE_GUIDANCE: advisory / next-steps — context + direct LLM, no patch execution", () => {
+    const d = routeTools(
+      intent("CODE_GUIDANCE"),
+      entities([]),
+      tasks([]),
+    );
+    expect(d.directLLMResponse).toBe(true);
+    expect(d.runContextEngine).toBe(true);
+    expect(d.runImplementationAgent).toBe(false);
+  });
+
+  it("PROJECT_SETUP: guided answer with context retrieval + direct LLM (no implementation loop)", () => {
+    const d = routeTools(
+      intent("PROJECT_SETUP"),
+      entities([]),
+      tasks([]),
+    );
+    expect(d.directLLMResponse).toBe(true);
+    expect(d.runContextEngine).toBe(true);
+    expect(d.runRanking).toBe(true);
+    expect(d.runImplementationAgent).toBe(false);
+  });
+
   it("unknown intent: directLLMResponse true (generic question)", () => {
     const d = routeTools(
       intent("UNKNOWN"),
