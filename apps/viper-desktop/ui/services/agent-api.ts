@@ -7,6 +7,11 @@ const BACKEND_URL =
   (typeof import.meta !== "undefined" && (import.meta as { env?: { VITE_AGENT_API_URL?: string } }).env?.VITE_AGENT_API_URL) ||
   "http://localhost:4000";
 
+export {
+  buildV2rayTunSubscriptionImportDeepLink,
+  normalizeSubscriptionUrlForRemoteFetch,
+} from "../lib/v2raytun-deeplink";
+
 /** Chromium/Electron surfaces dropped SSE/TCP as "Failed to fetch" — explain what that usually means. */
 function humanizeNetworkError(err: unknown): Error {
   if (!(err instanceof Error)) return new Error("Request failed");

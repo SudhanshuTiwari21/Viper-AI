@@ -15,6 +15,14 @@ const WORKFLOW_POLICY_KEYS = [
   "directLlmCacheTtl",
   "chatHistoryLimit",
   "runAnalysisWaitMs",
+  "minRetrievalConfidenceForEdits",
+  "enablePostEditValidation",
+  "postEditValidationCommand",
+  "postEditValidationTimeoutMs",
+  "enablePostEditAutoRepair",
+  "postEditAutoRepairCommand",
+  "postEditAutoRepairMaxExtraValidationRuns",
+  "postEditAutoRepairTimeoutMs",
 ] as const;
 
 describe("/debug/workflow-policy", () => {

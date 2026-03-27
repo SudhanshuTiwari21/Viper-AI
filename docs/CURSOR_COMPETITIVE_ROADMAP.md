@@ -602,15 +602,65 @@ This is the strict execution sequence to minimize rework and de-risk production 
 
 ### Step Group B — Safety and reliability core
 
-6. Ship standardized retrieval confidence object in backend responses/events.
-7. Enforce strict edit gate on confidence threshold (configurable).
-8. Add mandatory post-edit validation pipeline orchestration.
-9. Add bounded auto-repair pass for validation failures.
-10. Add reliability tests for cold index, stale index, and large repo scenarios.
+6. ~~Ship standardized retrieval confidence object in backend responses/events.~~ **COMPLETE**
+
+#### B.6 Status: COMPLETE
+
+- **Implemented:** Versioned `RetrievalConfidenceV1` + `buildRetrievalConfidence()` in `@repo/context-ranking` (`packages/context-ranking/src/retrieval-confidence/build-retrieval-confidence.ts`). Hybrid retrieval paths emit SSE `retrieval:confidence` before existing `context:retrieved` from `packages/agents/execution-engine/tools/context-engine.tool.ts`. Non-stream guided retrieval (`retrieveEmbeddingContextWindow` in `apps/backend/src/services/assistant.service.ts`) logs `retrieval:confidence:computed` when `VIPER_DEBUG_WORKFLOW=1`. `StreamEvent` + `apps/backend/src/execution-engine.d.ts` updated; desktop `chat-panel.tsx` ignores the new event type without breaking the stream.
+- **Evidence:**
+  - Unit tests: `npm test -w @repo/context-ranking` (or `npx vitest run` in `packages/context-ranking`) for `build-retrieval-confidence.test.ts`; `npm test -w @repo/execution-engine` includes `engine/stream-events.test.ts`.
+  - SSE: when `executePlan` runs with `onEvent`, expect an `event: retrieval:confidence` frame (JSON body = `RetrievalConfidenceV1`) immediately before `context:retrieved` for context-tool steps.
+- **Rollback:** Remove retrieval-confidence module, event variant, emissions, assistant wiring, and roadmap section.
+
+7. ~~Enforce strict edit gate on confidence threshold (configurable).~~ **COMPLETE**
+
+#### B.7 Status: COMPLETE
+
+- **Implemented:** `VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS` on `workflowRuntimeConfig` (float \[0,1\], default **0** = off; invalid/non-finite → **0**; out of range clamped). When **> 0**, agentic stream path runs one `retrieveEmbeddingContextWindow` seed (same hybrid stack as B.6) with `guidanceSeedTerms` + intent entities, emits `retrieval:confidence` SSE, then enforces floor **after** analysis / files-read / discovery gates in `canEdit`. Blocks with `workflow:gate` reason `insufficient_retrieval_confidence` and metrics `retrievalOverall`, `retrievalThreshold`, optional `confidenceSchemaVersion`. Seed failure → overall **0** for gate purposes (debug log only). Desktop narration updated in `chat-panel.tsx`.
+- **Files:** `apps/backend/src/config/workflow-flags.ts`, `apps/backend/src/config/workflow-flags.test.ts`, `apps/backend/src/lib/retrieval-edit-gate.ts`, `apps/backend/src/lib/retrieval-edit-gate.test.ts`, `apps/backend/src/services/assistant.service.ts`, `packages/agents/execution-engine/engine/stream-events.ts`, `apps/backend/src/execution-engine.d.ts`, `apps/viper-desktop/ui/components/chat-panel.tsx`
+- **Evidence:**
+  - Tests: `npx vitest run src/config/workflow-flags.test.ts src/lib/retrieval-edit-gate.test.ts` (from `apps/backend`)
+  - Verify: set `VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS=0.55`, send an agentic `/chat/stream` request; expect `retrieval:confidence` then possible `workflow:gate` blocked with `insufficient_retrieval_confidence` when overall \< threshold.
+  - `/debug/workflow-policy` includes `minRetrievalConfidenceForEdits` when exposure gate is on.
+- **Rollback:** Remove env + gate branch + seed call + types/UI strings; revert roadmap section.
+
+8. ~~Add mandatory post-edit validation pipeline orchestration.~~ **COMPLETE**
+
+#### B.8 Status: COMPLETE
+
+- **Implemented:** Feature flags `VIPER_ENABLE_POST_EDIT_VALIDATION` (default off), `VIPER_POST_EDIT_VALIDATION_COMMAND` (trimmed; empty → `npm run check-types`), `VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS` (default 30000). After a **successful** `edit_file` / `create_file` in the agentic stream path, backend runs `runWorkspaceCommand` (from `@repo/workspace-tools`) and emits SSE `validation:started` | `validation:passed` | `validation:failed`. When `VIPER_DEBUG_WORKFLOW=1`, `workflowLog` emits matching stages (schema-validated). Desktop `chat-panel.tsx` ignores these events without breaking the stream. **Part A (same PR):** resume path passes mutable `gateState` + `attachAnalysisGateForEdits` so `VIPER_REQUIRE_ANALYSIS_FOR_EDITS` does not spuriously block edits on resume; resume **skips** `STREAM_ANALYSIS_WARMUP_MS` (see comment in `assistant.service.ts`).
+- **Evidence:** Unit tests: `npx vitest run src/config/workflow-flags.test.ts src/lib/analysis-edit-gate.test.ts src/lib/post-edit-validation.test.ts` (from `apps/backend`); `npx vitest run packages/agents/execution-engine/engine/stream-events.test.ts`.
+- **Manual verify:** Set `VIPER_ENABLE_POST_EDIT_VALIDATION=true`, trigger an agentic edit; expect `validation:started` then `validation:passed` or `validation:failed` in the SSE stream. With `VIPER_DEBUG_WORKFLOW=1`, confirm no `[workflow:schema-warning]` lines for validation stages.
+- **Rollback:** Remove env keys, orchestration hook, SSE variants, desktop cases, resume `gateState` wiring, and roadmap section.
+
+9. ~~Add bounded auto-repair pass for validation failures.~~ **COMPLETE**
+
+#### B.9 Status: COMPLETE
+
+- **Implemented:** `VIPER_ENABLE_POST_EDIT_AUTO_REPAIR` (default off), `VIPER_POST_EDIT_AUTO_REPAIR_COMMAND` (trimmed; empty ⇒ explicit `auto-repair:attempt|result` skip, no re-validation), `VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS` (clamped **1–3**, default **1** — see `workflow-flags.ts` header for **max validation runs = 1 + maxExtra**), `VIPER_POST_EDIT_AUTO_REPAIR_TIMEOUT_MS` (default follows validation timeout / 30000). After first `validation:failed`, up to **maxExtra** cycles of **repair command → re-run B.8 validation**; SSE **`auto-repair:attempt`** / **`auto-repair:result`**; `workflowLog` stages when `VIPER_DEBUG_WORKFLOW=1`; desktop `chat-panel.tsx` no-op handlers. Orchestration in `runPostEditValidationWithOptionalAutoRepair` (`post-edit-validation.ts`); still **fire-and-forget** from `onToolResult`.
+- **Evidence:** `npx vitest run src/config/workflow-flags.test.ts src/lib/post-edit-validation.test.ts src/lib/post-edit-auto-repair.test.ts` (from `apps/backend`); `npx vitest run packages/agents/execution-engine/engine/stream-events.test.ts`; `src/types/workflow-log-schema.test.ts` sweeps new stages.
+- **Manual SSE:** Enable B.8 + B.9 with non-empty repair command; force validation failure then repair success → expect `validation:failed` → `auto-repair:attempt` → `auto-repair:result` → `validation:started` → `validation:passed` (when applicable).
+- **Rollback:** Remove B.9 env keys, wrapper + SSE + workflow stages + desktop cases + roadmap block; restore direct `runPostEditValidationOrchestration` call only if desired.
+
+10. ~~Add reliability tests for cold index, stale index, and large repo scenarios.~~ **COMPLETE**
+
+#### B.10 Status: COMPLETE
+
+- **Implemented:** Vitest reliability suite for `createContextAdapter` `searchEmbeddings` (`apps/backend/src/adapters/context-builder.adapter.reliability.test.ts`): **cold** — missing collection → `[]` and no `search`; empty Qdrant results → `[]`; empty embedding vector → `[]`; Qdrant throw → `[]` (no propagate). **Stale** — Qdrant payloads with missing/`""` `file` map to `[chunk]` / `chunk_id` fallbacks and optional `file` (adapter does not stat disk; mismatched paths are caller/UI concern). **Large repo** — asserts `limit` passed to Qdrant matches `CONTEXT_ADAPTER_EMBEDDING_SEARCH_LIMIT` (20) and one-page result cardinality. Mocks only (`openai`, `@qdrant/js-client-rest`); no live Qdrant. Minimal exports on adapter for test/observability alignment: `CONTEXT_ADAPTER_QDRANT_COLLECTION`, `CONTEXT_ADAPTER_EMBEDDING_SEARCH_LIMIT`. Complementary existing caps: `packages/context-ranking/src/topk-selector/topk-selector.test.ts` (`selectTopK` / `CONTEXT_LIMITS`).
+- **Evidence:** From `apps/backend`: `npx vitest run src/adapters/context-builder.adapter.reliability.test.ts` (or `npm test`). `npm run check-types`.
+- **Manual:** Optional — see `docs/BUILD_AND_RUN.md` for Qdrant-off behavior; these tests encode the non-throwing contract without a running vector DB.
+- **Rollback:** Remove reliability test file + adapter exports; revert roadmap block.
 
 ### Step Group C — Mode contract and UX
 
-11. Add mode enum to request schema (`ask|plan|debug|agent`).
+11. ~~Add mode enum to request schema (`ask|plan|debug|agent`).~~ **COMPLETE**
+
+#### B.11 Status: COMPLETE
+
+- **Implemented:** `ChatModeSchema` / `ChatMode` and `mode` on `ChatRequestSchema` (`request.schemas.ts`): trim + lowercase then `ask|plan|debug|agent`; omitted/`""`/`null` → **`agent`** (inferred output always includes `mode`). `postChat` / `postChatStream` pass `chatMode` into `runAssistantPipeline` / `runAssistantStreamPipeline` (final param, default `"agent"`). Stream path: `workflowLog` for `request:start`, `request:resume`, `request:complete` includes `{ mode: chatMode }` when **`VIPER_DEBUG_ASSISTANT=1` or `VIPER_DEBUG_WORKFLOW=1`** (same gate as other `workflowLog` lines); non-stream: `DEBUG_ASSISTANT` one-line log only. **Tool allow/deny lists and routing by mode — deferred to step 12** (no policy enforcement in this change).
+- **Evidence:** `apps/backend/src/validators/request.schemas.test.ts`; `cd apps/backend && npx vitest run src/validators/request.schemas.test.ts && npm run check-types`.
+- **Rollback:** Remove `mode` from schema, controller destructuring, assistant params/log fields, Fastify body `mode`, and this roadmap subsection.
+
 12. Implement backend mode policy enforcement for tool permissions.
 13. Add mode selector in desktop chat UI.
 14. Add mode-aware narration and output contract.

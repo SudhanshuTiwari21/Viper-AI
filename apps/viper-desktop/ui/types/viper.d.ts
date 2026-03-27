@@ -203,6 +203,7 @@ interface ViperApi {
   git: ViperGitApi;
   shell: {
     revealInFolder: (workspaceRoot: string, relPath: string) => Promise<void>;
+    openExternal: (url: string) => Promise<void>;
   };
   extensions: ViperExtensionsApi;
   debug: ViperDebugApi;

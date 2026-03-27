@@ -4,12 +4,6 @@ import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useCurrentFile } from "../contexts/current-file-context";
 import type { SidebarView } from "./activity-bar";
 
-declare global {
-  interface Window {
-    viper: { git: { log: (root: string, relPath: string) => Promise<string[]> } };
-  }
-}
-
 export interface TimelineSectionProps {
   activeView: SidebarView;
 }

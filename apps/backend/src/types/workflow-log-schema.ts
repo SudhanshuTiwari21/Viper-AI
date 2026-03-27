@@ -19,6 +19,8 @@ export const VALID_WORKFLOW_STAGES = [
   "validation:started",
   "validation:passed",
   "validation:failed",
+  "auto-repair:attempt",
+  "auto-repair:result",
   "result:emitted",
 
   // A.1 request lifecycle (emitted by workflowLog in this repo)

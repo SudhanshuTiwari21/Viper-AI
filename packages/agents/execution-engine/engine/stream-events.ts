@@ -1,4 +1,5 @@
 import type { ExecutionPlan } from "@repo/planner-agent";
+import type { RetrievalConfidenceV1 } from "@repo/context-ranking";
 
 export type StreamEvent =
   | { type: "stream:open"; data: Record<string, never> }
@@ -30,6 +31,8 @@ export type StreamEvent =
       type: "context:retrieved";
       data: { files: number; functions: number; tokens: number };
     }
+  /** Structured retrieval confidence (hybrid ranking); additive to `context:retrieved`. */
+  | { type: "retrieval:confidence"; data: RetrievalConfidenceV1 }
   /** File paths + counts for IDE exploration UI (project setup / retrieval). */
   | {
       type: "context:explored";
@@ -83,12 +86,45 @@ export type StreamEvent =
           discoveryCount?: number;
           requiredDiscovery?: number;
           analysisReady?: boolean;
+          /** B.7 seed hybrid retrieval `overall` when confidence edit gate is enabled */
+          retrievalOverall?: number;
+          /** B.7 configured floor (`VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS`) */
+          retrievalThreshold?: number;
+          /** B.6 / B.7 `RetrievalConfidenceV1.schema_version` when present */
+          confidenceSchemaVersion?: string;
         };
       };
     }
   | { type: "step:awaiting_approval"; data: { summary: string; editedFiles: string[]; stepNumber: number } }
   | { type: "reasoning:start"; data: Record<string, never> }
   | { type: "reasoning:complete"; data: Record<string, never> }
+  /** B.8: post-edit workspace validation (orchestration only; not auto-repair). */
+  | { type: "validation:started"; data: { command: string; tool?: string } }
+  | { type: "validation:passed"; data: { exitCode: 0; summary: string } }
+  | { type: "validation:failed"; data: { exitCode: number; error: string } }
+  /** B.9: bounded shell-based auto-repair after validation failure (WS9). */
+  | {
+      type: "auto-repair:attempt";
+      data: {
+        cycle: number;
+        tool?: string;
+        command?: string;
+        skipped?: boolean;
+        reason?: string;
+      };
+    }
+  | {
+      type: "auto-repair:result";
+      data: {
+        cycle: number;
+        success: boolean;
+        skipped?: boolean;
+        exitCode?: number;
+        summary?: string;
+        reason?: string;
+        error?: string;
+      };
+    }
   | { type: "result"; data: unknown }
   | { type: "error"; data: { message: string } }
   | {

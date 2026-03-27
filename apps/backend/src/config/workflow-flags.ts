@@ -16,6 +16,16 @@
  * - DIRECT_LLM_CACHE_TTL — int, default 900, Math.max(0, …); forced 0 when DISABLE_LLM_CACHE
  * - CHAT_HISTORY_LIMIT — int, default 10, clamped Math.max(0, Math.min(10, …))
  * - RUN_ANALYSIS_WAIT_MS — int, default 12000, Math.max(0, …)
+ * - VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS — float in [0, 1], default 0 (off). Non-finite or
+ *   out-of-range values clamp to [0, 1]; invalid parse falls back to 0 (B.7).
+ * - VIPER_ENABLE_POST_EDIT_VALIDATION — default false unless lowercase is "true" (B.8).
+ * - VIPER_POST_EDIT_VALIDATION_COMMAND — trimmed shell string; when empty, defaults to
+ *   `npm run check-types` (used only when post-edit validation is enabled).
+ * - VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS — int, default 30000, Math.max(0, …); bounds `runWorkspaceCommand`.
+ * - VIPER_ENABLE_POST_EDIT_AUTO_REPAIR — default false unless lowercase is "true" (B.9). Only runs after a failed post-edit validation when B.8 is enabled.
+ * - VIPER_POST_EDIT_AUTO_REPAIR_COMMAND — trimmed shell string; **empty** = repair skipped (explicit SSE + logs; no extra validation retry).
+ * - VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS — int clamped **1–3**, default **1**. Semantics: after the **first** validation fails, at most this many **(repair → re-validate)** cycles run. **Max validation runs total** = **1 initial + maxExtra** (e.g. default 1 ⇒ at most **2** `validation:*` rounds, **1** repair execution if command is non-empty).
+ * - VIPER_POST_EDIT_AUTO_REPAIR_TIMEOUT_MS — int, default **same numeric default as** `VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS` (30000) when unset; Math.max(0, …); bounds repair `runWorkspaceCommand`.
  *
  * Debug HTTP (A.5) — not part of assistant parsing above:
  * - VIPER_EXPOSE_WORKFLOW_DEBUG — "1" exposes GET /debug/workflow-policy; default off (404)
@@ -43,6 +53,38 @@ export interface WorkflowRuntimeConfig {
    * Forward-compat for A.5 (model route / tier label). Not wired to env yet.
    */
   readonly modelRouteDefault: string | undefined;
+  /** B.7: min hybrid retrieval `overall` to allow edits; 0 = disabled. */
+  readonly minRetrievalConfidenceForEdits: number;
+  /** B.8: run a workspace command after successful edit/create tools. */
+  readonly enablePostEditValidation: boolean;
+  /** B.8: command string (trimmed); empty → `npm run check-types` when validation is enabled. */
+  readonly postEditValidationCommand: string;
+  /** B.8: timeout for `runWorkspaceCommand` during post-edit validation. */
+  readonly postEditValidationTimeoutMs: number;
+  /** B.9: bounded shell auto-repair after validation failure. */
+  readonly enablePostEditAutoRepair: boolean;
+  readonly postEditAutoRepairCommand: string;
+  /** B.9: 1–3 repair→re-validate cycles after first failure (see header). */
+  readonly postEditAutoRepairMaxExtraValidationRuns: number;
+  readonly postEditAutoRepairTimeoutMs: number;
+}
+
+/**
+ * Parse B.7 threshold: [0, 1], default 0. NaN / non-finite → 0; out of range → clamped.
+ */
+export function parseMinRetrievalConfidenceForEdits(env: NodeJS.ProcessEnv): number {
+  const raw = env.VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS;
+  if (raw === undefined || raw === "") return 0;
+  const n = Number.parseFloat(String(raw));
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+/** B.9: clamp 1–3; invalid/non-finite → 1. */
+export function parsePostEditAutoRepairMaxExtraValidationRuns(env: NodeJS.ProcessEnv): number {
+  const n = parseInt(env.VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS ?? "1", 10);
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(3, n));
 }
 
 /** Exported for tests; production uses `workflowRuntimeConfig` snapshot below. */
@@ -80,6 +122,29 @@ export function parseWorkflowRuntimeConfig(
     0,
     parseInt(env.RUN_ANALYSIS_WAIT_MS ?? "12000", 10),
   );
+  const minRetrievalConfidenceForEdits = parseMinRetrievalConfidenceForEdits(env);
+
+  const enablePostEditValidation =
+    (env.VIPER_ENABLE_POST_EDIT_VALIDATION ?? "false").toLowerCase() === "true";
+  const postEditValidationCommandRaw = (env.VIPER_POST_EDIT_VALIDATION_COMMAND ?? "").trim();
+  const postEditValidationCommand =
+    postEditValidationCommandRaw !== "" ? postEditValidationCommandRaw : "npm run check-types";
+  const postEditValidationTimeoutMs = Math.max(
+    0,
+    parseInt(env.VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS ?? "30000", 10),
+  );
+
+  const enablePostEditAutoRepair =
+    (env.VIPER_ENABLE_POST_EDIT_AUTO_REPAIR ?? "false").toLowerCase() === "true";
+  const postEditAutoRepairCommand = (env.VIPER_POST_EDIT_AUTO_REPAIR_COMMAND ?? "").trim();
+  const postEditAutoRepairMaxExtraValidationRuns = parsePostEditAutoRepairMaxExtraValidationRuns(env);
+  const postEditAutoRepairTimeoutMs = Math.max(
+    0,
+    parseInt(
+      env.VIPER_POST_EDIT_AUTO_REPAIR_TIMEOUT_MS ?? String(postEditValidationTimeoutMs),
+      10,
+    ),
+  );
 
   return {
     debugAssistant,
@@ -96,6 +161,14 @@ export function parseWorkflowRuntimeConfig(
     runAnalysisWaitMs,
     modeDefault: undefined,
     modelRouteDefault: undefined,
+    minRetrievalConfidenceForEdits,
+    enablePostEditValidation,
+    postEditValidationCommand,
+    postEditValidationTimeoutMs,
+    enablePostEditAutoRepair,
+    postEditAutoRepairCommand,
+    postEditAutoRepairMaxExtraValidationRuns,
+    postEditAutoRepairTimeoutMs,
   };
 }
 

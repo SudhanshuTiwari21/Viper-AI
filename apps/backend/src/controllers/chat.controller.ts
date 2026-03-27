@@ -13,7 +13,7 @@ export async function postChat(
   request: FastifyRequest<{ Body: ChatRequest }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const { prompt, workspacePath, conversationId, messages } = request.body;
+  const { prompt, workspacePath, conversationId, messages, mode: chatMode } = request.body;
 
   const exists = await verifyWorkspaceExists(workspacePath);
   if (!exists) {
@@ -30,6 +30,7 @@ export async function postChat(
       identity,
       conversationId,
       messages,
+      chatMode,
     );
     await reply.send(result);
   } catch (err) {
@@ -49,7 +50,7 @@ export async function postChatStream(
   request: FastifyRequest<{ Body: ChatRequest }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const { prompt, workspacePath, conversationId, messages } = request.body;
+  const { prompt, workspacePath, conversationId, messages, mode: chatMode } = request.body;
 
   const exists = await verifyWorkspaceExists(workspacePath);
   if (!exists) {
@@ -134,6 +135,7 @@ export async function postChatStream(
       conversationId,
       messages,
       ac.signal,
+      chatMode,
     );
   } catch (err) {
     if (err instanceof ClientDisconnectedError) {

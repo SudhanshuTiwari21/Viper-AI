@@ -4,6 +4,7 @@ import { buildExecutionPlan, type ExecutionPlan } from "@repo/planner-agent";
 import { executePlan } from "@repo/execution-engine";
 import type { OnStreamEvent } from "@repo/execution-engine";
 import type { RequestIdentity } from "../types/request-identity.js";
+import type { ChatMode } from "../validators/request.schemas.js";
 import { validateWorkflowLog } from "../types/workflow-log-schema.js";
 // runAutonomousLoop no longer used in the streaming path (replaced by agentic loop)
 import {
@@ -21,6 +22,7 @@ import {
   selectTopK,
   CONTEXT_LIMITS,
   buildContextWindow,
+  buildRetrievalConfidence,
 } from "@repo/context-ranking";
 import { getPool } from "@repo/database";
 import { createContextAdapter } from "../adapters/context-builder.adapter.js";
@@ -46,7 +48,10 @@ import {
 import {
   readWorkspaceFile,
   listWorkspaceDirectory,
+  runWorkspaceCommand,
 } from "@repo/workspace-tools";
+import { attachAnalysisGateForEdits } from "../lib/analysis-edit-gate.js";
+import { runPostEditValidationWithOptionalAutoRepair } from "../lib/post-edit-validation.js";
 import {
   runAgenticLoop,
   buildAgenticSystemPrompt,
@@ -54,6 +59,7 @@ import {
   type AgenticLoopPausedState,
 } from "@repo/agentic-loop";
 import { workflowRuntimeConfig } from "../config/workflow-flags.js";
+import { shouldBlockEditForRetrievalConfidence } from "../lib/retrieval-edit-gate.js";
 
 const FALLBACK_NO_CONTEXT = "No relevant code found in repository.";
 
@@ -83,6 +89,14 @@ const {
   directLlmCacheTtl: DIRECT_LLM_CACHE_TTL,
   chatHistoryLimit: CHAT_HISTORY_LIMIT,
   runAnalysisWaitMs: RUN_ANALYSIS_WAIT_MS,
+  minRetrievalConfidenceForEdits: MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS,
+  enablePostEditValidation: ENABLE_POST_EDIT_VALIDATION,
+  postEditValidationCommand: POST_EDIT_VALIDATION_COMMAND,
+  postEditValidationTimeoutMs: POST_EDIT_VALIDATION_TIMEOUT_MS,
+  enablePostEditAutoRepair: ENABLE_POST_EDIT_AUTO_REPAIR,
+  postEditAutoRepairCommand: POST_EDIT_AUTO_REPAIR_COMMAND,
+  postEditAutoRepairMaxExtraValidationRuns: POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS,
+  postEditAutoRepairTimeoutMs: POST_EDIT_AUTO_REPAIR_TIMEOUT_MS,
 } = workflowRuntimeConfig;
 
 const DIRECT_LLM_SYSTEM_PROMPT =
@@ -379,7 +393,7 @@ async function retrieveEmbeddingContextWindow(
   adapter: ContextBuilderAdapter,
   entityValues: string[],
   seedTerms: string[],
-): Promise<ContextWindow> {
+): Promise<{ contextWindow: ContextWindow; confidence: ReturnType<typeof buildRetrievalConfidence> }> {
   const raw = await buildRawContext(
     repo_id,
     { embeddingSearch: seedTerms },
@@ -398,7 +412,13 @@ async function retrieveEmbeddingContextWindow(
     functions: Math.max(1, Math.round(CONTEXT_LIMITS.functions * 0.8)),
     snippets: Math.max(1, Math.round(CONTEXT_LIMITS.snippets * 1.2)),
   });
-  return buildContextWindow(bundle);
+  const contextWindow = buildContextWindow(bundle);
+  const confidence = buildRetrievalConfidence({
+    rankedCandidates: ranked,
+    bundle,
+    contextWindow,
+  });
+  return { contextWindow, confidence };
 }
 
 async function retrieveProjectSetupContext(
@@ -406,7 +426,7 @@ async function retrieveProjectSetupContext(
   query: string,
   adapter: ContextBuilderAdapter,
   entityValues: string[],
-): Promise<ContextWindow> {
+): Promise<{ contextWindow: ContextWindow; confidence: ReturnType<typeof buildRetrievalConfidence> }> {
   return retrieveEmbeddingContextWindow(
     repo_id,
     query,
@@ -421,7 +441,7 @@ async function retrieveGuidanceContext(
   query: string,
   adapter: ContextBuilderAdapter,
   entityValues: string[],
-): Promise<ContextWindow> {
+): Promise<{ contextWindow: ContextWindow; confidence: ReturnType<typeof buildRetrievalConfidence> }> {
   return retrieveEmbeddingContextWindow(
     repo_id,
     query,
@@ -429,6 +449,38 @@ async function retrieveGuidanceContext(
     entityValues,
     guidanceSeedTerms(query, entityValues),
   );
+}
+
+/**
+ * B.7 — One hybrid retrieval pass to seed `RetrievalConfidenceV1.overall` for agentic edit gating.
+ * On failure: returns overall 0 (strict gate), logs debug-only — does not throw.
+ */
+async function seedRetrievalConfidenceForAgenticEditGate(
+  repo_id: string,
+  historyAwarePrompt: string,
+  entityValues: string[],
+  onEvent: OnStreamEvent,
+): Promise<{ overall: number; schemaVersion?: string }> {
+  try {
+    const adapter =
+      resolveAdapter(repo_id) ??
+      ((await getIntentAgentAdapter()) as unknown as ContextBuilderAdapter);
+    const seedTerms = guidanceSeedTerms(historyAwarePrompt, entityValues);
+    const { confidence } = await retrieveEmbeddingContextWindow(
+      repo_id,
+      historyAwarePrompt,
+      adapter,
+      entityValues,
+      seedTerms,
+    );
+    onEvent({ type: "retrieval:confidence", data: confidence });
+    return { overall: confidence.overall, schemaVersion: confidence.schema_version };
+  } catch (err) {
+    if (DEBUG_ASSISTANT || DEBUG_WORKFLOW) {
+      log("Agentic seed retrieval failed; treating retrieval overall as 0 for edit gate", err);
+    }
+    return { overall: 0 };
+  }
 }
 
 /** Max total bytes of file content to inject into a single LLM prompt. */
@@ -836,7 +888,9 @@ export async function runAssistantPipeline(
   identity: RequestIdentity,
   conversationId?: string,
   messages: Array<{ role: "user" | "assistant"; content: string }> = [],
+  chatMode: ChatMode = "agent",
 ): Promise<AssistantPipelineResult> {
+  if (DEBUG_ASSISTANT) log("Chat pipeline (B.11 mode — tool policy deferred to step 12)", { chatMode });
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
   const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
   const historyAwarePrompt =
@@ -898,8 +952,8 @@ export async function runAssistantPipeline(
   }
 
   if (contextualDirectGuided) {
-    const mode = intentResult.intent.intentType;
-    if (DEBUG_ASSISTANT) log(`${mode}: analysis + retrieval + direct LLM`);
+    const intentType = intentResult.intent.intentType;
+    if (DEBUG_ASSISTANT) log(`${intentType}: analysis + retrieval + direct LLM`);
     const repo_id = getRepoId(workspacePath);
     await runCodebaseAnalysisIfConfigured(workspacePath, repo_id);
     const waitMs = RUN_ANALYSIS_WAIT_MS;
@@ -908,10 +962,20 @@ export async function runAssistantPipeline(
       resolveAdapter(repo_id) ??
       ((await getIntentAgentAdapter()) as unknown as ContextBuilderAdapter);
     const entities = intentResult.entities.entities.map((e) => e.value);
-    const ctx =
-      mode === "CODE_GUIDANCE"
+    const { contextWindow: ctx, confidence: retrievalConfidence } =
+      intentType === "CODE_GUIDANCE"
         ? await retrieveGuidanceContext(repo_id, historyAwarePrompt, adapter, entities)
         : await retrieveProjectSetupContext(repo_id, historyAwarePrompt, adapter, entities);
+
+    if (DEBUG_WORKFLOW) {
+      workflowLog("retrieval:confidence:computed", identity, {
+        schema_version: retrievalConfidence.schema_version,
+        overall: retrievalConfidence.overall,
+        counts: retrievalConfidence.counts,
+        ...(retrievalConfidence.signals ? { signals: retrievalConfidence.signals } : {}),
+        ...(retrievalConfidence.index_state ? { index_state: retrievalConfidence.index_state } : {}),
+      });
+    }
 
     // Enrich with actual file contents
     const { block: fileBlock } = await enrichContextSync(workspacePath, ctx.files);
@@ -921,11 +985,11 @@ export async function runAssistantPipeline(
     return await runDirectLLM(prompt, lastMessages, {
       workspaceKey,
       conversationId,
-      intentType: mode,
+      intentType,
       projectContextBlock: combinedBlock,
       contextWindow: ctx,
       workspaceContextPreamble:
-        mode === "CODE_GUIDANCE"
+        intentType === "CODE_GUIDANCE"
           ? "Workspace context (actual file contents and indexed snippets — ground your answer in this; do not invent files or APIs not shown below):\n\n"
           : "Workspace context (actual file contents and indexed snippets — use for accurate run/install commands):\n\n",
     });
@@ -1129,10 +1193,18 @@ async function runAgenticStreamPath(
   conversationId?: string,
   resumeState?: typeof pausedLoopStates extends Map<string, infer V> ? V : never,
   gateState?: { analysisReady: boolean },
+  retrievalEditGate?: { overall: number; threshold: number; schemaVersion?: string },
 ): Promise<AssistantPipelineResult & { paused?: boolean }> {
   const client = getOpenAIClient();
   const discoveryToolsUsed = new Set<string>();
   const filesReadForGate = new Set<string>();
+  /**
+   * Edit gate order in `canEdit` (B.7):
+   * 1) Analysis readiness (VIPER_REQUIRE_ANALYSIS_FOR_EDITS)
+   * 2) Minimum files read
+   * 3) Minimum discovery tool usage
+   * 4) Retrieval confidence floor (when VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS > 0)
+   */
   const tools = buildWorkspaceTools(workspacePath, {
     onCommandOutput: (chunk) => {
       onEvent({
@@ -1221,12 +1293,61 @@ async function runAgenticStreamPath(
         };
       }
 
+      if (
+        retrievalEditGate &&
+        shouldBlockEditForRetrievalConfidence(
+          retrievalEditGate.overall,
+          retrievalEditGate.threshold,
+        )
+      ) {
+        onEvent({
+          type: "workflow:gate",
+          data: {
+            gate: "edit",
+            status: "blocked",
+            tool: toolName,
+            path,
+            reason: "insufficient_retrieval_confidence",
+            metrics: {
+              filesRead: filesReadForGate.size,
+              requiredFilesRead: MIN_FILES_READ_BEFORE_EDIT,
+              discoveryCount: discoveryToolsUsed.size,
+              requiredDiscovery: MIN_DISCOVERY_TOOLS_BEFORE_EDIT,
+              analysisReady: gateState?.analysisReady ?? false,
+              retrievalOverall: retrievalEditGate.overall,
+              retrievalThreshold: retrievalEditGate.threshold,
+              ...(retrievalEditGate.schemaVersion
+                ? { confidenceSchemaVersion: retrievalEditGate.schemaVersion }
+                : {}),
+            },
+          },
+        });
+        workflowLog("edit-gate:blocked", identity, {
+          toolName,
+          path,
+          reason: "insufficient_retrieval_confidence",
+          retrievalOverall: retrievalEditGate.overall,
+          retrievalThreshold: retrievalEditGate.threshold,
+        });
+        return {
+          allowed: false as const,
+          reason:
+            "Retrieval confidence is below the configured threshold. Read or search more targeted files and retry.",
+        };
+      }
+
       workflowLog("edit-gate:passed", identity, {
         toolName,
         path,
         filesRead: filesReadForGate.size,
         discoveryCount: discoveryToolsUsed.size,
         analysisReady: gateState?.analysisReady ?? false,
+        ...(retrievalEditGate && retrievalEditGate.threshold > 0
+          ? {
+              retrievalOverall: retrievalEditGate.overall,
+              retrievalThreshold: retrievalEditGate.threshold,
+            }
+          : {}),
       });
       onEvent({
         type: "workflow:gate",
@@ -1241,6 +1362,15 @@ async function runAgenticStreamPath(
             discoveryCount: discoveryToolsUsed.size,
             requiredDiscovery: MIN_DISCOVERY_TOOLS_BEFORE_EDIT,
             analysisReady: gateState?.analysisReady ?? false,
+            ...(retrievalEditGate && retrievalEditGate.threshold > 0
+              ? {
+                  retrievalOverall: retrievalEditGate.overall,
+                  retrievalThreshold: retrievalEditGate.threshold,
+                  ...(retrievalEditGate.schemaVersion
+                    ? { confidenceSchemaVersion: retrievalEditGate.schemaVersion }
+                    : {}),
+                }
+              : {}),
           },
         },
       });
@@ -1343,6 +1473,30 @@ async function runAgenticStreamPath(
           args: {},
           resultSummary: summary.slice(0, 200),
           durationMs,
+        });
+      }
+
+      if (
+        ENABLE_POST_EDIT_VALIDATION &&
+        (name === "edit_file" || name === "create_file") &&
+        !summary.startsWith("Tool error:")
+      ) {
+        void runPostEditValidationWithOptionalAutoRepair({
+          workspacePath,
+          command: POST_EDIT_VALIDATION_COMMAND,
+          timeoutMs: POST_EDIT_VALIDATION_TIMEOUT_MS,
+          toolName: name,
+          onEvent,
+          identity,
+          workflowLog,
+          debugWorkflow: DEBUG_WORKFLOW,
+          runWorkspaceCommand,
+          enableAutoRepair: ENABLE_POST_EDIT_AUTO_REPAIR,
+          autoRepairCommand: POST_EDIT_AUTO_REPAIR_COMMAND,
+          autoRepairTimeoutMs: POST_EDIT_AUTO_REPAIR_TIMEOUT_MS,
+          maxExtraValidationRuns: POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS,
+        }).catch((err) => {
+          if (DEBUG_ASSISTANT) log("Post-edit validation orchestration failed", err);
         });
       }
     },
@@ -1449,10 +1603,11 @@ export async function runAssistantStreamPipeline(
   conversationId?: string,
   messages: Array<{ role: "user" | "assistant"; content: string }> = [],
   signal?: AbortSignal,
+  chatMode: ChatMode = "agent",
 ): Promise<void> {
   ensureDbMemoryAdapter();
   const requestStart = Date.now();
-  workflowLog("request:start", identity);
+  workflowLog("request:start", identity, { mode: chatMode });
 
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
   const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
@@ -1467,22 +1622,90 @@ export async function runAssistantStreamPipeline(
     const resumeState = pausedLoopStates.get(conversationId)!;
     pausedLoopStates.delete(conversationId);
 
-    workflowLog("request:resume", identity, { step: resumeState.stepNumber });
+    workflowLog("request:resume", identity, { step: resumeState.stepNumber, mode: chatMode });
     if (DEBUG_ASSISTANT) log("Resuming paused agentic loop", { conversationId, step: resumeState.stepNumber });
 
     onEvent({ type: "intent", data: resumeState.intentSummary });
 
+    let historyForSeed =
+      lastMessages.length > 0
+        ? `${lastMessages
+            .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+            .join("\n")}\nUser: ${prompt}`
+        : prompt;
+    if (memKey) {
+      historyForSeed = injectMemoryIntoPrompt(historyForSeed, memKey);
+    }
+
+    const repo_id_resume = getRepoId(workspacePath);
+    const gateStateResume = { analysisReady: false };
+    const analysisPromiseResume = attachAnalysisGateForEdits(
+      workspacePath,
+      repo_id_resume,
+      gateStateResume,
+    );
+    const resumeAnalysisWarmupStart = Date.now();
+    // Resume path: skip STREAM_ANALYSIS_WARMUP_MS / withStreamKeepalivesDuring — the user is
+    // continuing a paused session; do not delay the resumed agent loop with the same warmup
+    // window used for a fresh agentic turn (analysis still runs in the background via
+    // attachAnalysisGateForEdits, same as the main path).
+    analysisPromiseResume
+      .then((ran) => {
+        if (ran) gateStateResume.analysisReady = true;
+        workflowLog("analysis:background:complete", identity, {
+          ran,
+          elapsedMs: Date.now() - resumeAnalysisWarmupStart,
+        });
+      })
+      .catch((err) => {
+        workflowLog("analysis:background:error", identity, {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+    let retrievalEditGateResume:
+      | { overall: number; threshold: number; schemaVersion?: string }
+      | undefined;
+    if (MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS > 0) {
+      const seeded = await withAbort(
+        seedRetrievalConfidenceForAgenticEditGate(
+          repo_id_resume,
+          historyForSeed,
+          [],
+          onEvent,
+        ),
+        signal,
+      );
+      retrievalEditGateResume = {
+        overall: seeded.overall,
+        threshold: MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS,
+        ...(seeded.schemaVersion ? { schemaVersion: seeded.schemaVersion } : {}),
+      };
+    }
+
     const agenticResult = await withAbort(
       runAgenticStreamPath(
-        prompt, lastMessages, workspacePath, onEvent,
-        resumeState.intentSummary, identity, signal, conversationId, resumeState,
+        prompt,
+        lastMessages,
+        workspacePath,
+        onEvent,
+        resumeState.intentSummary,
+        identity,
+        signal,
+        conversationId,
+        resumeState,
+        gateStateResume,
+        retrievalEditGateResume,
       ),
       signal,
     );
 
     onEvent({ type: "result", data: agenticResult });
     onEvent({ type: "done", data: {} });
-    workflowLog("request:complete", identity, { latency_ms: Date.now() - requestStart });
+    workflowLog("request:complete", identity, {
+      latency_ms: Date.now() - requestStart,
+      mode: chatMode,
+    });
     return;
   }
 
@@ -1540,7 +1763,10 @@ export async function runAssistantStreamPipeline(
     );
     onEvent({ type: "result", data: result });
     onEvent({ type: "done", data: {} });
-    workflowLog("request:complete", identity, { latency_ms: Date.now() - requestStart });
+    workflowLog("request:complete", identity, {
+      latency_ms: Date.now() - requestStart,
+      mode: chatMode,
+    });
     return;
   }
 
@@ -1555,15 +1781,8 @@ export async function runAssistantStreamPipeline(
     repo_id,
     warmupMs: STREAM_ANALYSIS_WARMUP_MS,
   });
-  const analysisPromise = runCodebaseAnalysisIfConfigured(workspacePath, repo_id);
   const gateState = { analysisReady: false };
-  analysisPromise
-    .then((ran) => {
-      gateState.analysisReady = Boolean(ran);
-    })
-    .catch(() => {
-      gateState.analysisReady = false;
-    });
+  const analysisPromise = attachAnalysisGateForEdits(workspacePath, repo_id, gateState);
   const warmupStart = Date.now();
   try {
     if (STREAM_ANALYSIS_WARMUP_MS > 0) {
@@ -1611,6 +1830,27 @@ export async function runAssistantStreamPipeline(
     }
   }
 
+  let retrievalEditGate:
+    | { overall: number; threshold: number; schemaVersion?: string }
+    | undefined;
+  if (MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS > 0) {
+    const entityValues = intentResult.entities.entities.map((e) => e.value);
+    const seeded = await withAbort(
+      seedRetrievalConfidenceForAgenticEditGate(
+        repo_id,
+        historyAwarePrompt,
+        entityValues,
+        onEvent,
+      ),
+      signal,
+    );
+    retrievalEditGate = {
+      overall: seeded.overall,
+      threshold: MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS,
+      ...(seeded.schemaVersion ? { schemaVersion: seeded.schemaVersion } : {}),
+    };
+  }
+
   workflowLog("agentic-loop:start", identity);
   const agenticResult = await withAbort(
     runAgenticStreamPath(
@@ -1624,6 +1864,7 @@ export async function runAssistantStreamPipeline(
       conversationId,
       undefined,
       gateState,
+      retrievalEditGate,
     ),
     signal,
   );
@@ -1631,7 +1872,10 @@ export async function runAssistantStreamPipeline(
 
   onEvent({ type: "result", data: agenticResult });
   onEvent({ type: "done", data: {} });
-  workflowLog("request:complete", identity, { latency_ms: Date.now() - requestStart });
+  workflowLog("request:complete", identity, {
+    latency_ms: Date.now() - requestStart,
+    mode: chatMode,
+  });
 }
 
 export interface ContextDebugResult {

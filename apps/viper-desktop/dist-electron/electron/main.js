@@ -32,6 +32,11 @@ function init() {
         const full = path_1.default.isAbsolute(relPath) ? relPath : path_1.default.join(workspaceRoot, relPath);
         electron_1.shell.showItemInFolder(full);
     });
+    electron_1.ipcMain.handle("shell:openExternal", (_e, url) => {
+        if (typeof url !== "string" || !url.trim())
+            return;
+        return electron_1.shell.openExternal(url.trim());
+    });
     mainWindow = (0, window_1.createMainWindow)(isDev);
     // macOS application menu – let Electron generate the standard app menu
     // (it will automatically use app.name, which we've set to "Viper AI").

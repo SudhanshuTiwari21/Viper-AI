@@ -12,6 +12,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           prompt: { type: "string" },
           workspacePath: { type: "string" },
           conversationId: { type: "string" },
+          /** Coercion/enum: Zod `ChatRequestSchema` is authoritative (allows e.g. `ASK` → `ask`). */
+          mode: { type: "string" },
           messages: {
             type: "array",
             maxItems: 10,
@@ -49,6 +51,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           prompt: { type: "string" },
           workspacePath: { type: "string" },
           conversationId: { type: "string" },
+          mode: { type: "string" },
           messages: {
             type: "array",
             maxItems: 10,

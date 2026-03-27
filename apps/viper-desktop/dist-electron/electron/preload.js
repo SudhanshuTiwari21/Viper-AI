@@ -48,6 +48,7 @@ electron_1.contextBridge.exposeInMainWorld("viper", {
     },
     shell: {
         revealInFolder: (workspaceRoot, relPath) => electron_1.ipcRenderer.invoke("shell:revealInFolder", workspaceRoot, relPath),
+        openExternal: (url) => electron_1.ipcRenderer.invoke("shell:openExternal", url),
     },
     extensions: {
         scan: () => electron_1.ipcRenderer.invoke("extensions:scan"),

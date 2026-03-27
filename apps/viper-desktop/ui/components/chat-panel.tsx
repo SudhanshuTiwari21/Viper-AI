@@ -21,6 +21,7 @@ import {
   formatScanReport,
   applyPatch as apiApplyPatch,
   rejectPatch as apiRejectPatch,
+  buildV2rayTunSubscriptionImportDeepLink,
   type ChatResponse,
 } from "../services/agent-api";
 import { filterPatchByHunks, buildInitialHunkStatuses } from "../lib/filter-patch";
@@ -237,6 +238,10 @@ export function ChatPanel() {
                 break;
               }
 
+              case "retrieval:confidence":
+                // B.6: structured ranking confidence — UI parity deferred; ignore without breaking stream.
+                break;
+
               case "context:retrieved": {
                 const d = event.data as {
                   files?: string[] | number;
@@ -283,6 +288,17 @@ export function ChatPanel() {
                 break;
               }
 
+              case "validation:started":
+              case "validation:passed":
+              case "validation:failed":
+                // B.8: optional narration later; swallow so unknown-event handling never breaks the stream.
+                break;
+
+              case "auto-repair:attempt":
+              case "auto-repair:result":
+                // B.9 (WS9): bounded shell repair after validation failure; safe no-op for the desktop parser.
+                break;
+
               case "workflow:gate": {
                 const d = event.data as {
                   gate: "edit";
@@ -294,6 +310,9 @@ export function ChatPanel() {
                     discoveryCount?: number;
                     requiredDiscovery?: number;
                     analysisReady?: boolean;
+                    retrievalOverall?: number;
+                    retrievalThreshold?: number;
+                    confidenceSchemaVersion?: string;
                   };
                 };
                 if (d.gate === "edit") {
@@ -305,6 +324,8 @@ export function ChatPanel() {
                           ? `Read more files before editing (${d.metrics?.filesRead ?? 0}/${d.metrics?.requiredFilesRead ?? 0}).`
                           : d.reason === "insufficient_discovery"
                             ? `Run discovery first (${d.metrics?.discoveryCount ?? 0}/${d.metrics?.requiredDiscovery ?? 0}).`
+                            : d.reason === "insufficient_retrieval_confidence"
+                              ? `Retrieval confidence too low (${(d.metrics?.retrievalOverall ?? 0).toFixed(2)} / required ${(d.metrics?.retrievalThreshold ?? 0).toFixed(2)}). Read or search more targeted files and retry.`
                             : "Edit is currently blocked by workflow policy.";
                     setActionNarration(sid, assistantId, label);
                   } else {
@@ -712,6 +733,29 @@ export function ChatPanel() {
                 <Scan size={14} className="text-v-text3" />
                 Scan only (Repo Scanner)
               </button>
+              {import.meta.env.VITE_SUBSCRIPTION_IMPORT_URL ? (
+                <button
+                  type="button"
+                  className="v-press w-full text-left px-3 py-2 text-xs text-v-text hover:bg-white/[0.04] flex items-center gap-2"
+                  title="Opens v2RayTun via the deep link from docs.v2raytun.com/deep-link. Set VITE_SUBSCRIPTION_PUBLIC_ORIGIN if the URL uses localhost."
+                  onClick={() => {
+                    const subUrl = import.meta.env.VITE_SUBSCRIPTION_IMPORT_URL as string;
+                    const deepLink = buildV2rayTunSubscriptionImportDeepLink(subUrl);
+                    const open = window.viper?.shell?.openExternal;
+                    if (open) {
+                      void open(deepLink).catch(() => {
+                        window.location.href = deepLink;
+                      });
+                    } else {
+                      window.location.href = deepLink;
+                    }
+                    setActionsOpen(false);
+                  }}
+                >
+                  <Code2 size={14} className="text-v-accent" />
+                  Open subscription in v2RayTun
+                </button>
+              ) : null}
             </div>
           )}
         </div>

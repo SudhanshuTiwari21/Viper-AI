@@ -33,6 +33,11 @@ function init(): void {
     shell.showItemInFolder(full);
   });
 
+  ipcMain.handle("shell:openExternal", (_e, url: string) => {
+    if (typeof url !== "string" || !url.trim()) return;
+    return shell.openExternal(url.trim());
+  });
+
   mainWindow = createMainWindow(isDev);
 
   // macOS application menu – let Electron generate the standard app menu

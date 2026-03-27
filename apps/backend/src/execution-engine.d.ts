@@ -1,6 +1,6 @@
 declare module "@repo/execution-engine" {
   import type { ContextBuilderAdapter } from "@repo/context-builder";
-  import type { ContextWindow } from "@repo/context-ranking";
+  import type { ContextWindow, RetrievalConfidenceV1 } from "@repo/context-ranking";
 
   export interface ExecutionPlan {
     intent: string;
@@ -58,6 +58,7 @@ declare module "@repo/execution-engine" {
     | { type: "step:complete"; data: { stepId: string; stepType: string; durationMs: number } }
     | { type: "step:skip"; data: { stepId: string; stepType: string; reason: string } }
     | { type: "context:retrieved"; data: { files: number; functions: number; tokens: number } }
+    | { type: "retrieval:confidence"; data: RetrievalConfidenceV1 }
     | {
         type: "context:explored";
         data: {
@@ -100,10 +101,38 @@ declare module "@repo/execution-engine" {
             discoveryCount?: number;
             requiredDiscovery?: number;
             analysisReady?: boolean;
+            retrievalOverall?: number;
+            retrievalThreshold?: number;
+            confidenceSchemaVersion?: string;
           };
         };
       }
     | { type: "step:awaiting_approval"; data: { summary: string; editedFiles: string[]; stepNumber: number } }
+    | { type: "validation:started"; data: { command: string; tool?: string } }
+    | { type: "validation:passed"; data: { exitCode: 0; summary: string } }
+    | { type: "validation:failed"; data: { exitCode: number; error: string } }
+    | {
+        type: "auto-repair:attempt";
+        data: {
+          cycle: number;
+          tool?: string;
+          command?: string;
+          skipped?: boolean;
+          reason?: string;
+        };
+      }
+    | {
+        type: "auto-repair:result";
+        data: {
+          cycle: number;
+          success: boolean;
+          skipped?: boolean;
+          exitCode?: number;
+          summary?: string;
+          reason?: string;
+          error?: string;
+        };
+      }
     | { type: "reasoning:start"; data: Record<string, never> }
     | { type: "reasoning:complete"; data: Record<string, never> }
     | { type: "result"; data: unknown }

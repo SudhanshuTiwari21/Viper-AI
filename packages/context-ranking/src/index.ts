@@ -17,3 +17,9 @@ export {
   CONTEXT_TOKEN_BUDGET,
 } from "./context-window-builder/build-context-window.js";
 export type { ContextWindow } from "./context-window-builder/context-window.types.js";
+
+export {
+  buildRetrievalConfidence,
+  RETRIEVAL_CONFIDENCE_SCHEMA_VERSION,
+} from "./retrieval-confidence/build-retrieval-confidence.js";
+export type { RetrievalConfidenceV1 } from "./retrieval-confidence/build-retrieval-confidence.js";

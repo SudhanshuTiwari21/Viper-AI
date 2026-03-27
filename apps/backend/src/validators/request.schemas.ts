@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** B.11 chat / interaction mode (tool policy enforcement is step 12 — schema only here). */
+export const ChatModeSchema = z.enum(["ask", "plan", "debug", "agent"]);
+export type ChatMode = z.infer<typeof ChatModeSchema>;
+
 /** Strip empty history rows so clients don’t 400 after failed streams leave content: "". */
 function sanitizeChatMessages(data: unknown): unknown {
   if (typeof data !== "object" || data === null) return data;
@@ -38,6 +42,11 @@ export const ChatRequestSchema = z.preprocess(
       )
       .max(10)
       .optional(),
+    /** Omitted → `agent` (backward compatible with pre–B.11 clients). Trimmed + lowercased before enum check. */
+    mode: z.preprocess((raw) => {
+      if (raw === undefined || raw === null || raw === "") return "agent";
+      return String(raw).trim().toLowerCase();
+    }, ChatModeSchema),
   }),
 );
 

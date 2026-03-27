@@ -7,6 +7,7 @@ import {
   selectTopK,
   CONTEXT_LIMITS,
   buildContextWindow,
+  buildRetrievalConfidence,
 } from "@repo/context-ranking";
 import type { ToolInput, ToolOutput } from "./tool.types";
 import type { ExecutionContext } from "../engine/execution.types";
@@ -51,11 +52,17 @@ export async function runContextTool(
     snippets: Math.max(1, Math.round(CONTEXT_LIMITS.snippets * depth)),
   });
   const window = buildContextWindow(bundle);
+  const confidence = buildRetrievalConfidence({
+    rankedCandidates: ranked,
+    bundle,
+    contextWindow: window,
+  });
 
   ctx.logs.push(
     `[Viper] context tool ${input.type} iteration=${iter} topK depth≈${depth.toFixed(2)}`,
   );
 
+  ctx.onEvent?.({ type: "retrieval:confidence", data: confidence });
   ctx.onEvent?.({
     type: "context:retrieved",
     data: {

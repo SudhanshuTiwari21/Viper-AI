@@ -16,6 +16,10 @@ const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-
 const QDRANT_COLLECTION = process.env.QDRANT_COLLECTION ?? "viper_code";
 const SEARCH_LIMIT = 20;
 
+/** Test / observability alignment — same values as used in `searchEmbeddings`. */
+export const CONTEXT_ADAPTER_QDRANT_COLLECTION = QDRANT_COLLECTION;
+export const CONTEXT_ADAPTER_EMBEDDING_SEARCH_LIMIT = SEARCH_LIMIT;
+
 export interface ContextAdapterOptions {
   repo_id: string;
   pool: Pool;

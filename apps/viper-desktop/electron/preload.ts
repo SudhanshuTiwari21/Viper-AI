@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("viper", {
   shell: {
     revealInFolder: (workspaceRoot: string, relPath: string) =>
       ipcRenderer.invoke("shell:revealInFolder", workspaceRoot, relPath) as Promise<void>,
+    openExternal: (url: string) =>
+      ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
   },
   extensions: {
     scan: () =>

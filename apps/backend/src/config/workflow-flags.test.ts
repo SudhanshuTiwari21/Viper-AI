@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseWorkflowRuntimeConfig } from "./workflow-flags.js";
+import {
+  parseWorkflowRuntimeConfig,
+  parseMinRetrievalConfidenceForEdits,
+  parsePostEditAutoRepairMaxExtraValidationRuns,
+} from "./workflow-flags.js";
 
 function env(partial: Record<string, string | undefined>): NodeJS.ProcessEnv {
   return { ...partial } as NodeJS.ProcessEnv;
@@ -22,6 +26,14 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(c.runAnalysisWaitMs).toBe(12000);
     expect(c.modeDefault).toBeUndefined();
     expect(c.modelRouteDefault).toBeUndefined();
+    expect(c.minRetrievalConfidenceForEdits).toBe(0);
+    expect(c.enablePostEditValidation).toBe(false);
+    expect(c.postEditValidationCommand).toBe("npm run check-types");
+    expect(c.postEditValidationTimeoutMs).toBe(30000);
+    expect(c.enablePostEditAutoRepair).toBe(false);
+    expect(c.postEditAutoRepairCommand).toBe("");
+    expect(c.postEditAutoRepairMaxExtraValidationRuns).toBe(1);
+    expect(c.postEditAutoRepairTimeoutMs).toBe(30000);
   });
 
   it("VIPER_DEBUG_ASSISTANT and VIPER_DEBUG_WORKFLOW only when === \"1\"", () => {
@@ -96,5 +108,70 @@ describe("parseWorkflowRuntimeConfig", () => {
   it("invalid int: preserves NaN through Math.max like prior code (non-throwing)", () => {
     const c = parseWorkflowRuntimeConfig(env({ VIPER_STREAM_ANALYSIS_WARMUP_MS: "not-a-number" }));
     expect(Number.isNaN(c.streamAnalysisWarmupMs)).toBe(true);
+  });
+
+  it("VIPER_ENABLE_POST_EDIT_VALIDATION and post-edit command defaults", () => {
+    expect(parseWorkflowRuntimeConfig(env({})).enablePostEditValidation).toBe(false);
+    expect(
+      parseWorkflowRuntimeConfig(env({ VIPER_ENABLE_POST_EDIT_VALIDATION: "true" }))
+        .enablePostEditValidation,
+    ).toBe(true);
+    expect(parseWorkflowRuntimeConfig(env({})).postEditValidationCommand).toBe("npm run check-types");
+    expect(
+      parseWorkflowRuntimeConfig(
+        env({ VIPER_POST_EDIT_VALIDATION_COMMAND: "  pnpm run lint  " }),
+      ).postEditValidationCommand,
+    ).toBe("pnpm run lint");
+    expect(
+      parseWorkflowRuntimeConfig(env({ VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS: "5000" }))
+        .postEditValidationTimeoutMs,
+    ).toBe(5000);
+  });
+
+  it("B.9 auto-repair flags and max-extra clamp 1–3", () => {
+    expect(
+      parseWorkflowRuntimeConfig(env({ VIPER_ENABLE_POST_EDIT_AUTO_REPAIR: "true" }))
+        .enablePostEditAutoRepair,
+    ).toBe(true);
+    expect(
+      parseWorkflowRuntimeConfig(
+        env({ VIPER_POST_EDIT_AUTO_REPAIR_COMMAND: "  npm run lint --fix  " }),
+      ).postEditAutoRepairCommand,
+    ).toBe("npm run lint --fix");
+    expect(parsePostEditAutoRepairMaxExtraValidationRuns(env({}))).toBe(1);
+    expect(parsePostEditAutoRepairMaxExtraValidationRuns(env({ VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS: "3" }))).toBe(3);
+    expect(parsePostEditAutoRepairMaxExtraValidationRuns(env({ VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS: "99" }))).toBe(3);
+    expect(parsePostEditAutoRepairMaxExtraValidationRuns(env({ VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS: "0" }))).toBe(1);
+    expect(parsePostEditAutoRepairMaxExtraValidationRuns(env({ VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS: "bogus" }))).toBe(1);
+    const c = parseWorkflowRuntimeConfig(
+      env({
+        VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS: "7000",
+      }),
+    );
+    expect(c.postEditAutoRepairTimeoutMs).toBe(7000);
+    expect(
+      parseWorkflowRuntimeConfig(
+        env({
+          VIPER_POST_EDIT_VALIDATION_TIMEOUT_MS: "7000",
+          VIPER_POST_EDIT_AUTO_REPAIR_TIMEOUT_MS: "5000",
+        }),
+      ).postEditAutoRepairTimeoutMs,
+    ).toBe(5000);
+  });
+
+  it("VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: default 0, clamp [0,1], invalid → 0", () => {
+    expect(parseMinRetrievalConfidenceForEdits(env({}))).toBe(0);
+    expect(
+      parseMinRetrievalConfidenceForEdits(env({ VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: "0.55" })),
+    ).toBe(0.55);
+    expect(
+      parseMinRetrievalConfidenceForEdits(env({ VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: "2" })),
+    ).toBe(1);
+    expect(
+      parseMinRetrievalConfidenceForEdits(env({ VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: "-0.5" })),
+    ).toBe(0);
+    expect(
+      parseMinRetrievalConfidenceForEdits(env({ VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: "bogus" })),
+    ).toBe(0);
   });
 });
