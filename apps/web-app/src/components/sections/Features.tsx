@@ -58,7 +58,7 @@ function useFadeIn() {
 function UnifiedContext() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-black p-12 md:p-20 flex flex-col justify-between">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 flex flex-col justify-between hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
@@ -67,10 +67,10 @@ function UnifiedContext() {
         <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
           01 / Unified Context
         </span>
-        <h2 className="text-4xl font-medium tracking-tight mb-6">
+        <h2 className="text-4xl font-bold tracking-tight mb-6">
           Everything in one context.
         </h2>
-        <p className="text-neutral-400 text-lg leading-relaxed max-w-md font-light">
+        <p className="text-neutral-400 text-lg leading-relaxed max-w-md font-normal">
           Viper connects product requirements, codebase architecture, and
           development workflow into a single intelligent layer. Every part
           of the system understands what you&apos;re building — and why.
@@ -98,7 +98,7 @@ function UnifiedContext() {
 function CodebaseIntelligence() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-black p-12 md:p-20 flex flex-col justify-between">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 flex flex-col justify-between hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
@@ -107,10 +107,10 @@ function CodebaseIntelligence() {
         <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
           02 / Codebase Intelligence
         </span>
-        <h2 className="text-4xl font-medium tracking-tight mb-6">
+        <h2 className="text-4xl font-bold tracking-tight mb-6">
           AI that reads the system.
         </h2>
-        <p className="text-neutral-400 text-lg leading-relaxed max-w-md font-light">
+        <p className="text-neutral-400 text-lg leading-relaxed max-w-md font-normal">
           Viper maps your entire codebase before making a single change.
           Dependencies traced. Architecture understood. Context never lost.
         </p>
@@ -121,12 +121,12 @@ function CodebaseIntelligence() {
         transition={{ duration: 0.55, delay: 0.2, ease: [0.25, 0.4, 0.25, 1] }}
         className="mt-12 grid grid-cols-2 gap-4"
       >
-        <div className="p-6 border border-border-muted hover:border-border-active transition-colors">
+        <div className="p-6 border border-white/10 rounded-xl hover:border-white/20 transition-colors">
           <span className="text-white mb-4 block"><IconGraph /></span>
           <h4 className="text-xs font-bold uppercase tracking-widest mb-1">Deep Analysis</h4>
           <p className="text-[11px] text-neutral-500">Full codebase indexing</p>
         </div>
-        <div className="p-6 border border-border-muted hover:border-border-active transition-colors">
+        <div className="p-6 border border-white/10 rounded-xl hover:border-white/20 transition-colors">
           <span className="text-white mb-4 block"><IconDeps /></span>
           <h4 className="text-xs font-bold uppercase tracking-widest mb-1">Multi-file Context</h4>
           <p className="text-[11px] text-neutral-500">Dependency-aware reasoning</p>
@@ -139,7 +139,7 @@ function CodebaseIntelligence() {
 function IntentToCode() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-black p-12 md:p-20 md:col-span-2 border-t border-border-muted">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 md:col-span-2 hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <div className="grid md:grid-cols-2 gap-12 items-end">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -149,10 +149,10 @@ function IntentToCode() {
           <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
             03 / Intent to Code
           </span>
-          <h2 className="text-5xl font-medium tracking-tight mb-6 leading-none">
+          <h2 className="text-5xl font-bold tracking-tight mb-6 leading-none">
             Describe it. Viper builds it.
           </h2>
-          <p className="text-neutral-400 text-lg leading-relaxed max-w-lg font-light">
+          <p className="text-neutral-400 text-lg leading-relaxed max-w-lg font-normal">
             Write high-level intent. Viper understands the system, identifies
             which files need to change, plans the implementation, and executes
             it end-to-end — without losing context.
@@ -196,7 +196,7 @@ const LOG_LINES = [
 function DevelopmentLoop() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-black p-12 md:p-20 md:col-span-2 border-t border-border-muted">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 md:col-span-2 hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <div className="grid md:grid-cols-5 gap-12">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -207,10 +207,10 @@ function DevelopmentLoop() {
           <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-500 mb-8 block">
             04 / The Development Loop
           </span>
-          <h2 className="text-4xl font-medium tracking-tight mb-6">
+          <h2 className="text-4xl font-bold tracking-tight mb-6">
             Idea to production, connected.
           </h2>
-          <p className="text-neutral-400 text-lg leading-relaxed font-light mb-10">
+          <p className="text-neutral-400 text-lg leading-relaxed font-normal mb-10">
             The gap between product intent and shipping code is where context
             dies. Viper closes that gap — keeping every layer aligned from
             first prompt to last commit.
@@ -221,7 +221,7 @@ function DevelopmentLoop() {
           initial={{ opacity: 0, y: 20 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.55, delay: 0.15, ease: [0.25, 0.4, 0.25, 1] }}
-          className="md:col-span-3 border border-border-muted bg-[#050505] p-6 font-mono text-[12px]"
+          className="md:col-span-3 border border-white/10 bg-[#050505] rounded-xl p-6 font-mono text-[12px]"
         >
           <div className="flex items-center gap-2 mb-6 text-neutral-600">
             <IconTerminal />
@@ -258,9 +258,9 @@ function DevelopmentLoop() {
 
 export default function Features() {
   return (
-    <section className="py-32 px-8 border-t border-border-muted">
+    <section className="py-32 px-8 border-t border-border-muted font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border-muted border border-border-muted">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <UnifiedContext />
           <CodebaseIntelligence />
           <IntentToCode />

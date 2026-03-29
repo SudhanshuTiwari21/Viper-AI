@@ -9,13 +9,13 @@ export default function CTA() {
   const isInView = useInView(ref, { once: true, margin: '-80px' })
 
   return (
-    <section ref={ref} className="py-48 px-8 border-t border-border-muted">
+    <section ref={ref} className="py-48 px-8 border-t border-border-muted font-sans">
       <div className="max-w-3xl mx-auto text-center">
         <motion.h2
           initial={{ opacity: 0, y: 28 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.6, ease: [0.25, 0.4, 0.25, 1] }}
-          className="text-5xl md:text-6xl font-medium tracking-tight mb-8 leading-none"
+          className="text-5xl md:text-6xl font-bold tracking-tight mb-8 leading-none"
         >
           Build differently.
         </motion.h2>
@@ -23,7 +23,7 @@ export default function CTA() {
           initial={{ opacity: 0, y: 18 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.6, delay: 0.15, ease: [0.25, 0.4, 0.25, 1] }}
-          className="text-neutral-400 text-lg mb-12 font-light max-w-lg mx-auto leading-relaxed"
+          className="text-neutral-400 text-lg mb-12 max-w-lg mx-auto leading-relaxed"
         >
           Viper is in early access. Join the waitlist and help define the next
           generation of engineering tooling.
