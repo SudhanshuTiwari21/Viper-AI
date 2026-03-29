@@ -80,7 +80,7 @@ export default function Hero() {
   }, [titleIndex])
 
   return (
-    <section className="relative min-h-screen pt-16 pb-16 px-8 overflow-hidden flex items-center">
+    <section className="relative min-h-screen pt-16 pb-16 px-8 overflow-hidden flex items-center font-sans">
       {/* Infinite grid background */}
       <InfiniteGrid />
 
@@ -124,7 +124,7 @@ export default function Hero() {
           </h1>
 
           {/* Subheading */}
-          <p className="text-base md:text-lg text-neutral-400 mb-10 max-w-md font-light leading-relaxed">
+          <p className="text-base md:text-lg text-neutral-400 mb-10 max-w-md leading-relaxed">
             Viper is an autonomous engineering operating system that transforms
             high-level intent into production-ready software.
           </p>

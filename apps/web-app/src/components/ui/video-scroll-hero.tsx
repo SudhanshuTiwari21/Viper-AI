@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 
 interface VideoScrollHeroProps {
@@ -91,7 +91,7 @@ export function VideoScrollHero({
 
       {/* Next Section — Problem Cards */}
       <motion.section
-        className="relative bg-muted -mt-8 rounded-t-3xl min-h-screen"
+        className="relative bg-muted -mt-8 rounded-t-3xl min-h-screen font-sans"
         initial={{ opacity: 0, y: 50 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: '-100px' }}
@@ -133,7 +133,7 @@ export function VideoScrollHero({
             ].map((item, index) => (
               <motion.div
                 key={item.id}
-                className="bg-[#111111] p-8 rounded-lg border border-white/8 shadow-lg flex flex-col gap-0 h-full"
+                className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-8 shadow-lg flex flex-col gap-0 h-full hover:border-white/25 hover:bg-[#111111] transition-all duration-300"
                 initial={{ opacity: 0, y: 30, scale: 0.95 }}
                 whileInView={{ opacity: 1, y: 0, scale: 1 }}
                 viewport={{ once: true }}
@@ -153,10 +153,10 @@ export function VideoScrollHero({
                 <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-8 block">
                   {item.id}
                 </span>
-                <h3 className="text-xl font-semibold text-foreground leading-snug mb-6 min-h-14">
+                <h3 className="text-xl font-bold text-white leading-snug mb-6 min-h-14">
                   {item.title}
                 </h3>
-                <p className="text-muted-foreground text-sm leading-relaxed flex-1">
+                <p className="text-muted-foreground text-xs leading-relaxed flex-1">
                   {item.body}
                 </p>
               </motion.div>
