@@ -23,12 +23,13 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(c.resolvedModelId).toBe("gpt-4o-mini");
     expect(c.resolvedModelProvider).toBe("openai");
     expect(c.resolvedModelTier).toBeTruthy();
+    expect(c.modelRouteDefault).toBe("pinned");
     expect(c.disableLlmCache).toBe(false);
     expect(c.directLlmCacheTtl).toBe(900);
     expect(c.chatHistoryLimit).toBe(10);
     expect(c.runAnalysisWaitMs).toBe(12000);
     expect(c.modeDefault).toBeUndefined();
-    expect(c.modelRouteDefault).toBeUndefined();
+    expect(c.modelRouteLabelDefault).toBeUndefined();
     expect(c.minRetrievalConfidenceForEdits).toBe(0);
     expect(c.enablePostEditValidation).toBe(false);
     expect(c.postEditValidationCommand).toBe("npm run check-types");
@@ -48,6 +49,13 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(unknown.openaiModel).toBe("definitely-not-real");
     // fallback = registry fast default
     expect(unknown.resolvedModelId).toBe("gpt-4o-mini");
+  });
+
+  it("VIPER_MODEL_ROUTE_DEFAULT supports auto (default pinned)", () => {
+    expect(parseWorkflowRuntimeConfig(env({})).modelRouteDefault).toBe("pinned");
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "auto" })).modelRouteDefault).toBe("auto");
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "AUTO" })).modelRouteDefault).toBe("auto");
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "something-else" })).modelRouteDefault).toBe("pinned");
   });
 
   it("VIPER_DEBUG_ASSISTANT and VIPER_DEBUG_WORKFLOW only when === \"1\"", () => {

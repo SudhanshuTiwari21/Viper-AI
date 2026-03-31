@@ -47,6 +47,8 @@ export interface WorkflowRuntimeConfig {
   readonly resolvedModelId: string;
   readonly resolvedModelProvider: string;
   readonly resolvedModelTier: string;
+  /** D.17: model router default mode (preserve existing behavior by default). */
+  readonly modelRouteDefault: "pinned" | "auto";
   readonly disableLlmCache: boolean;
   readonly directLlmCacheTtl: number;
   readonly chatHistoryLimit: number;
@@ -59,7 +61,7 @@ export interface WorkflowRuntimeConfig {
   /**
    * Forward-compat for A.5 (model route / tier label). Not wired to env yet.
    */
-  readonly modelRouteDefault: string | undefined;
+  readonly modelRouteLabelDefault: string | undefined;
   /** B.7: min hybrid retrieval `overall` to allow edits; 0 = disabled. */
   readonly minRetrievalConfidenceForEdits: number;
   /** B.8: run a workspace command after successful edit/create tools. */
@@ -118,6 +120,9 @@ export function parseWorkflowRuntimeConfig(
   );
   const openaiModel = env.OPENAI_MODEL ?? "gpt-4o-mini";
   const resolved = resolveModelSpec(openaiModel) ?? getDefaultModelForTier("fast");
+  const modelRouteDefaultRaw = (env.VIPER_MODEL_ROUTE_DEFAULT ?? "pinned").trim().toLowerCase();
+  const modelRouteDefault =
+    modelRouteDefaultRaw === "auto" ? "auto" : ("pinned" as const);
   const disableLlmCache = (env.DISABLE_LLM_CACHE ?? "false").toLowerCase() === "true";
   const directLlmCacheTtl = disableLlmCache
     ? 0
@@ -166,12 +171,13 @@ export function parseWorkflowRuntimeConfig(
     resolvedModelId: resolved.id,
     resolvedModelProvider: resolved.provider,
     resolvedModelTier: resolved.tier,
+    modelRouteDefault,
     disableLlmCache,
     directLlmCacheTtl,
     chatHistoryLimit,
     runAnalysisWaitMs,
     modeDefault: undefined,
-    modelRouteDefault: undefined,
+    modelRouteLabelDefault: undefined,
     minRetrievalConfidenceForEdits,
     enablePostEditValidation,
     postEditValidationCommand,

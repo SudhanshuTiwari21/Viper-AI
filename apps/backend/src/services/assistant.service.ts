@@ -54,6 +54,7 @@ import { attachAnalysisGateForEdits } from "../lib/analysis-edit-gate.js";
 import { runPostEditValidationWithOptionalAutoRepair } from "../lib/post-edit-validation.js";
 import { getAllowedToolNames } from "../lib/mode-tool-policy.js";
 import { getModePromptAddendum, enforceOutputContract } from "../lib/mode-narration.js";
+import { selectModel, type ModelRouteMode } from "../lib/model-router.js";
 import {
   runAgenticLoop,
   buildAgenticSystemPrompt,
@@ -90,6 +91,7 @@ const {
   resolvedModelId: RESOLVED_MODEL_ID,
   resolvedModelProvider: RESOLVED_MODEL_PROVIDER,
   resolvedModelTier: RESOLVED_MODEL_TIER,
+  modelRouteDefault: MODEL_ROUTE_DEFAULT,
   disableLlmCache: DISABLE_LLM_CACHE,
   directLlmCacheTtl: DIRECT_LLM_CACHE_TTL,
   chatHistoryLimit: CHAT_HISTORY_LIMIT,
@@ -317,6 +319,42 @@ function workflowLog(stage: string, identity: RequestIdentity | null, data?: Rec
 
   // Always emit the original workflow log line (best-effort) even if the schema check fails.
   log(`[workflow] ${stage}`, merged);
+}
+
+function routeModelForRequest(params: {
+  routeMode: ModelRouteMode;
+  chatMode: ChatMode;
+  intentType: string;
+  isStreaming: boolean;
+  retrievalConfidence?: number;
+}): { modelId: string; provider: string; tier?: string; reason: string; signals: Record<string, unknown> } {
+  if (params.routeMode === "pinned") {
+    return {
+      modelId: RESOLVED_MODEL_ID,
+      provider: RESOLVED_MODEL_PROVIDER,
+      tier: RESOLVED_MODEL_TIER,
+      reason: "pinned_env",
+      signals: {
+        openaiModelEnv: OPENAI_MODEL,
+        resolvedModelId: RESOLVED_MODEL_ID,
+      },
+    };
+  }
+
+  const decision = selectModel({
+    chatMode: params.chatMode,
+    intentType: params.intentType,
+    hasAttachments: false,
+    isStreaming: params.isStreaming,
+    retrievalConfidence: params.retrievalConfidence,
+  });
+  return {
+    modelId: decision.selected.id,
+    provider: decision.selected.provider,
+    tier: decision.selected.tier,
+    reason: decision.reason,
+    signals: decision.signals as Record<string, unknown>,
+  };
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -725,6 +763,7 @@ async function streamPlanNarrativeLLM(
   intentType: string,
   plan: ExecutionPlan,
   onEvent: OnStreamEvent,
+  modelId: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const client = getOpenAIClient();
@@ -734,7 +773,7 @@ async function streamPlanNarrativeLLM(
   });
   onEvent({ type: "plan:narrative:start", data: {} });
   const stream = await client.chat.completions.create({
-    model: RESOLVED_MODEL_ID,
+    model: modelId,
     messages: [
       {
         role: "system",
@@ -775,6 +814,8 @@ async function runDirectLLM(
     contextWindow?: ContextWindow;
     /** Override default preamble before the context block (e.g. CODE_GUIDANCE vs setup). */
     workspaceContextPreamble?: string;
+    modelId: string;
+    chatMode: ChatMode;
   },
 ): Promise<AssistantPipelineResult> {
   const cacheKey = `direct-llm:${buildCacheKey({
@@ -816,11 +857,11 @@ async function runDirectLLM(
     const response = await withRetry(
       () =>
         client.chat.completions.create({
-          model: RESOLVED_MODEL_ID,
+          model: args.modelId,
           messages: [
             {
               role: "system",
-              content: DIRECT_LLM_SYSTEM_PROMPT,
+              content: DIRECT_LLM_SYSTEM_PROMPT + getModePromptAddendum(args.chatMode),
             },
             ...(ctx
               ? [
@@ -840,8 +881,11 @@ async function runDirectLLM(
         }),
       { maxRetries: 3, retryDelayMs: 500, isRetryable: isRetryableError },
     );
-    const content =
+    let content =
       response.choices[0]?.message?.content?.trim() ?? FALLBACK_NO_CONTEXT;
+    if (content !== FALLBACK_NO_CONTEXT) {
+      content = enforceOutputContract(content, args.chatMode);
+    }
     const estimatedTokens = Math.ceil(content.length / 4);
     const cw = args.contextWindow;
     const result: AssistantPipelineResult = {
@@ -941,6 +985,23 @@ export async function runAssistantPipeline(
   );
   if (DEBUG_ASSISTANT) log("Routing decision", decision);
 
+  const routeMode = MODEL_ROUTE_DEFAULT;
+  const routed = routeModelForRequest({
+    routeMode,
+    chatMode,
+    intentType: intentResult.intent.intentType,
+    isStreaming: false,
+  });
+  workflowLog("model:route:selected", identity, {
+    model_id: routed.modelId,
+    provider: routed.provider,
+    tier: routed.tier,
+    reason: routed.reason,
+    signals: routed.signals,
+    routeMode,
+    mode: chatMode,
+  });
+
   const contextualDirectGuided =
     decision.directLLMResponse &&
     decision.runContextEngine &&
@@ -953,6 +1014,8 @@ export async function runAssistantPipeline(
       workspaceKey,
       conversationId,
       intentType: intentResult.intent.intentType,
+      modelId: routed.modelId,
+      chatMode,
     });
   }
 
@@ -997,6 +1060,8 @@ export async function runAssistantPipeline(
         intentType === "CODE_GUIDANCE"
           ? "Workspace context (actual file contents and indexed snippets — ground your answer in this; do not invent files or APIs not shown below):\n\n"
           : "Workspace context (actual file contents and indexed snippets — use for accurate run/install commands):\n\n",
+      modelId: routed.modelId,
+      chatMode,
     });
   }
 
@@ -1119,6 +1184,7 @@ async function runDirectLLMStream(
   lastMessages: Array<{ role: "user" | "assistant"; content: string }> = [],
   onEvent: OnStreamEvent,
   identity: RequestIdentity,
+  modelId: string,
   resultIntent?: { intent: string; summary: string },
   options?: {
     projectContextBlock?: string;
@@ -1135,7 +1201,7 @@ async function runDirectLLMStream(
   const modeAddendum = getModePromptAddendum(options?.chatMode ?? "agent");
 
   const stream = await client.chat.completions.create({
-    model: RESOLVED_MODEL_ID,
+    model: modelId,
     messages: [
       {
         role: "system",
@@ -1203,6 +1269,7 @@ async function runAgenticStreamPath(
   onEvent: OnStreamEvent,
   intentSummary: { intent: string; summary: string },
   identity: RequestIdentity,
+  modelId: string,
   signal?: AbortSignal,
   conversationId?: string,
   resumeState?: typeof pausedLoopStates extends Map<string, infer V> ? V : never,
@@ -1444,7 +1511,7 @@ async function runAgenticStreamPath(
 
   const result = await runAgenticLoop({
     client,
-    model: RESOLVED_MODEL_ID,
+    model: modelId,
     systemPrompt,
     messages: openaiMessages,
     tools,
@@ -1646,6 +1713,8 @@ export async function runAssistantStreamPipeline(
 ): Promise<void> {
   ensureDbMemoryAdapter();
   const requestStart = Date.now();
+  // request:start logs the pinned/default model; a per-request routed decision (if enabled)
+  // is logged after intent classification at model:route:selected.
   if (DEBUG_ASSISTANT && OPENAI_MODEL !== RESOLVED_MODEL_ID) {
     log("Unknown OPENAI_MODEL; falling back to registry default", {
       openaiModel: OPENAI_MODEL,
@@ -1654,12 +1723,7 @@ export async function runAssistantStreamPipeline(
       tier: RESOLVED_MODEL_TIER,
     });
   }
-  workflowLog("request:start", identity, {
-    mode: chatMode,
-    model_id: RESOLVED_MODEL_ID,
-    provider: RESOLVED_MODEL_PROVIDER,
-    tier: RESOLVED_MODEL_TIER,
-  });
+  workflowLog("request:start", identity, { mode: chatMode, model_id: RESOLVED_MODEL_ID, provider: RESOLVED_MODEL_PROVIDER, tier: RESOLVED_MODEL_TIER });
 
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
   const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
@@ -1777,6 +1841,7 @@ export async function runAssistantStreamPipeline(
         onEvent,
         resumeState.intentSummary,
         identity,
+        RESOLVED_MODEL_ID,
         signal,
         conversationId,
         resumeState,
@@ -1842,10 +1907,27 @@ export async function runAssistantStreamPipeline(
   // 2. Route: GENERIC intents with no context → fast direct LLM (no tools needed)
   const isGeneric = intentResult.intent.intentType === "GENERIC";
   if (isGeneric) {
+    const routeMode = MODEL_ROUTE_DEFAULT;
+    const routed = routeModelForRequest({
+      routeMode,
+      chatMode,
+      intentType: intentResult.intent.intentType,
+      isStreaming: true,
+    });
+    workflowLog("model:route:selected", identity, {
+      model_id: routed.modelId,
+      provider: routed.provider,
+      tier: routed.tier,
+      reason: routed.reason,
+      signals: routed.signals,
+      routeMode,
+      mode: chatMode,
+    });
+
     workflowLog("route:direct-llm", identity, { intent: intentResult.intent.intentType });
     if (DEBUG_ASSISTANT) log("Direct LLM response (GENERIC, no workspace tools)");
     const result = await withAbort(
-      runDirectLLMStream(prompt, lastMessages, onEvent, identity, intentSummary, { chatMode }),
+      runDirectLLMStream(prompt, lastMessages, onEvent, identity, routed.modelId, intentSummary, { chatMode }),
       signal,
     );
     onEvent({ type: "result", data: result });
@@ -1861,6 +1943,23 @@ export async function runAssistantStreamPipeline(
   // The LLM decides which files to read, which patterns to search, etc.
   workflowLog("route:agentic", identity, { intent: intentSummary.intent });
   if (DEBUG_ASSISTANT) log("Agentic loop path for intent:", intentSummary.intent);
+
+  const routeMode = MODEL_ROUTE_DEFAULT;
+  const routed = routeModelForRequest({
+    routeMode,
+    chatMode,
+    intentType: intentResult.intent.intentType,
+    isStreaming: true,
+  });
+  workflowLog("model:route:selected", identity, {
+    model_id: routed.modelId,
+    provider: routed.provider,
+    tier: routed.tier,
+    reason: routed.reason,
+    signals: routed.signals,
+    routeMode,
+    mode: chatMode,
+  });
 
   // Kick off codebase analysis (for embedding index) with a short warmup window.
   const repo_id = getRepoId(workspacePath);
@@ -1947,6 +2046,7 @@ export async function runAssistantStreamPipeline(
       onEvent,
       intentSummary,
       identity,
+      routed.modelId,
       signal,
       conversationId,
       undefined,

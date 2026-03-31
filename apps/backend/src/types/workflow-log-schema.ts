@@ -22,6 +22,7 @@ export const VALID_WORKFLOW_STAGES = [
   "auto-repair:attempt",
   "auto-repair:result",
   "mode:tool:blocked",
+  "model:route:selected",
   "result:emitted",
 
   // A.1 request lifecycle (emitted by workflowLog in this repo)

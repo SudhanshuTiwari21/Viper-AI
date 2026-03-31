@@ -729,7 +729,21 @@ Milestones in this group use the **C** series (**C.11**–**C.15**) alongside th
 - **Evidence:** `cd packages/model-registry && npx vitest run && npm run check-types`; `cd apps/backend && npx vitest run && npm run check-types`.
 - **Not done yet:** Step 17 (router), step 18 (fallback), step 19 (desktop selector), provider failover.
 - **Rollback:** Remove `packages/model-registry`, remove registry wiring in `workflow-flags.ts`, revert `assistant.service.ts` to use raw `openaiModel`.
-17. Implement router policy engine for `Auto`.
+17. ~~Implement router policy engine for `Auto`.~~ **COMPLETE**
+
+#### D.17 Status: COMPLETE
+
+- **Implemented:** Policy-based model router `apps/backend/src/lib/model-router.ts` with typed inputs/outputs:
+  - `RouteInputs` includes `chatMode`, `intentType`, `hasAttachments`, `isStreaming` (+ optional signals).
+  - `RouteDecision` returns `selected: ModelSpec`, `reason`, `signals` (plus placeholder `fallbackChain`).
+  - Baseline policy is intentionally small/auditable: ask/plan → fast; debug → premium; agent + complex intents → premium; else fast.
+- **Config:** `VIPER_MODEL_ROUTE_DEFAULT` (`pinned|auto`), default **pinned** (preserves existing behavior). Parsed into `workflowRuntimeConfig.modelRouteDefault`.
+- **Backend wiring:** After intent classification, backend calls router in both streaming + non-streaming pipelines and emits `workflowLog("model:route:selected", ...)` with `{ model_id, provider, tier, reason, signals, routeMode, mode }`. All OpenAI calls use the routed `modelId` for that request.
+- **Schema:** Added `model:route:selected` to `VALID_WORKFLOW_STAGES` to avoid schema warnings when `VIPER_DEBUG_WORKFLOW=1`.
+- **Tests:** Unit test `apps/backend/src/lib/model-router.test.ts` (table-driven). Integration-style test `apps/backend/src/integration/model-router.integration.test.ts` mocks OpenAI and asserts pinned vs auto selection by inspecting the `model` parameter passed to `chat.completions.create`.
+- **Evidence:** `cd apps/backend && npx vitest run src/lib/model-router.test.ts src/integration/model-router.integration.test.ts && npx vitest run && npm run check-types`.
+- **Not done yet:** D.18 fallback chains runtime failover; D.19 desktop selector.
+- **Rollback:** Set `VIPER_MODEL_ROUTE_DEFAULT=pinned` (or remove), remove `model-router.ts` wiring + stage if reverting fully.
 18. Add fallback chain + failover behavior.
 19. Add model selector UI (`Auto`, `Premium`, `Fast`).
 20. Persist per-conversation model choice with entitlement checks.
