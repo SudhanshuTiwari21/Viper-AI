@@ -680,12 +680,55 @@ Milestones in this group use the **C** series (**C.11**–**C.15**) alongside th
 - **Evidence:** Visual: open desktop app, mode selector visible above composer. Functional: select "Ask" → send a prompt that would edit → backend blocks edits (C.12 enforcement). Select "Agent" → normal behavior. Switch sessions → mode restores.
 - **Rollback:** Remove `ChatMode` type + `mode` param from `agent-api.ts`, remove `chatMode`/`setChatMode` from `chat-context.tsx`, remove selector + mode wiring from `chat-panel.tsx`, revert roadmap block. Mode-aware narration = **step 14**.
 
-14. Add mode-aware narration and output contract.
-15. Add mode-specific integration tests.
+14. ~~Add mode-aware narration and output contract.~~ **COMPLETE**
+
+#### C.14 Status: COMPLETE
+
+- **Implemented:** Mode-aware narration + output contract via `apps/backend/src/lib/mode-narration.ts`. Three exports: `getModePromptAddendum(mode)` returns a system-prompt addendum instructing the LLM on required output sections per mode; `getRequiredHeadings(mode)` returns the required plain-text section headings; `enforceOutputContract(content, mode)` is a lightweight post-processor that appends stub headings if the LLM omits required sections. Addenda are appended to both the direct-LLM system prompt and the agentic system prompt in `assistant.service.ts`. Post-processor runs on final content before emitting `result` events.
+
+  **Mode output templates:**
+
+  | Mode | Required sections | Streaming UX |
+  |------|------------------|--------------|
+  | **Ask** | Answer; Assumptions (optional); If you want, I can ... (optional) | Minimal: intent → answer → done. Tool calls / step timeline suppressed in desktop. |
+  | **Plan** | Plan; Risks / tradeoffs; Next actions | Planning phase shown from intent. No tool / step UI. |
+  | **Debug** | Observations; Hypotheses; Experiments (optional); Recommendation | Full tool activity + command output shown. No edits (C.12). |
+  | **Agent** | Summary; What changed (optional); Test plan (optional) | All phases, tool calls, step timeline visible (current behavior). |
+
+- **Desktop rendering:** `chat-panel.tsx` suppresses `tool:start`, `tool:result`, `step:start`, `step:complete` events in ask/plan modes (defense-in-depth; tools are already filtered by C.12). Intent event maps to "Planning" phase in plan mode.
+- **Files changed:** `apps/backend/src/lib/mode-narration.ts` (new), `apps/backend/src/lib/mode-narration.test.ts` (new, 16 tests), `apps/backend/src/services/assistant.service.ts` (import + wiring), `apps/viper-desktop/ui/components/chat-panel.tsx` (event suppression).
+- **Evidence:** `cd apps/backend && npx vitest run src/lib/mode-narration.test.ts` (16 passed); `npx vitest run` (94 total passed); `npm run check-types` clean.
+- **Rollback:** Remove `mode-narration.ts` + test, remove import/usage from `assistant.service.ts`, remove event suppression from `chat-panel.tsx`, revert roadmap block. Integration tests = **step 15**.
+
+15. ~~Add mode-specific integration tests.~~ **COMPLETE**
+
+#### C.15 Status: COMPLETE
+
+- **Implemented:** Deterministic backend integration suite `apps/backend/src/integration/mode-contract.integration.test.ts` that calls `runAssistantStreamPipeline` directly and collects SSE events (no Fastify server required). The suite mocks OpenAI streaming (no network), intent classification, analysis warmup, DB/memory adapters (no Postgres), and `runWorkspaceCommand` (no shell). Each mode asserts the C.14 output contract headings and C.12 tool restrictions at the streaming boundary:
+  - **ask:** result contains `Answer`; no `tool:start` SSE events.
+  - **plan:** result contains `Plan`, `Risks / tradeoffs`, `Next actions`; no `tool:start`.
+  - **debug:** `tool:start` occurs for `run_command`; attempted `edit_file` tool call yields `workflow:gate` with `reason: mode_tool_blocked`; result contains `Observations`/`Hypotheses`/`Recommendation` (missing headings appended by post-processor).
+  - **agent:** tool events allowed (`read_file`), result contains `Summary` (appended if missing).
+- **Evidence:** `cd apps/backend && npx vitest run src/integration/mode-contract.integration.test.ts && npx vitest run && npm run check-types`.
+- **Rollback:** Remove the integration test file and roadmap block; keep C.11–C.14 intact.
 
 ### Step Group D — Model router and model-tier product UX
 
-16. Implement model registry abstraction (provider/model metadata + limits).
+16. ~~Implement model registry abstraction (provider/model metadata + limits).~~ **COMPLETE**
+
+#### D.16 Status: COMPLETE
+
+- **Implemented:** New shared workspace package `@repo/model-registry` (`packages/model-registry`) exporting a typed registry of models/providers/tiers and coarse metadata + policy limits:
+  - Types: `ModelProvider` (initially `openai`), `ModelTier` (`auto|premium|fast`), `ModelSpec` (capabilities + limits).
+  - Functions: `getModelRegistry()`, `getDefaultModelForTier(tier)`, `resolveModelSpec(modelId)`, `assertValidModelId(modelId)`.
+- **Backend wiring (no router yet):** `apps/backend/src/config/workflow-flags.ts` resolves `OPENAI_MODEL` against the registry:
+  - Known id → `resolvedModelId` equals env value.
+  - Unknown id → falls back to registry default for `fast` tier (currently `gpt-4o-mini`) while keeping raw env in `openaiModel`.
+  - `assistant.service.ts` uses `resolvedModelId` for all OpenAI calls and logs `{ model_id, provider, tier }` on `workflowLog("request:start")`. If `VIPER_DEBUG_ASSISTANT=1` and `OPENAI_MODEL` is unknown, it logs a debug warning about the fallback.
+- **Tests:** `packages/model-registry/src/registry.test.ts`; backend `apps/backend/src/config/workflow-flags.test.ts` asserts known-id resolution + unknown-id fallback.
+- **Evidence:** `cd packages/model-registry && npx vitest run && npm run check-types`; `cd apps/backend && npx vitest run && npm run check-types`.
+- **Not done yet:** Step 17 (router), step 18 (fallback), step 19 (desktop selector), provider failover.
+- **Rollback:** Remove `packages/model-registry`, remove registry wiring in `workflow-flags.ts`, revert `assistant.service.ts` to use raw `openaiModel`.
 17. Implement router policy engine for `Auto`.
 18. Add fallback chain + failover behavior.
 19. Add model selector UI (`Auto`, `Premium`, `Fast`).

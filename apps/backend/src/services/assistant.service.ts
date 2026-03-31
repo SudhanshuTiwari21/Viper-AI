@@ -53,6 +53,7 @@ import {
 import { attachAnalysisGateForEdits } from "../lib/analysis-edit-gate.js";
 import { runPostEditValidationWithOptionalAutoRepair } from "../lib/post-edit-validation.js";
 import { getAllowedToolNames } from "../lib/mode-tool-policy.js";
+import { getModePromptAddendum, enforceOutputContract } from "../lib/mode-narration.js";
 import {
   runAgenticLoop,
   buildAgenticSystemPrompt,
@@ -86,6 +87,9 @@ const {
   minFilesReadBeforeEdit: MIN_FILES_READ_BEFORE_EDIT,
   minDiscoveryToolsBeforeEdit: MIN_DISCOVERY_TOOLS_BEFORE_EDIT,
   openaiModel: OPENAI_MODEL,
+  resolvedModelId: RESOLVED_MODEL_ID,
+  resolvedModelProvider: RESOLVED_MODEL_PROVIDER,
+  resolvedModelTier: RESOLVED_MODEL_TIER,
   disableLlmCache: DISABLE_LLM_CACHE,
   directLlmCacheTtl: DIRECT_LLM_CACHE_TTL,
   chatHistoryLimit: CHAT_HISTORY_LIMIT,
@@ -691,7 +695,7 @@ async function streamInitialThinkingLLM(
   const client = getOpenAIClient();
   onEvent({ type: "thinking:start", data: {} });
   const stream = await client.chat.completions.create({
-    model: OPENAI_MODEL,
+    model: RESOLVED_MODEL_ID,
     messages: [
       {
         role: "system",
@@ -730,7 +734,7 @@ async function streamPlanNarrativeLLM(
   });
   onEvent({ type: "plan:narrative:start", data: {} });
   const stream = await client.chat.completions.create({
-    model: OPENAI_MODEL,
+    model: RESOLVED_MODEL_ID,
     messages: [
       {
         role: "system",
@@ -812,7 +816,7 @@ async function runDirectLLM(
     const response = await withRetry(
       () =>
         client.chat.completions.create({
-          model: OPENAI_MODEL,
+          model: RESOLVED_MODEL_ID,
           messages: [
             {
               role: "system",
@@ -1120,6 +1124,7 @@ async function runDirectLLMStream(
     projectContextBlock?: string;
     contextMeta?: Pick<ContextWindow, "files" | "functions" | "estimatedTokens">;
     workspaceContextPreamble?: string;
+    chatMode?: ChatMode;
   },
 ): Promise<AssistantPipelineResult> {
   const client = getOpenAIClient();
@@ -1127,13 +1132,14 @@ async function runDirectLLMStream(
   const preamble =
     options?.workspaceContextPreamble ??
     "Workspace context from the project index (use for accurate run/install commands):\n\n";
+  const modeAddendum = getModePromptAddendum(options?.chatMode ?? "agent");
 
   const stream = await client.chat.completions.create({
-    model: OPENAI_MODEL,
+    model: RESOLVED_MODEL_ID,
     messages: [
       {
         role: "system",
-        content: DIRECT_LLM_SYSTEM_PROMPT,
+        content: DIRECT_LLM_SYSTEM_PROMPT + modeAddendum,
       },
       ...(ctx
         ? [
@@ -1164,6 +1170,8 @@ async function runDirectLLMStream(
 
   if (!content.trim()) {
     content = FALLBACK_NO_CONTEXT;
+  } else {
+    content = enforceOutputContract(content, options?.chatMode ?? "agent");
   }
 
   const estimatedTokens = Math.ceil(content.length / 4);
@@ -1393,8 +1401,8 @@ async function runAgenticStreamPath(
     ? { workspacePath, conversationId }
     : null;
 
-  // Inject rich cross-turn memory into the system prompt
-  let systemPrompt = buildAgenticSystemPrompt(workspacePath);
+  // Inject rich cross-turn memory + mode contract into the system prompt
+  let systemPrompt = buildAgenticSystemPrompt(workspacePath) + getModePromptAddendum(chatMode);
   if (memKey) {
     try {
       const memoryBlock = await buildRichMemoryContext(memKey, prompt);
@@ -1436,7 +1444,7 @@ async function runAgenticStreamPath(
 
   const result = await runAgenticLoop({
     client,
-    model: OPENAI_MODEL,
+    model: RESOLVED_MODEL_ID,
     systemPrompt,
     messages: openaiMessages,
     tools,
@@ -1605,7 +1613,10 @@ async function runAgenticStreamPath(
     });
   }
 
-  const content = result.content || FALLBACK_NO_CONTEXT;
+  const rawContent = result.content || FALLBACK_NO_CONTEXT;
+  const content = rawContent === FALLBACK_NO_CONTEXT
+    ? rawContent
+    : enforceOutputContract(rawContent, chatMode);
   const estimatedTokens = Math.ceil(content.length / 4);
 
   return {
@@ -1635,7 +1646,20 @@ export async function runAssistantStreamPipeline(
 ): Promise<void> {
   ensureDbMemoryAdapter();
   const requestStart = Date.now();
-  workflowLog("request:start", identity, { mode: chatMode });
+  if (DEBUG_ASSISTANT && OPENAI_MODEL !== RESOLVED_MODEL_ID) {
+    log("Unknown OPENAI_MODEL; falling back to registry default", {
+      openaiModel: OPENAI_MODEL,
+      resolvedModelId: RESOLVED_MODEL_ID,
+      provider: RESOLVED_MODEL_PROVIDER,
+      tier: RESOLVED_MODEL_TIER,
+    });
+  }
+  workflowLog("request:start", identity, {
+    mode: chatMode,
+    model_id: RESOLVED_MODEL_ID,
+    provider: RESOLVED_MODEL_PROVIDER,
+    tier: RESOLVED_MODEL_TIER,
+  });
 
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
   const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
@@ -1821,7 +1845,7 @@ export async function runAssistantStreamPipeline(
     workflowLog("route:direct-llm", identity, { intent: intentResult.intent.intentType });
     if (DEBUG_ASSISTANT) log("Direct LLM response (GENERIC, no workspace tools)");
     const result = await withAbort(
-      runDirectLLMStream(prompt, lastMessages, onEvent, identity, intentSummary),
+      runDirectLLMStream(prompt, lastMessages, onEvent, identity, intentSummary, { chatMode }),
       signal,
     );
     onEvent({ type: "result", data: result });

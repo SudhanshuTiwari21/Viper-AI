@@ -31,6 +31,8 @@
  * - VIPER_EXPOSE_WORKFLOW_DEBUG — "1" exposes GET /debug/workflow-policy; default off (404)
  */
 
+import { getDefaultModelForTier, resolveModelSpec } from "@repo/model-registry";
+
 export interface WorkflowRuntimeConfig {
   readonly debugAssistant: boolean;
   readonly debugWorkflow: boolean;
@@ -39,7 +41,12 @@ export interface WorkflowRuntimeConfig {
   readonly requireAnalysisForEdits: boolean;
   readonly minFilesReadBeforeEdit: number;
   readonly minDiscoveryToolsBeforeEdit: number;
+  /** Raw env value for backwards compatibility (may be unknown). */
   readonly openaiModel: string;
+  /** D.16: resolved model id from the registry (always known). */
+  readonly resolvedModelId: string;
+  readonly resolvedModelProvider: string;
+  readonly resolvedModelTier: string;
   readonly disableLlmCache: boolean;
   readonly directLlmCacheTtl: number;
   readonly chatHistoryLimit: number;
@@ -110,6 +117,7 @@ export function parseWorkflowRuntimeConfig(
     parseInt(env.VIPER_MIN_DISCOVERY_TOOLS_BEFORE_EDIT ?? "1", 10),
   );
   const openaiModel = env.OPENAI_MODEL ?? "gpt-4o-mini";
+  const resolved = resolveModelSpec(openaiModel) ?? getDefaultModelForTier("fast");
   const disableLlmCache = (env.DISABLE_LLM_CACHE ?? "false").toLowerCase() === "true";
   const directLlmCacheTtl = disableLlmCache
     ? 0
@@ -155,6 +163,9 @@ export function parseWorkflowRuntimeConfig(
     minFilesReadBeforeEdit,
     minDiscoveryToolsBeforeEdit,
     openaiModel,
+    resolvedModelId: resolved.id,
+    resolvedModelProvider: resolved.provider,
+    resolvedModelTier: resolved.tier,
     disableLlmCache,
     directLlmCacheTtl,
     chatHistoryLimit,

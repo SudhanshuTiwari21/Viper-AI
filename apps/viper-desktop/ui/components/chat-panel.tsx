@@ -142,7 +142,8 @@ export function ChatPanel() {
           (event) => {
             switch (event.type) {
               case "intent":
-                setStreamingPhase(sid, assistantId, "intent");
+                setStreamingPhase(sid, assistantId,
+                  currentMode === "plan" ? "planning" : "intent");
                 break;
 
               case "workspace:preparing": {
@@ -189,6 +190,7 @@ export function ChatPanel() {
               }
 
               case "step:start": {
+                if (currentMode === "ask" || currentMode === "plan") break;
                 const d = event.data as { stepId: string; stepType: string };
                 // Autonomous loop re-runs the same plan step IDs across iterations — upsert, don’t append duplicates
                 // or step:complete only updates the first row and the rest spin forever.
@@ -213,6 +215,7 @@ export function ChatPanel() {
               }
 
               case "step:complete": {
+                if (currentMode === "ask" || currentMode === "plan") break;
                 const d = event.data as { stepId: string; durationMs: number };
                 const step = steps.find((s) => s.stepId === d.stepId);
                 if (step) {
@@ -273,6 +276,7 @@ export function ChatPanel() {
                 break;
 
               case "tool:start": {
+                if (currentMode === "ask" || currentMode === "plan") break;
                 const d = event.data as { tool: string; args: Record<string, string> };
                 const tcId = `${d.tool}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
                 appendToolCall(sid, assistantId, {
@@ -285,6 +289,7 @@ export function ChatPanel() {
               }
 
               case "tool:result": {
+                if (currentMode === "ask" || currentMode === "plan") break;
                 const d = event.data as { tool: string; summary: string; durationMs: number };
                 completeToolCall(sid, assistantId, d.tool, d.summary, d.durationMs);
                 break;

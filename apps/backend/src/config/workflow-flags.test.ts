@@ -20,6 +20,9 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(c.minFilesReadBeforeEdit).toBe(2);
     expect(c.minDiscoveryToolsBeforeEdit).toBe(1);
     expect(c.openaiModel).toBe("gpt-4o-mini");
+    expect(c.resolvedModelId).toBe("gpt-4o-mini");
+    expect(c.resolvedModelProvider).toBe("openai");
+    expect(c.resolvedModelTier).toBeTruthy();
     expect(c.disableLlmCache).toBe(false);
     expect(c.directLlmCacheTtl).toBe(900);
     expect(c.chatHistoryLimit).toBe(10);
@@ -34,6 +37,17 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(c.postEditAutoRepairCommand).toBe("");
     expect(c.postEditAutoRepairMaxExtraValidationRuns).toBe(1);
     expect(c.postEditAutoRepairTimeoutMs).toBe(30000);
+  });
+
+  it("OPENAI_MODEL: known ids resolve; unknown falls back predictably", () => {
+    const known = parseWorkflowRuntimeConfig(env({ OPENAI_MODEL: "gpt-4o" }));
+    expect(known.openaiModel).toBe("gpt-4o");
+    expect(known.resolvedModelId).toBe("gpt-4o");
+
+    const unknown = parseWorkflowRuntimeConfig(env({ OPENAI_MODEL: "definitely-not-real" }));
+    expect(unknown.openaiModel).toBe("definitely-not-real");
+    // fallback = registry fast default
+    expect(unknown.resolvedModelId).toBe("gpt-4o-mini");
   });
 
   it("VIPER_DEBUG_ASSISTANT and VIPER_DEBUG_WORKFLOW only when === \"1\"", () => {
