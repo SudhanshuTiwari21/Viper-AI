@@ -94,12 +94,15 @@ export interface ToolCallEntry {
   commandOutput?: string;
 }
 
+export type ChatMode = "ask" | "plan" | "debug" | "agent";
+
 export interface ChatSession {
   id: string;
   title: string;
   messages: ChatMessage[];
   createdAt: number;
   attachedPaths?: string[];
+  chatMode?: ChatMode;
 }
 
 interface ChatContextValue {
@@ -134,6 +137,7 @@ interface ChatContextValue {
   completeToolCall: (sessionId: string, messageId: string, toolName: string, summary: string, durationMs: number) => void;
   appendCommandOutput: (sessionId: string, messageId: string, chunk: string) => void;
   setAwaitingApproval: (sessionId: string, messageId: string, data: ChatMessage["awaitingApproval"]) => void;
+  setChatMode: (sessionId: string, mode: ChatMode) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -514,6 +518,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const setChatMode = useCallback(
+    (sessionId: string, mode: ChatMode) => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, chatMode: mode } : s)),
+      );
+    },
+    [],
+  );
+
   const value: ChatContextValue = {
     sessions,
     activeSessionId,
@@ -546,6 +559,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     completeToolCall,
     appendCommandOutput,
     setAwaitingApproval,
+    setChatMode,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

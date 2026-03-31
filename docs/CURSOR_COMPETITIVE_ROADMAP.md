@@ -671,7 +671,15 @@ Milestones in this group use the **C** series (**C.11**–**C.15**) alongside th
 - **Evidence:** `npx vitest run src/lib/mode-tool-policy.test.ts src/lib/mode-tool-filtering.test.ts src/lib/mode-execution-guard.test.ts` (from `apps/backend`); `cd apps/backend && npm run check-types`; `cd packages/agents/agentic-loop && npm run check-types`.
 - **Rollback:** Remove `mode-tool-policy.ts` + tests, revert `agentic-loop.types.ts` / `run-agentic-loop.ts` guard, remove `allowedToolNames` from `runAgenticLoop` calls, remove tool filtering in `runAgenticStreamPath`, remove `blockedStepTypes` from `ExecutionContext` / `step-runner.ts` / `execute-plan.ts`, remove `mode:tool:blocked` from `VALID_WORKFLOW_STAGES`, remove `mode_tool_blocked` handling in `chat-panel.tsx`, revert roadmap block. Desktop mode selector = **step 13**.
 
-13. Add mode selector in desktop chat UI.
+13. ~~Add mode selector in desktop chat UI.~~ **COMPLETE**
+
+#### C.13 Status: COMPLETE
+
+- **Implemented:** Segmented mode selector (`Ask | Plan | Debug | Agent`) in the desktop chat UI, placed above the composer in the sticky input area (`chat-panel.tsx`). Mode is stored **per session** on `ChatSession.chatMode` (default `"agent"` for existing/new sessions) — switching sessions restores that session's mode. Selector is **disabled during streaming** to prevent mid-request mode changes. API wiring: `sendChatStream` and `sendChat` in `agent-api.ts` accept an optional `mode` param and include it in the JSON body when set. The selected mode is sent as `mode` in `POST /chat/stream` requests, where the backend enforces tool permissions per C.12. Per-session mode persists to localStorage via the existing chat context serialization.
+- **Files changed:** `apps/viper-desktop/ui/services/agent-api.ts` (added `ChatMode` type + `mode` param to `sendChat`/`sendChatStream`), `apps/viper-desktop/ui/contexts/chat-context.tsx` (added `ChatMode` type, `chatMode` to `ChatSession`, `setChatMode` action), `apps/viper-desktop/ui/components/chat-panel.tsx` (mode selector UI, mode wiring into `sendChatStream`).
+- **Evidence:** Visual: open desktop app, mode selector visible above composer. Functional: select "Ask" → send a prompt that would edit → backend blocks edits (C.12 enforcement). Select "Agent" → normal behavior. Switch sessions → mode restores.
+- **Rollback:** Remove `ChatMode` type + `mode` param from `agent-api.ts`, remove `chatMode`/`setChatMode` from `chat-context.tsx`, remove selector + mode wiring from `chat-panel.tsx`, revert roadmap block. Mode-aware narration = **step 14**.
+
 14. Add mode-aware narration and output contract.
 15. Add mode-specific integration tests.
 

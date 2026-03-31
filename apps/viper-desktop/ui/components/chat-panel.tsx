@@ -10,7 +10,7 @@ import {
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
 import { useChat } from "../contexts/chat-context";
-import type { ExecutionStep, PendingDiff } from "../contexts/chat-context";
+import type { ExecutionStep, PendingDiff, ChatMode } from "../contexts/chat-context";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { usePendingEdits } from "../contexts/pending-edits-context";
 import {
@@ -75,6 +75,7 @@ export function ChatPanel() {
     completeToolCall,
     appendCommandOutput,
     setAwaitingApproval,
+    setChatMode,
   } = useChat();
   const { workspace } = useWorkspaceContext();
   const { addPendingEdit } = usePendingEdits();
@@ -89,6 +90,7 @@ export function ChatPanel() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages ?? [];
+  const currentMode: ChatMode = activeSession?.chatMode ?? "agent";
 
   useEffect(() => {
     scrollToBottom();
@@ -455,6 +457,8 @@ export function ChatPanel() {
           },
           activeSessionId,
           lastMessages,
+          undefined,
+          currentMode,
         );
       } catch (err) {
         const errorText = err instanceof Error ? err.message : "Request failed";
@@ -492,6 +496,7 @@ export function ChatPanel() {
       appendCommandOutput,
       setAwaitingApproval,
       addPendingEdit,
+      currentMode,
     ],
   );
 
@@ -863,7 +868,24 @@ export function ChatPanel() {
       </div>
 
       {/* ─── Sticky input ─── */}
-      <div className="shrink-0 border-t border-v-border bg-v-bg px-3 py-1.5 max-w-3xl mx-auto w-full">
+      <div className="shrink-0 border-t border-v-border bg-v-bg px-3 py-1.5 max-w-3xl mx-auto w-full space-y-1.5">
+        <div className="flex items-center gap-1">
+          {(["ask", "plan", "debug", "agent"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              disabled={streaming}
+              onClick={() => activeSessionId && setChatMode(activeSessionId, m)}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium capitalize transition-colors ${
+                currentMode === m
+                  ? "bg-v-accent/15 text-v-accent"
+                  : "text-v-text3 hover:bg-white/[0.04] hover:text-v-text"
+              } disabled:opacity-40 disabled:pointer-events-none`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
         <ChatInput onSend={handleSend} disabled={streaming} />
       </div>
     </div>

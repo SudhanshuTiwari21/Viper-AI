@@ -50,19 +50,22 @@ export interface ChatResponse {
   proposalSummary?: string;
 }
 
+export type ChatMode = "ask" | "plan" | "debug" | "agent";
+
 /** POST /chat — run assistant pipeline (intent + context ranking). Returns intent + context. */
 export async function sendChat(
   prompt: string,
   workspacePath: string,
   conversationId?: string,
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
+  mode?: ChatMode,
 ): Promise<ChatResponse> {
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
+      body: JSON.stringify({ prompt, workspacePath, conversationId, messages, ...(mode ? { mode } : {}) }),
       signal: AbortSignal.timeout(120_000),
     });
   } catch (e) {
@@ -92,13 +95,14 @@ export async function sendChatStream(
   conversationId?: string,
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
   signal?: AbortSignal,
+  mode?: ChatMode,
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, workspacePath, conversationId, messages }),
+      body: JSON.stringify({ prompt, workspacePath, conversationId, messages, ...(mode ? { mode } : {}) }),
       signal: signal ?? AbortSignal.timeout(300_000),
     });
   } catch (e) {
