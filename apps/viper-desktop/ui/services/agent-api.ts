@@ -52,6 +52,9 @@ export interface ChatResponse {
 
 export type ChatMode = "ask" | "plan" | "debug" | "agent";
 
+/** D.19: per-request model tier (matches backend `modelTier`). */
+export type ModelTier = "auto" | "premium" | "fast";
+
 /** POST /chat — run assistant pipeline (intent + context ranking). Returns intent + context. */
 export async function sendChat(
   prompt: string,
@@ -59,13 +62,21 @@ export async function sendChat(
   conversationId?: string,
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
   mode?: ChatMode,
+  modelTier: ModelTier = "auto",
 ): Promise<ChatResponse> {
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, workspacePath, conversationId, messages, ...(mode ? { mode } : {}) }),
+      body: JSON.stringify({
+        prompt,
+        workspacePath,
+        conversationId,
+        messages,
+        ...(mode ? { mode } : {}),
+        modelTier,
+      }),
       signal: AbortSignal.timeout(120_000),
     });
   } catch (e) {
@@ -96,13 +107,21 @@ export async function sendChatStream(
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
   signal?: AbortSignal,
   mode?: ChatMode,
+  modelTier: ModelTier = "auto",
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetch(`${BACKEND_URL}/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, workspacePath, conversationId, messages, ...(mode ? { mode } : {}) }),
+      body: JSON.stringify({
+        prompt,
+        workspacePath,
+        conversationId,
+        messages,
+        ...(mode ? { mode } : {}),
+        modelTier,
+      }),
       signal: signal ?? AbortSignal.timeout(300_000),
     });
   } catch (e) {
@@ -459,6 +478,33 @@ export async function rollbackPatch(
     throw new Error((err as { error?: string }).error ?? `Rollback failed: ${res.status}`);
   }
   return res.json() as Promise<{ success: boolean; logs: string[] }>;
+}
+
+/** D.21: submit feedback for an assistant message. */
+export type FeedbackRating = "up" | "down";
+
+export async function sendFeedback(params: {
+  request_id: string;
+  message_id?: string;
+  rating: FeedbackRating;
+  tags?: string[];
+  comment?: string;
+  workspace_id: string;
+}): Promise<void> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/chat/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      console.warn("[Viper] Feedback failed:", (err as { error?: string }).error);
+    }
+  } catch (e) {
+    console.warn("[Viper] Feedback request failed:", e);
+  }
 }
 
 export const EDIT_URL = "http://localhost:3000/editor/apply-change";

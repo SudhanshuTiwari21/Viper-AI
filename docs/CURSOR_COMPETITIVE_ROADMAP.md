@@ -727,7 +727,7 @@ Milestones in this group use the **C** series (**C.11**–**C.15**) alongside th
   - `assistant.service.ts` uses `resolvedModelId` for all OpenAI calls and logs `{ model_id, provider, tier }` on `workflowLog("request:start")`. If `VIPER_DEBUG_ASSISTANT=1` and `OPENAI_MODEL` is unknown, it logs a debug warning about the fallback.
 - **Tests:** `packages/model-registry/src/registry.test.ts`; backend `apps/backend/src/config/workflow-flags.test.ts` asserts known-id resolution + unknown-id fallback.
 - **Evidence:** `cd packages/model-registry && npx vitest run && npm run check-types`; `cd apps/backend && npx vitest run && npm run check-types`.
-- **Not done yet:** Step 17 (router), step 18 (fallback), step 19 (desktop selector), provider failover.
+- **Not done yet:** Provider failover beyond OpenAI tier failovers.
 - **Rollback:** Remove `packages/model-registry`, remove registry wiring in `workflow-flags.ts`, revert `assistant.service.ts` to use raw `openaiModel`.
 17. ~~Implement router policy engine for `Auto`.~~ **COMPLETE**
 
@@ -735,19 +735,65 @@ Milestones in this group use the **C** series (**C.11**–**C.15**) alongside th
 
 - **Implemented:** Policy-based model router `apps/backend/src/lib/model-router.ts` with typed inputs/outputs:
   - `RouteInputs` includes `chatMode`, `intentType`, `hasAttachments`, `isStreaming` (+ optional signals).
-  - `RouteDecision` returns `selected: ModelSpec`, `reason`, `signals` (plus placeholder `fallbackChain`).
+  - `RouteDecision` returns `selected: ModelSpec`, `reason`, `signals`; `buildFallbackChainForAuto` supplies runtime failover targets (D.18).
   - Baseline policy is intentionally small/auditable: ask/plan → fast; debug → premium; agent + complex intents → premium; else fast.
 - **Config:** `VIPER_MODEL_ROUTE_DEFAULT` (`pinned|auto`), default **pinned** (preserves existing behavior). Parsed into `workflowRuntimeConfig.modelRouteDefault`.
 - **Backend wiring:** After intent classification, backend calls router in both streaming + non-streaming pipelines and emits `workflowLog("model:route:selected", ...)` with `{ model_id, provider, tier, reason, signals, routeMode, mode }`. All OpenAI calls use the routed `modelId` for that request.
 - **Schema:** Added `model:route:selected` to `VALID_WORKFLOW_STAGES` to avoid schema warnings when `VIPER_DEBUG_WORKFLOW=1`.
 - **Tests:** Unit test `apps/backend/src/lib/model-router.test.ts` (table-driven). Integration-style test `apps/backend/src/integration/model-router.integration.test.ts` mocks OpenAI and asserts pinned vs auto selection by inspecting the `model` parameter passed to `chat.completions.create`.
 - **Evidence:** `cd apps/backend && npx vitest run src/lib/model-router.test.ts src/integration/model-router.integration.test.ts && npx vitest run && npm run check-types`.
-- **Not done yet:** D.18 fallback chains runtime failover; D.19 desktop selector.
 - **Rollback:** Set `VIPER_MODEL_ROUTE_DEFAULT=pinned` (or remove), remove `model-router.ts` wiring + stage if reverting fully.
-18. Add fallback chain + failover behavior.
-19. Add model selector UI (`Auto`, `Premium`, `Fast`).
-20. Persist per-conversation model choice with entitlement checks.
-21. Add model route telemetry and quality feedback loop.
+18. ~~Add fallback chain + failover behavior.~~ **COMPLETE**
+
+#### D.18 Status: COMPLETE
+
+- **Implemented:** Bounded OpenAI-only failover: `apps/backend/src/lib/openai-chat-with-failover.ts` (`classifyOpenAIError`, non-stream + text-stream helpers, agentic stream create with retry-on-throw only). `buildFallbackChainForAuto` in `model-router.ts` builds a **tier flip** (fast ↔ premium defaults), **de-duped by id**, at most **2** fallback **slots** (`min(2, VIPER_MODEL_FAILOVER_MAX_ATTEMPTS - 1)`). **`VIPER_MODEL_FAILOVER_ENABLED`:** unset ⇒ failover **on** for `VIPER_MODEL_ROUTE_DEFAULT=auto`, **off** for `pinned`; explicit `true`/`false` overrides for both modes (primary id still comes from pin vs auto router). **`VIPER_MODEL_FAILOVER_MAX_ATTEMPTS`:** default **3** total ordered model tries (clamped 1–5). Workflow stage **`model:route:fallback`** with `{ from_model, to_model, attempt, reason, error_class }`. `@repo/agentic-loop`: optional `createChatCompletionStream` dependency injection so failover stays in the backend.
+- **Evidence:** `cd apps/backend && npx vitest run && npm run check-types`; `cd packages/agents/agentic-loop && npm run check-types`.
+- **Rollback:** Set `VIPER_MODEL_FAILOVER_ENABLED=0` or `VIPER_MODEL_FAILOVER_MAX_ATTEMPTS=1`; or remove failover module + revert `assistant.service` / agentic-loop wiring.
+- **Not done yet:** Multi-provider failover.
+19. ~~Add model selector UI (`Auto`, `Premium`, `Fast`).~~ **COMPLETE**
+
+#### D.19 Status: COMPLETE
+
+- **API:** Optional body field **`modelTier`** (`"auto"` | `"premium"` | `"fast"`). Explicit values are upserted server-side (D.20). Omitted → **D.20** loads persisted preference for `(workspace_id, conversation_id)` or **`auto`**. Zod: `request.schemas.ts`. Fastify lists `modelTier` on `/chat` and `/chat/stream`.
+- **Precedence:** **`premium`** / **`fast`** → primary is always `getDefaultModelForTier(tier)` for that request (**overrides** `VIPER_MODEL_ROUTE_DEFAULT=pinned` and D.17 `selectModel`). **`auto`** → existing D.17 + pinned/env behavior unchanged. D.18 failover: unchanged cross-tier chain from the effective primary.
+- **Observability:** `workflowLog("model:route:selected", …)` includes **`client_model_tier`** and **`tier_override_from_client`**; signals may include **`env_pinned_primary_superseded`** when the client tier overrides a pinned env primary.
+- **Desktop:** `ChatSession.modelTier` + localStorage; `chat-panel.tsx` segment control (disabled while streaming); `agent-api` sends `modelTier` on every request (default `auto`).
+- **Tests:** `request.schemas.test.ts`; `model-router.integration.test.ts` (premium overrides pinned; fast overrides auto+debug).
+- **Evidence:** `cd apps/backend && npx vitest run && npm run check-types`.
+- **Rollback:** Remove `modelTier` from schema/routes/controller/desktop; revert `routeModelForRequest` client branch and `workflowLog` fields.
+20. ~~Persist per-conversation model choice with entitlement checks.~~ **COMPLETE**
+
+#### D.20 Status: COMPLETE
+
+- **Persistence:** Table `conversation_model_preferences` (`migration 006`, `packages/database/schema.sql`): PK `(workspace_id, conversation_id)`, `model_tier` check, `updated_at`. Upsert when the client sends an explicit `modelTier` field; load when the field is omitted and `conversationId` is present. **No `DATABASE_URL`:** in-memory store (`conversation-model-preference-store.ts`) so tests need no Postgres.
+- **Entitlements:** `workflowRuntimeConfig.entitledModelTiers` from `VIPER_ALLOWED_MODEL_TIERS` + optional `VIPER_PREMIUM_REQUIRES_ENTITLEMENT` / `VIPER_PREMIUM_ENTITLED`. Disallowed tiers **downgrade** along premium → fast → auto to the best allowed tier (`model-tier-entitlements.ts`).
+- **Observability:** `workflowLog("model:tier:denied", …)` with `tier_downgraded_from`, `tier_downgraded_to`, `reason`. SSE **`model:tier:downgraded`** after `stream:open` when downgraded. POST **`/chat`** includes **`tierResolution`** on the JSON body.
+- **Evidence:** `cd apps/backend && npx vitest run && npm run check-types`; `cd packages/database && npm run check-types`.
+- **Rollback:** Drop table / revert migration; remove `resolve-effective-model-tier` wiring from `chat.controller.ts`; unset entitlement envs; restore optional `modelTier` default in Zod if reverting D.20 only.
+- **Docs:** `docs/ENV.md` (D.20 variables).
+
+21. ~~Add model route telemetry and quality feedback loop.~~ **COMPLETE**
+
+#### D.21 Status: COMPLETE
+
+- **Slice 1 — Model route telemetry (structured, end-to-end):**
+  - New workflow stage **`model:route:outcome`** added to `VALID_WORKFLOW_STAGES` (with optional `latency_ms`). Emitted via `workflowLog` at the end of every request (stream + non-stream).
+  - Telemetry payload: `request_id`, `workspace_id`, `conversation_id`, `mode`, `effective_model_tier`, `primary_model_id`, `final_model_id` (post-failover), `fallback_chain`, `fallback_count`, `intent`, `route_mode`, `tier_downgraded`, `latency_ms`.
+  - **SSE (streaming):** `model:route:summary` event emitted before `result`/`done` with the same payload; desktop parser silently ignores it (safe no-op).
+  - **POST /chat:** Response includes `routeTelemetry` object alongside existing `tierResolution`.
+  - **Structured stdout:** `VIPER_MODEL_TELEMETRY=1` writes one JSON line per request to stdout (`_type: "viper.route.telemetry"`) for ops scraping without enabling full debug.
+  - Type: `RouteTelemetry` / `RouteMeta` in `apps/backend/src/types/route-telemetry.ts`.
+  - `AssistantPipelineResult.routeMeta` populated by every exit path (direct LLM, agentic, execution plan).
+- **Slice 2 — Quality feedback loop:**
+  - **API:** `POST /chat/feedback` with body `{ request_id, message_id?, rating: "up"|"down", tags?: [...], comment?, workspace_id }`. Zod schema `ChatFeedbackSchema`. Tags enum: `incorrect`, `too_slow`, `great`, `off_topic`, `incomplete`. Comment max 1000 chars.
+  - **Storage:** Postgres table `chat_feedback` (migration `007`), indexes on `(workspace_id, created_at)` and `request_id`. In-memory fallback when `DATABASE_URL` is not set (same pattern as `conversation-model-preference-store.ts`).
+  - **Stats:** `GET /feedback/stats?workspace_id=…&since=…` returns `{ up, down, total }`.
+  - **Observability:** `workflowLog("feedback:received", …)` with `rating`, `tags`, `message_id`.
+  - **Desktop:** Thumbs up/down on assistant messages. `request_id` captured from `stream:open` SSE event and stored on `ChatMessage.requestId`. Toggle feedback state stored in `ChatMessage.feedbackRating`.
+- **Evidence:** `cd apps/backend && npx vitest run && npm run check-types` (154 tests, 22 files). `cd packages/database && npm run check-types`.
+- **Env vars:** `VIPER_MODEL_TELEMETRY` (D.21); see `docs/ENV.md`.
+- **Rollback:** Remove `model:route:outcome` + `feedback:received` from stages; remove telemetry emission from `assistant.service.ts` + `chat.controller.ts`; remove feedback routes/controller/store; drop `chat_feedback` table; unset `VIPER_MODEL_TELEMETRY`.
 
 ### Step Group E — Multimodal and browser verification
 

@@ -10,13 +10,19 @@ function streamFromChunks(chunks: OpenAIChunk[]) {
   })();
 }
 
-function makeOpenAIRecorder() {
+function makeOpenAIRecorder(options?: {
+  failFirstStreamWith429?: boolean;
+}) {
   const seenModels: string[] = [];
+  let streamCalls = 0;
   const client = {
     chat: {
       completions: {
-        create: vi.fn(async (args: { model: string }) => {
+        create: vi.fn(async (args: { model: string; stream?: boolean }) => {
           seenModels.push(args.model);
+          if (options?.failFirstStreamWith429 && args.stream && streamCalls++ === 0) {
+            throw Object.assign(new Error("rate limit"), { status: 429 });
+          }
           return streamFromChunks([{ choices: [{ delta: { content: "ok" } }] }]);
         }),
       },
@@ -63,7 +69,11 @@ vi.mock("openai", () => ({
   },
 }));
 
-async function runGenericStream(modeEnv: string | undefined, chatMode: "ask" | "plan" | "debug" | "agent") {
+async function runGenericStream(
+  modeEnv: string | undefined,
+  chatMode: "ask" | "plan" | "debug" | "agent",
+  modelTier: "auto" | "premium" | "fast" = "auto",
+) {
   // Force fresh module graph with new env snapshot.
   vi.resetModules();
   process.env.OPENAI_API_KEY = "test";
@@ -94,6 +104,7 @@ async function runGenericStream(modeEnv: string | undefined, chatMode: "ask" | "
     [],
     undefined,
     chatMode,
+    modelTier,
   );
   return { seenModels, events };
 }
@@ -113,6 +124,65 @@ describe("D.17 integration: auto model router uses registry defaults", () => {
   it("auto routes debug to premium default", async () => {
     const { seenModels } = await runGenericStream("auto", "debug");
     expect(seenModels[0]).toBe("gpt-4o");
+  });
+
+  it("D.19: modelTier=premium overrides pinned primary to registry premium default", async () => {
+    vi.resetModules();
+    process.env.OPENAI_API_KEY = "test";
+    process.env.VIPER_ENABLE_STREAM_CONTEXT_PRIMER = "false";
+    process.env.VIPER_STREAM_ANALYSIS_WARMUP_MS = "0";
+    process.env.VIPER_DEBUG_ASSISTANT = "0";
+    process.env.VIPER_DEBUG_WORKFLOW = "0";
+    process.env.VIPER_MODEL_ROUTE_DEFAULT = "pinned";
+
+    intentMock.runIntentPipeline.mockResolvedValue({
+      intent: { intentType: "GENERIC" },
+      entities: { entities: [] },
+      response: { intent: "GENERIC", summary: "GENERIC" },
+    });
+
+    const { seenModels } = await runGenericStream("pinned", "agent", "premium");
+    expect(seenModels[0]).toBe("gpt-4o");
+  });
+
+  it("D.19: modelTier=fast overrides auto debug (premium) routing", async () => {
+    const { seenModels } = await runGenericStream("auto", "debug", "fast");
+    expect(seenModels[0]).toBe("gpt-4o-mini");
+  });
+
+  it("D.18: generic streaming failovers to cross-tier model on 429", async () => {
+    vi.resetModules();
+    process.env.OPENAI_API_KEY = "test";
+    process.env.VIPER_ENABLE_STREAM_CONTEXT_PRIMER = "false";
+    process.env.VIPER_STREAM_ANALYSIS_WARMUP_MS = "0";
+    process.env.VIPER_DEBUG_ASSISTANT = "0";
+    process.env.VIPER_DEBUG_WORKFLOW = "0";
+    process.env.VIPER_MODEL_ROUTE_DEFAULT = "auto";
+
+    intentMock.runIntentPipeline.mockResolvedValue({
+      intent: { intentType: "GENERIC" },
+      entities: { entities: [] },
+      response: { intent: "GENERIC", summary: "GENERIC" },
+    });
+
+    const { client, seenModels } = makeOpenAIRecorder({ failFirstStreamWith429: true });
+    openAIHolder.current = client;
+
+    const mod = await import("../services/assistant.service.js");
+    await mod.runAssistantStreamPipeline(
+      "hello",
+      "/tmp",
+      () => {},
+      { request_id: "req-1", workspace_id: "ws-1", conversation_id: "conv-1" },
+      "conv-1",
+      [],
+      undefined,
+      "agent",
+      "auto",
+    );
+    expect(seenModels.length).toBeGreaterThanOrEqual(2);
+    expect(seenModels[0]).toBe("gpt-4o-mini");
+    expect(seenModels[1]).toBe("gpt-4o");
   });
 });
 

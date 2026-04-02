@@ -31,3 +31,26 @@ CREATE TABLE IF NOT EXISTS repository_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_repository_files_repo_id ON repository_files(repo_id);
+
+-- D.20: per-conversation model tier (see migrations/006_create_conversation_model_preferences.sql)
+CREATE TABLE IF NOT EXISTS conversation_model_preferences (
+  workspace_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  model_tier TEXT NOT NULL CHECK (model_tier IN ('auto', 'premium', 'fast')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, conversation_id)
+);
+
+-- D.21: quality feedback (see migrations/007_create_chat_feedback.sql)
+CREATE TABLE IF NOT EXISTS chat_feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  message_id TEXT,
+  rating TEXT NOT NULL CHECK (rating IN ('up', 'down')),
+  tags TEXT[] NOT NULL DEFAULT '{}',
+  comment TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_feedback_workspace_created ON chat_feedback(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_feedback_request_id ON chat_feedback(request_id);

@@ -12,6 +12,13 @@
  * - VIPER_MIN_FILES_READ_BEFORE_EDIT — int, default 2, Math.max(0, …)
  * - VIPER_MIN_DISCOVERY_TOOLS_BEFORE_EDIT — int, default 1, Math.max(0, …)
  * - OPENAI_MODEL — default gpt-4o-mini
+ * - VIPER_MODEL_ROUTE_DEFAULT — `pinned`|`auto`, default **pinned** (D.17).
+ * - VIPER_MODEL_FAILOVER_MAX_ATTEMPTS — int **1–5**, default **3**: max **total** model tries (primary + fallbacks, deduped order).
+ * - VIPER_MODEL_FAILOVER_ENABLED — optional `true`|`false`|`1`|`0`. Unset ⇒ failover **on** when route default is `auto`, **off** when `pinned`.
+ * - VIPER_ALLOWED_MODEL_TIERS — D.20: comma-separated `auto`|`fast`|`premium`; default all three; invalid tokens ignored.
+ * - VIPER_PREMIUM_REQUIRES_ENTITLEMENT — D.20: default false; when true, premium requires `VIPER_PREMIUM_ENTITLED` truthy.
+ * - VIPER_PREMIUM_ENTITLED — D.20: default true; set false/0 to deny premium when premium gate is on.
+ * - VIPER_MODEL_TELEMETRY — D.21: "1" emits a structured JSON line to stdout per request (route outcome telemetry) for ops scraping without full debug.
  * - DISABLE_LLM_CACHE — default false unless lowercase is "true"
  * - DIRECT_LLM_CACHE_TTL — int, default 900, Math.max(0, …); forced 0 when DISABLE_LLM_CACHE
  * - CHAT_HISTORY_LIMIT — int, default 10, clamped Math.max(0, Math.min(10, …))
@@ -32,6 +39,13 @@
  */
 
 import { getDefaultModelForTier, resolveModelSpec } from "@repo/model-registry";
+import type { ModelTierSelection } from "../validators/request.schemas.js";
+import {
+  buildEntitledTierSet,
+  parseAllowedModelTiersFromEnv,
+  parsePremiumEntitled,
+  parsePremiumRequiresEntitlement,
+} from "../lib/model-tier-entitlements.js";
 
 export interface WorkflowRuntimeConfig {
   readonly debugAssistant: boolean;
@@ -49,6 +63,16 @@ export interface WorkflowRuntimeConfig {
   readonly resolvedModelTier: string;
   /** D.17: model router default mode (preserve existing behavior by default). */
   readonly modelRouteDefault: "pinned" | "auto";
+  /**
+   * D.18: max **total** model attempts in a failover sequence (primary + fallbacks), clamped 1–5.
+   * Default **3** (primary plus up to two fallbacks if the chain lists them).
+   */
+  readonly modelFailoverMaxAttempts: number;
+  /**
+   * D.18: when `true` / `false`, forces failover on or off for **all** route modes.
+   * When `undefined`, failover defaults to **on** for `modelRouteDefault=auto` and **off** for `pinned`.
+   */
+  readonly modelFailoverEnabledOverride: boolean | undefined;
   readonly disableLlmCache: boolean;
   readonly directLlmCacheTtl: number;
   readonly chatHistoryLimit: number;
@@ -76,6 +100,15 @@ export interface WorkflowRuntimeConfig {
   /** B.9: 1–3 repair→re-validate cycles after first failure (see header). */
   readonly postEditAutoRepairMaxExtraValidationRuns: number;
   readonly postEditAutoRepairTimeoutMs: number;
+  /**
+   * D.20: tiers allowed after env list + optional premium entitlement gate.
+   * Used by `resolveEffectiveModelTier` for downgrade decisions.
+   */
+  readonly entitledModelTiers: ReadonlySet<ModelTierSelection>;
+  /**
+   * D.21: emit structured JSON route telemetry to stdout per request for ops scraping.
+   */
+  readonly modelTelemetry: boolean;
 }
 
 /**
@@ -94,6 +127,30 @@ export function parsePostEditAutoRepairMaxExtraValidationRuns(env: NodeJS.Proces
   const n = parseInt(env.VIPER_POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS ?? "1", 10);
   if (!Number.isFinite(n)) return 1;
   return Math.max(1, Math.min(3, n));
+}
+
+/** D.18: clamped 1–5; default 3 total attempts (primary + fallbacks). */
+export function parseModelFailoverMaxAttempts(env: NodeJS.ProcessEnv): number {
+  const n = parseInt(env.VIPER_MODEL_FAILOVER_MAX_ATTEMPTS ?? "3", 10);
+  if (!Number.isFinite(n)) return 3;
+  return Math.max(1, Math.min(5, n));
+}
+
+/** D.18: explicit enable/disable; invalid values treated as unset. */
+export function parseModelFailoverEnabledOverride(env: NodeJS.ProcessEnv): boolean | undefined {
+  const raw = env.VIPER_MODEL_FAILOVER_ENABLED?.trim().toLowerCase();
+  if (raw === undefined || raw === "") return undefined;
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  return undefined;
+}
+
+export function modelFailoverEnabledForRoute(
+  override: boolean | undefined,
+  routeMode: "pinned" | "auto",
+): boolean {
+  if (override !== undefined) return override;
+  return routeMode === "auto";
 }
 
 /** Exported for tests; production uses `workflowRuntimeConfig` snapshot below. */
@@ -123,6 +180,8 @@ export function parseWorkflowRuntimeConfig(
   const modelRouteDefaultRaw = (env.VIPER_MODEL_ROUTE_DEFAULT ?? "pinned").trim().toLowerCase();
   const modelRouteDefault =
     modelRouteDefaultRaw === "auto" ? "auto" : ("pinned" as const);
+  const modelFailoverMaxAttempts = parseModelFailoverMaxAttempts(env);
+  const modelFailoverEnabledOverride = parseModelFailoverEnabledOverride(env);
   const disableLlmCache = (env.DISABLE_LLM_CACHE ?? "false").toLowerCase() === "true";
   const directLlmCacheTtl = disableLlmCache
     ? 0
@@ -159,6 +218,17 @@ export function parseWorkflowRuntimeConfig(
     ),
   );
 
+  const modelTelemetry = env.VIPER_MODEL_TELEMETRY === "1";
+
+  const allowedModelTiers = parseAllowedModelTiersFromEnv(env);
+  const premiumRequiresEntitlement = parsePremiumRequiresEntitlement(env);
+  const premiumEntitled = parsePremiumEntitled(env);
+  const entitledModelTiers = buildEntitledTierSet({
+    allowedFromEnv: allowedModelTiers,
+    premiumRequiresEntitlement,
+    premiumEntitled,
+  });
+
   return {
     debugAssistant,
     debugWorkflow,
@@ -172,6 +242,8 @@ export function parseWorkflowRuntimeConfig(
     resolvedModelProvider: resolved.provider,
     resolvedModelTier: resolved.tier,
     modelRouteDefault,
+    modelFailoverMaxAttempts,
+    modelFailoverEnabledOverride,
     disableLlmCache,
     directLlmCacheTtl,
     chatHistoryLimit,
@@ -186,6 +258,8 @@ export function parseWorkflowRuntimeConfig(
     postEditAutoRepairCommand,
     postEditAutoRepairMaxExtraValidationRuns,
     postEditAutoRepairTimeoutMs,
+    entitledModelTiers,
+    modelTelemetry,
   };
 }
 

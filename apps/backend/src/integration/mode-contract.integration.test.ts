@@ -107,7 +107,13 @@ vi.mock("@repo/workspace-tools", async () => {
   };
 });
 
-async function runStream(opts: { mode: "ask" | "plan" | "debug" | "agent"; prompt: string; openAI: unknown; workspacePath: string }) {
+async function runStream(opts: {
+  mode: "ask" | "plan" | "debug" | "agent";
+  prompt: string;
+  openAI: unknown;
+  workspacePath: string;
+  modelTier?: "auto" | "premium" | "fast";
+}) {
   openAIHolder.current = opts.openAI;
   const mod = await import("../services/assistant.service.js");
   const events: Array<{ type: string; data: unknown }> = [];
@@ -120,6 +126,7 @@ async function runStream(opts: { mode: "ask" | "plan" | "debug" | "agent"; promp
     [],
     undefined,
     opts.mode,
+    opts.modelTier ?? "auto",
   );
   return events;
 }

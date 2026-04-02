@@ -1,5 +1,16 @@
 import type OpenAI from "openai";
 
+/** Optional streaming factory (D.18 failover): backend can wrap `chat.completions.create` with model retries. */
+export type CreateChatCompletionStream = (
+  model: string,
+  params: {
+    messages: OpenAI.ChatCompletionMessageParam[];
+    tools?: OpenAI.ChatCompletionTool[] | undefined;
+    tool_choice?: OpenAI.ChatCompletionToolChoiceOption | undefined;
+    temperature: number;
+  },
+) => Promise<AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>>;
+
 export interface AgenticToolDefinition {
   definition: OpenAI.ChatCompletionTool;
   execute: (args: Record<string, unknown>) => Promise<string>;
@@ -30,6 +41,11 @@ export interface AgenticLoopOptions {
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
   temperature?: number;
+  /**
+   * When set, used instead of `client.chat.completions.create` for streamed completions
+   * (e.g. OpenAI model failover in the backend).
+   */
+  createChatCompletionStream?: CreateChatCompletionStream;
   /**
    * C.12 defense-in-depth: if provided, any tool call whose name is **not** in
    * this set is blocked at execution time (returns a policy message to the LLM

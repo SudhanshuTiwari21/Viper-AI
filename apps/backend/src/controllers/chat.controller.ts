@@ -8,6 +8,10 @@ import { sseCorsHeaders } from "../lib/sse-cors-headers.js";
 import { verifyWorkspaceExists } from "../services/workspace.service.js";
 import type { ChatRequest } from "../validators/request.schemas.js";
 import { createRequestIdentity } from "../types/request-identity.js";
+import { resolveEffectiveModelTier } from "../lib/resolve-effective-model-tier.js";
+import { workflowLog } from "../services/assistant.service.js";
+import { workflowRuntimeConfig } from "../config/workflow-flags.js";
+import { buildRouteTelemetry } from "../types/route-telemetry.js";
 
 export async function postChat(
   request: FastifyRequest<{ Body: ChatRequest }>,
@@ -23,7 +27,21 @@ export async function postChat(
 
   const identity = createRequestIdentity(workspacePath, conversationId);
 
+  const tierRes = await resolveEffectiveModelTier({
+    parsedBody: request.body,
+    identity,
+    config: workflowRuntimeConfig,
+  });
+  if (tierRes.downgraded) {
+    workflowLog("model:tier:denied", identity, {
+      tier_downgraded_from: tierRes.tier_downgraded_from,
+      tier_downgraded_to: tierRes.tier_downgraded_to,
+      reason: tierRes.denyReason ?? "tier_downgrade",
+    });
+  }
+
   try {
+    const requestStart = Date.now();
     const result = await runAssistantPipeline(
       prompt,
       workspacePath,
@@ -31,8 +49,38 @@ export async function postChat(
       conversationId,
       messages,
       chatMode,
+      tierRes.effective,
     );
-    await reply.send(result);
+
+    const routeTelemetry = result.routeMeta
+      ? buildRouteTelemetry({
+          identity,
+          mode: chatMode,
+          effectiveModelTier: tierRes.effective,
+          tierDowngraded: tierRes.downgraded,
+          routeMeta: result.routeMeta,
+          latencyMs: Date.now() - requestStart,
+        })
+      : undefined;
+
+    if (routeTelemetry) {
+      workflowLog("model:route:outcome", identity, routeTelemetry as unknown as Record<string, unknown>);
+      if (workflowRuntimeConfig.modelTelemetry) {
+        const line = { _type: "viper.route.telemetry", ts: new Date().toISOString(), ...routeTelemetry };
+        process.stdout.write(JSON.stringify(line) + "\n");
+      }
+    }
+
+    const { routeMeta: _rm, ...resultWithoutMeta } = result;
+    await reply.send({
+      ...resultWithoutMeta,
+      tierResolution: {
+        tier_requested: tierRes.requested,
+        tier_effective: tierRes.effective,
+        tier_downgraded: tierRes.downgraded,
+      },
+      routeTelemetry,
+    });
   } catch (err) {
     request.log.error({
       err,
@@ -59,6 +107,19 @@ export async function postChatStream(
   }
 
   const identity = createRequestIdentity(workspacePath, conversationId);
+
+  const tierRes = await resolveEffectiveModelTier({
+    parsedBody: request.body,
+    identity,
+    config: workflowRuntimeConfig,
+  });
+  if (tierRes.downgraded) {
+    workflowLog("model:tier:denied", identity, {
+      tier_downgraded_from: tierRes.tier_downgraded_from,
+      tier_downgraded_to: tierRes.tier_downgraded_to,
+      reason: tierRes.denyReason ?? "tier_downgrade",
+    });
+  }
 
   // Required for long-lived SSE: clears Fastify handler timeout / abort wiring that can drop the socket mid-stream.
   reply.hijack();
@@ -111,6 +172,18 @@ export async function postChatStream(
     data: {},
   });
 
+  if (tierRes.downgraded) {
+    send({
+      type: "model:tier:downgraded",
+      data: {
+        tier_requested: tierRes.requested,
+        tier_effective: tierRes.effective,
+        tier_downgraded_from: tierRes.tier_downgraded_from,
+        tier_downgraded_to: tierRes.tier_downgraded_to,
+      },
+    });
+  }
+
   /** Autonomous loop + reasoning can run 30-120s+ with no other events -- Electron/Chromium may kill idle streams. */
   const HEARTBEAT_MS = Math.max(
     3000,
@@ -136,6 +209,8 @@ export async function postChatStream(
       messages,
       ac.signal,
       chatMode,
+      tierRes.effective,
+      { tierDowngraded: tierRes.downgraded, requestedTier: tierRes.requested },
     );
   } catch (err) {
     if (err instanceof ClientDisconnectedError) {

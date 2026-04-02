@@ -4,6 +4,10 @@ import { z } from "zod";
 export const ChatModeSchema = z.enum(["ask", "plan", "debug", "agent"]);
 export type ChatMode = z.infer<typeof ChatModeSchema>;
 
+/** D.19: model tier selector (`auto` = D.17 router + D.18 failover; `premium`/`fast` = registry defaults). */
+export const ModelTierSelectionSchema = z.enum(["auto", "premium", "fast"]);
+export type ModelTierSelection = z.infer<typeof ModelTierSelectionSchema>;
+
 /** Strip empty history rows so clients don’t 400 after failed streams leave content: "". */
 function sanitizeChatMessages(data: unknown): unknown {
   if (typeof data !== "object" || data === null) return data;
@@ -47,6 +51,14 @@ export const ChatRequestSchema = z.preprocess(
       if (raw === undefined || raw === null || raw === "") return "agent";
       return String(raw).trim().toLowerCase();
     }, ChatModeSchema),
+    /**
+     * D.19/D.20: omitted → `undefined` (server may load persisted preference). Explicit `auto` stays `auto`.
+     * Trimmed + lowercased before enum check.
+     */
+    modelTier: z.preprocess((raw) => {
+      if (raw === undefined || raw === null || raw === "") return undefined;
+      return String(raw).trim().toLowerCase();
+    }, ModelTierSelectionSchema.optional()),
   }),
 );
 
@@ -84,8 +96,45 @@ export const PatchRollbackSchema = z.object({
   rollbackId: z.string().min(1),
 });
 
+/** D.21: quality feedback for an assistant message. */
+export const VALID_FEEDBACK_TAGS = [
+  "incorrect",
+  "too_slow",
+  "great",
+  "off_topic",
+  "incomplete",
+] as const;
+
+export const ChatFeedbackSchema = z.object({
+  request_id: z.string().min(1),
+  message_id: z.string().min(1).optional(),
+  rating: z.enum(["up", "down"]),
+  tags: z
+    .array(z.enum(VALID_FEEDBACK_TAGS))
+    .max(5)
+    .optional()
+    .default([]),
+  comment: z.string().max(1000).optional(),
+  workspace_id: z.string().min(1),
+});
+
+/** D.21: GET /feedback/stats query params. */
+export const FeedbackStatsQuerySchema = z.object({
+  workspace_id: z.string().min(1),
+  since: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (!v) return undefined;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? undefined : d;
+    }),
+});
+
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type AnalysisRequest = z.infer<typeof AnalysisRequestSchema>;
 export type ContextDebugRequest = z.infer<typeof ContextDebugSchema>;
 export type PatchApplyRequest = z.infer<typeof PatchApplySchema>;
 export type PatchRollbackRequest = z.infer<typeof PatchRollbackSchema>;
+export type ChatFeedbackRequest = z.infer<typeof ChatFeedbackSchema>;
+export type FeedbackStatsQuery = z.infer<typeof FeedbackStatsQuerySchema>;

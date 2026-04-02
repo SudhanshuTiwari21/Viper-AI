@@ -18,7 +18,7 @@ export interface RouteDecision {
   /** short machine-readable reason */
   reason: string;
   signals: Record<string, number | string | boolean | null | undefined>;
-  /** placeholder for D.18 (no runtime failover yet) */
+  /** Cross-tier failover targets for `auto` routing (D.18); empty when failover disabled. */
   fallbackChain?: ModelSpec[];
 }
 
@@ -66,5 +66,23 @@ export function selectModel(inputs: RouteInputs): RouteDecision {
   const { tier, reason, signals } = pickTier(inputs);
   const selected = getDefaultModelForTier(tier);
   return { selected, reason, signals };
+}
+
+/**
+ * Deterministic tier-flip fallback: fast ↔ premium registry defaults. De-dupes by model id.
+ * Caps how many distinct fallback **models** are listed (D.18: max 2 fallbacks via env/router).
+ */
+export function buildFallbackChainForAuto(
+  selected: ModelSpec,
+  maxFallbackModels: number,
+): ModelSpec[] {
+  const cap = Math.max(0, Math.min(2, maxFallbackModels));
+  if (cap === 0) return [];
+
+  const otherTier: ModelTier = selected.tier === "premium" ? "fast" : "premium";
+  const alt = getDefaultModelForTier(otherTier);
+  if (alt.id === selected.id) return [];
+
+  return [{ ...alt }].slice(0, cap);
 }
 

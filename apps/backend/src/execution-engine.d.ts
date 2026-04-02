@@ -135,6 +135,9 @@ declare module "@repo/execution-engine" {
       }
     | { type: "reasoning:start"; data: Record<string, never> }
     | { type: "reasoning:complete"; data: Record<string, never> }
+    | { type: "model:route:summary"; data: Record<string, unknown> }
+    | { type: "command:output"; data: { content: string } }
+    | { type: "context:searching"; data: Record<string, never> }
     | { type: "result"; data: unknown }
     | { type: "error"; data: { message: string } }
     | {

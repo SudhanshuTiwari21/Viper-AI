@@ -48,14 +48,22 @@ export async function runAgenticLoop(
     if (opts.signal?.aborted) break;
 
     const isLastChance = i === maxIter;
-    const stream = await opts.client.chat.completions.create({
-      model: opts.model,
-      messages,
-      tools: isLastChance ? undefined : toolDefs.length > 0 ? toolDefs : undefined,
-      tool_choice: isLastChance ? undefined : "auto",
-      stream: true,
-      temperature: opts.temperature ?? 0.2,
-    });
+    const temp = opts.temperature ?? 0.2;
+    const stream = opts.createChatCompletionStream
+      ? await opts.createChatCompletionStream(opts.model, {
+          messages,
+          tools: isLastChance ? undefined : toolDefs.length > 0 ? toolDefs : undefined,
+          tool_choice: isLastChance ? undefined : "auto",
+          temperature: temp,
+        })
+      : await opts.client.chat.completions.create({
+          model: opts.model,
+          messages,
+          tools: isLastChance ? undefined : toolDefs.length > 0 ? toolDefs : undefined,
+          tool_choice: isLastChance ? undefined : "auto",
+          stream: true,
+          temperature: temp,
+        });
 
     let textContent = "";
     const toolCalls: Map<

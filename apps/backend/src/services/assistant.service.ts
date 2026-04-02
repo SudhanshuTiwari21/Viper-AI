@@ -1,10 +1,10 @@
 import OpenAI from "openai";
-import { buildCacheKey, createMemoryCache, hashString, withRetry } from "@repo/shared";
+import { buildCacheKey, createMemoryCache, hashString } from "@repo/shared";
 import { buildExecutionPlan, type ExecutionPlan } from "@repo/planner-agent";
 import { executePlan } from "@repo/execution-engine";
 import type { OnStreamEvent } from "@repo/execution-engine";
 import type { RequestIdentity } from "../types/request-identity.js";
-import type { ChatMode } from "../validators/request.schemas.js";
+import type { ChatMode, ModelTierSelection } from "../validators/request.schemas.js";
 import { validateWorkflowLog } from "../types/workflow-log-schema.js";
 // runAutonomousLoop no longer used in the streaming path (replaced by agentic loop)
 import {
@@ -54,14 +54,27 @@ import { attachAnalysisGateForEdits } from "../lib/analysis-edit-gate.js";
 import { runPostEditValidationWithOptionalAutoRepair } from "../lib/post-edit-validation.js";
 import { getAllowedToolNames } from "../lib/mode-tool-policy.js";
 import { getModePromptAddendum, enforceOutputContract } from "../lib/mode-narration.js";
-import { selectModel, type ModelRouteMode } from "../lib/model-router.js";
+import {
+  buildFallbackChainForAuto,
+  selectModel,
+  type ModelRouteMode,
+} from "../lib/model-router.js";
+import {
+  createAgenticChatStreamWithFailover,
+  runChatCompletionWithFailover,
+  runStreamingTextChatWithFailover,
+  type FailoverMeta,
+} from "../lib/openai-chat-with-failover.js";
 import {
   runAgenticLoop,
   buildAgenticSystemPrompt,
   buildWorkspaceTools,
   type AgenticLoopPausedState,
 } from "@repo/agentic-loop";
-import { workflowRuntimeConfig } from "../config/workflow-flags.js";
+import { workflowRuntimeConfig, modelFailoverEnabledForRoute } from "../config/workflow-flags.js";
+import type { RouteMeta } from "../types/route-telemetry.js";
+import type { ModelSpec } from "@repo/model-registry";
+import { resolveModelSpec, getDefaultModelForTier } from "@repo/model-registry";
 import { shouldBlockEditForRetrievalConfidence } from "../lib/retrieval-edit-gate.js";
 
 const FALLBACK_NO_CONTEXT = "No relevant code found in repository.";
@@ -92,6 +105,8 @@ const {
   resolvedModelProvider: RESOLVED_MODEL_PROVIDER,
   resolvedModelTier: RESOLVED_MODEL_TIER,
   modelRouteDefault: MODEL_ROUTE_DEFAULT,
+  modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
+  modelFailoverEnabledOverride: MODEL_FAILOVER_ENABLED_OVERRIDE,
   disableLlmCache: DISABLE_LLM_CACHE,
   directLlmCacheTtl: DIRECT_LLM_CACHE_TTL,
   chatHistoryLimit: CHAT_HISTORY_LIMIT,
@@ -104,6 +119,7 @@ const {
   postEditAutoRepairCommand: POST_EDIT_AUTO_REPAIR_COMMAND,
   postEditAutoRepairMaxExtraValidationRuns: POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS,
   postEditAutoRepairTimeoutMs: POST_EDIT_AUTO_REPAIR_TIMEOUT_MS,
+  modelTelemetry: MODEL_TELEMETRY,
 } = workflowRuntimeConfig;
 
 const DIRECT_LLM_SYSTEM_PROMPT =
@@ -292,6 +308,14 @@ export interface AssistantPipelineResult {
   };
   /** Short user-facing recap after patch preview (LLM), not raw JSON. */
   proposalSummary?: string;
+  /** D.20: set by chat controller when tier was resolved/downgraded (non-streaming). */
+  tierResolution?: {
+    tier_requested: string;
+    tier_effective: string;
+    tier_downgraded: boolean;
+  };
+  /** D.21: route telemetry metadata populated by the pipeline for controller telemetry. */
+  routeMeta?: RouteMeta;
 }
 
 function log(message: string, data?: unknown): void {
@@ -300,7 +324,7 @@ function log(message: string, data?: unknown): void {
   }
 }
 
-function workflowLog(stage: string, identity: RequestIdentity | null, data?: Record<string, unknown>): void {
+export function workflowLog(stage: string, identity: RequestIdentity | null, data?: Record<string, unknown>): void {
   if (!(DEBUG_ASSISTANT || DEBUG_WORKFLOW)) return;
   const idFields = identity
     ? { request_id: identity.request_id, workspace_id: identity.workspace_id, conversation_id: identity.conversation_id }
@@ -321,14 +345,63 @@ function workflowLog(stage: string, identity: RequestIdentity | null, data?: Rec
   log(`[workflow] ${stage}`, merged);
 }
 
+/**
+ * D.17 + D.19 routing precedence (single choke-point):
+ * 1. Client **`modelTier` `premium` / `fast`** → primary is always `getDefaultModelForTier(tier)` for this
+ *    request (including when `VIPER_MODEL_ROUTE_DEFAULT=pinned` — user tier wins). D.17 `selectModel` is
+ *    skipped for tier picking. D.18 failover remains a cross-tier chain from that primary.
+ * 2. Client **`auto`** + env **pinned** → resolved `OPENAI_MODEL` id + pinned failover rules.
+ * 3. Client **`auto`** + env **auto** → D.17 `selectModel` + auto failover rules.
+ */
 function routeModelForRequest(params: {
   routeMode: ModelRouteMode;
+  clientModelTier: ModelTierSelection;
   chatMode: ChatMode;
   intentType: string;
   isStreaming: boolean;
   retrievalConfidence?: number;
-}): { modelId: string; provider: string; tier?: string; reason: string; signals: Record<string, unknown> } {
+}): {
+  modelId: string;
+  provider: string;
+  tier?: string;
+  reason: string;
+  signals: Record<string, unknown>;
+  fallbackChain: ModelSpec[];
+  failoverEnabled: boolean;
+  fallbackModelIds: string[];
+} {
+  const failoverEnabled = modelFailoverEnabledForRoute(
+    MODEL_FAILOVER_ENABLED_OVERRIDE,
+    params.routeMode,
+  );
+  const maxFbSpecs = Math.min(2, Math.max(0, MODEL_FAILOVER_MAX_ATTEMPTS - 1));
+
+  if (params.clientModelTier === "premium" || params.clientModelTier === "fast") {
+    const selected = getDefaultModelForTier(params.clientModelTier);
+    const fallbackChain = failoverEnabled
+      ? buildFallbackChainForAuto(selected, maxFbSpecs)
+      : [];
+    return {
+      modelId: String(selected.id),
+      provider: selected.provider,
+      tier: selected.tier,
+      reason: params.clientModelTier === "premium" ? "client_tier_premium" : "client_tier_fast",
+      signals: {
+        clientModelTier: params.clientModelTier,
+        tier_override_from_client: true,
+        ...(params.routeMode === "pinned" ? { env_pinned_primary_superseded: true } : {}),
+      },
+      fallbackChain,
+      failoverEnabled,
+      fallbackModelIds: fallbackChain.map((s) => s.id),
+    };
+  }
+
   if (params.routeMode === "pinned") {
+    const resolvedSpec = resolveModelSpec(OPENAI_MODEL) ?? getDefaultModelForTier("fast");
+    const fallbackChain = failoverEnabled
+      ? buildFallbackChainForAuto(resolvedSpec, maxFbSpecs)
+      : [];
     return {
       modelId: RESOLVED_MODEL_ID,
       provider: RESOLVED_MODEL_PROVIDER,
@@ -337,7 +410,11 @@ function routeModelForRequest(params: {
       signals: {
         openaiModelEnv: OPENAI_MODEL,
         resolvedModelId: RESOLVED_MODEL_ID,
+        clientModelTier: "auto",
       },
+      fallbackChain,
+      failoverEnabled,
+      fallbackModelIds: fallbackChain.map((s) => s.id),
     };
   }
 
@@ -348,18 +425,29 @@ function routeModelForRequest(params: {
     isStreaming: params.isStreaming,
     retrievalConfidence: params.retrievalConfidence,
   });
+  const fallbackChain = failoverEnabled
+    ? buildFallbackChainForAuto(decision.selected, maxFbSpecs)
+    : [];
   return {
-    modelId: decision.selected.id,
+    modelId: String(decision.selected.id),
     provider: decision.selected.provider,
     tier: decision.selected.tier,
     reason: decision.reason,
-    signals: decision.signals as Record<string, unknown>,
+    signals: { ...(decision.signals as Record<string, unknown>), clientModelTier: "auto" },
+    fallbackChain,
+    failoverEnabled,
+    fallbackModelIds: fallbackChain.map((s) => s.id),
   };
 }
 
-function isRetryableError(err: unknown): boolean {
-  const status = (err as { status?: number })?.status;
-  return status === 429 || status === 503;
+function logModelFailover(identity: RequestIdentity | null, meta: FailoverMeta): void {
+  workflowLog("model:route:fallback", identity, {
+    from_model: meta.from_model,
+    to_model: meta.to_model,
+    attempt: meta.attempt,
+    reason: meta.reason,
+    error_class: meta.error_class,
+  });
 }
 
 function toRoutingTasks(plan: ExecutionPlan): { tasks: Array<{ type: string }> } {
@@ -816,6 +904,9 @@ async function runDirectLLM(
     workspaceContextPreamble?: string;
     modelId: string;
     chatMode: ChatMode;
+    identity?: RequestIdentity | null;
+    fallbackModelIds?: string[];
+    modelFailoverMaxAttempts?: number;
   },
 ): Promise<AssistantPipelineResult> {
   const cacheKey = `direct-llm:${buildCacheKey({
@@ -854,33 +945,44 @@ async function runDirectLLM(
     const preamble =
       args.workspaceContextPreamble ??
       "Workspace context from the project index (use for accurate run/install commands):\n\n";
-    const response = await withRetry(
-      () =>
-        client.chat.completions.create({
-          model: args.modelId,
-          messages: [
-            {
-              role: "system",
-              content: DIRECT_LLM_SYSTEM_PROMPT + getModePromptAddendum(args.chatMode),
-            },
-            ...(ctx
-              ? [
-                  {
-                    role: "system" as const,
-                    content: preamble + ctx,
-                  },
-                ]
-              : []),
-            ...lastMessages.slice(-CHAT_HISTORY_LIMIT).map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-        }),
-      { maxRetries: 3, retryDelayMs: 500, isRetryable: isRetryableError },
-    );
+    const fb = args.fallbackModelIds ?? [];
+    const maxAtt = args.modelFailoverMaxAttempts ?? MODEL_FAILOVER_MAX_ATTEMPTS;
+    let dlFinalModel = args.modelId;
+    let dlFbCount = 0;
+    const response = await runChatCompletionWithFailover({
+      client,
+      primaryModelId: args.modelId,
+      fallbackModelIds: fb,
+      maxAttempts: maxAtt,
+      onFallback: (meta) => {
+        dlFinalModel = meta.to_model;
+        dlFbCount++;
+        logModelFailover(args.identity ?? null, meta);
+      },
+      buildRequest: (model) => ({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: DIRECT_LLM_SYSTEM_PROMPT + getModePromptAddendum(args.chatMode),
+          },
+          ...(ctx
+            ? [
+                {
+                  role: "system" as const,
+                  content: preamble + ctx,
+                },
+              ]
+            : []),
+          ...lastMessages.slice(-CHAT_HISTORY_LIMIT).map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      }),
+    });
     let content =
       response.choices[0]?.message?.content?.trim() ?? FALLBACK_NO_CONTEXT;
     if (content !== FALLBACK_NO_CONTEXT) {
@@ -902,6 +1004,15 @@ async function runDirectLLM(
         functions: cw?.functions ?? [],
         snippets: [content],
         estimatedTokens: (cw?.estimatedTokens ?? 0) + estimatedTokens,
+      },
+      routeMeta: {
+        primary_model_id: args.modelId,
+        final_model_id: dlFinalModel,
+        fallback_chain: fb,
+        fallback_count: dlFbCount,
+        intent: args.intentType ?? "GENERIC",
+        route_mode: MODEL_ROUTE_DEFAULT,
+        route_reason: "direct_llm",
       },
     };
     if (canUseCache) {
@@ -938,6 +1049,8 @@ export async function runAssistantPipeline(
   conversationId?: string,
   messages: Array<{ role: "user" | "assistant"; content: string }> = [],
   chatMode: ChatMode = "agent",
+  /** D.20: effective tier after persistence + entitlements (controller-resolved). */
+  modelTier: ModelTierSelection = "auto",
 ): Promise<AssistantPipelineResult> {
   if (DEBUG_ASSISTANT) log("Chat pipeline (C.11 mode — tool policy in C.12)", { chatMode });
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
@@ -988,6 +1101,7 @@ export async function runAssistantPipeline(
   const routeMode = MODEL_ROUTE_DEFAULT;
   const routed = routeModelForRequest({
     routeMode,
+    clientModelTier: modelTier,
     chatMode,
     intentType: intentResult.intent.intentType,
     isStreaming: false,
@@ -1000,6 +1114,8 @@ export async function runAssistantPipeline(
     signals: routed.signals,
     routeMode,
     mode: chatMode,
+    client_model_tier: modelTier,
+    tier_override_from_client: modelTier === "premium" || modelTier === "fast",
   });
 
   const contextualDirectGuided =
@@ -1016,6 +1132,9 @@ export async function runAssistantPipeline(
       intentType: intentResult.intent.intentType,
       modelId: routed.modelId,
       chatMode,
+      identity,
+      fallbackModelIds: routed.fallbackModelIds,
+      modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
     });
   }
 
@@ -1062,6 +1181,9 @@ export async function runAssistantPipeline(
           : "Workspace context (actual file contents and indexed snippets — use for accurate run/install commands):\n\n",
       modelId: routed.modelId,
       chatMode,
+      identity,
+      fallbackModelIds: routed.fallbackModelIds,
+      modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
     });
   }
 
@@ -1153,6 +1275,16 @@ export async function runAssistantPipeline(
       }
     : undefined;
 
+  const execRouteMeta: RouteMeta = {
+    primary_model_id: routed.modelId,
+    final_model_id: routed.modelId,
+    fallback_chain: routed.fallbackModelIds,
+    fallback_count: 0,
+    intent: intentSummary.intent,
+    route_mode: routeMode,
+    route_reason: routed.reason,
+  };
+
   if (!hasContext) {
     return {
       intent: intentSummary,
@@ -1163,6 +1295,7 @@ export async function runAssistantPipeline(
         estimatedTokens: 0,
       },
       reasoning,
+      routeMeta: execRouteMeta,
     };
   }
 
@@ -1175,6 +1308,7 @@ export async function runAssistantPipeline(
       estimatedTokens: contextWindow.estimatedTokens,
     },
     reasoning,
+    routeMeta: execRouteMeta,
   };
 }
 
@@ -1191,6 +1325,8 @@ async function runDirectLLMStream(
     contextMeta?: Pick<ContextWindow, "files" | "functions" | "estimatedTokens">;
     workspaceContextPreamble?: string;
     chatMode?: ChatMode;
+    fallbackModelIds?: string[];
+    modelFailoverMaxAttempts?: number;
   },
 ): Promise<AssistantPipelineResult> {
   const client = getOpenAIClient();
@@ -1200,39 +1336,47 @@ async function runDirectLLMStream(
     "Workspace context from the project index (use for accurate run/install commands):\n\n";
   const modeAddendum = getModePromptAddendum(options?.chatMode ?? "agent");
 
-  const stream = await client.chat.completions.create({
-    model: modelId,
-    messages: [
-      {
-        role: "system",
-        content: DIRECT_LLM_SYSTEM_PROMPT + modeAddendum,
-      },
-      ...(ctx
-        ? [
-            {
-              role: "system" as const,
-              content: preamble + ctx,
-            },
-          ]
-        : []),
-      ...lastMessages.slice(-CHAT_HISTORY_LIMIT).map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.3,
-    stream: true,
-  });
-
   let content = "";
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content ?? "";
-    if (delta) {
+  let dsFinalModel = modelId;
+  let dsFbCount = 0;
+  const streamFo = await runStreamingTextChatWithFailover({
+    client,
+    primaryModelId: modelId,
+    fallbackModelIds: options?.fallbackModelIds ?? [],
+    maxAttempts: options?.modelFailoverMaxAttempts ?? MODEL_FAILOVER_MAX_ATTEMPTS,
+    streamBody: {
+      messages: [
+        {
+          role: "system",
+          content: DIRECT_LLM_SYSTEM_PROMPT + modeAddendum,
+        },
+        ...(ctx
+          ? [
+              {
+                role: "system" as const,
+                content: preamble + ctx,
+              },
+            ]
+          : []),
+        ...lastMessages.slice(-CHAT_HISTORY_LIMIT).map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.3,
+    },
+    onFallback: (m) => {
+      dsFinalModel = m.to_model;
+      dsFbCount++;
+      logModelFailover(identity, m);
+    },
+    onDelta: (delta) => {
       content += delta;
       onEvent({ type: "token", data: { content: delta } });
-    }
-  }
+    },
+  });
+  dsFinalModel = streamFo.modelUsed;
 
   if (!content.trim()) {
     content = FALLBACK_NO_CONTEXT;
@@ -1249,6 +1393,15 @@ async function runDirectLLMStream(
       functions: meta?.functions ?? [],
       snippets: [content],
       estimatedTokens: (meta?.estimatedTokens ?? 0) + estimatedTokens,
+    },
+    routeMeta: {
+      primary_model_id: modelId,
+      final_model_id: dsFinalModel,
+      fallback_chain: options?.fallbackModelIds ?? [],
+      fallback_count: dsFbCount,
+      intent: resultIntent?.intent ?? "GENERIC",
+      route_mode: MODEL_ROUTE_DEFAULT,
+      route_reason: "direct_llm_stream",
     },
   };
 }
@@ -1270,6 +1423,9 @@ async function runAgenticStreamPath(
   intentSummary: { intent: string; summary: string },
   identity: RequestIdentity,
   modelId: string,
+  failoverEnabled: boolean,
+  fallbackModelIds: string[],
+  modelFailoverMaxAttempts: number,
   signal?: AbortSignal,
   conversationId?: string,
   resumeState?: typeof pausedLoopStates extends Map<string, infer V> ? V : never,
@@ -1278,6 +1434,7 @@ async function runAgenticStreamPath(
   chatMode: ChatMode = "agent",
 ): Promise<AssistantPipelineResult & { paused?: boolean }> {
   const client = getOpenAIClient();
+  const useAgenticFailover = failoverEnabled && fallbackModelIds.length > 0;
   const discoveryToolsUsed = new Set<string>();
   const filesReadForGate = new Set<string>();
   const allowedToolNames = getAllowedToolNames(chatMode);
@@ -1508,6 +1665,8 @@ async function runAgenticStreamPath(
   const editedFiles: string[] = [];
   const toolsUsed: string[] = [];
   let thinkingCompleted = false;
+  let agFinalModel = modelId;
+  let agFbCount = 0;
 
   const result = await runAgenticLoop({
     client,
@@ -1519,6 +1678,26 @@ async function runAgenticStreamPath(
     temperature: 0.2,
     maxIterations: 12,
     signal,
+    createChatCompletionStream: useAgenticFailover
+      ? async (m, body) =>
+          createAgenticChatStreamWithFailover({
+            client,
+            primaryModelId: m,
+            fallbackModelIds,
+            maxAttempts: modelFailoverMaxAttempts,
+            streamBody: {
+              messages: body.messages,
+              tools: body.tools,
+              tool_choice: body.tool_choice,
+              temperature: body.temperature,
+            },
+            onFallback: (meta) => {
+              agFinalModel = meta.to_model;
+              agFbCount++;
+              logModelFailover(identity, meta);
+            },
+          })
+      : undefined,
     allowedToolNames: chatMode !== "agent" ? allowedToolNames : undefined,
     onToken: (delta) => {
       if (!thinkingCompleted) {
@@ -1660,6 +1839,15 @@ async function runAgenticStreamPath(
         snippets: content ? [content] : [],
         estimatedTokens,
       },
+      routeMeta: {
+        primary_model_id: modelId,
+        final_model_id: agFbCount > 0 ? agFinalModel : modelId,
+        fallback_chain: fallbackModelIds,
+        fallback_count: agFbCount,
+        intent: intentSummary.intent,
+        route_mode: MODEL_ROUTE_DEFAULT,
+        route_reason: "agentic_paused",
+      },
       paused: true,
     };
   }
@@ -1694,6 +1882,15 @@ async function runAgenticStreamPath(
       snippets: [content],
       estimatedTokens,
     },
+    routeMeta: {
+      primary_model_id: modelId,
+      final_model_id: agFbCount > 0 ? agFinalModel : modelId,
+      fallback_chain: fallbackModelIds,
+      fallback_count: agFbCount,
+      intent: intentSummary.intent,
+      route_mode: MODEL_ROUTE_DEFAULT,
+      route_reason: "agentic",
+    },
   };
 }
 
@@ -1710,9 +1907,45 @@ export async function runAssistantStreamPipeline(
   messages: Array<{ role: "user" | "assistant"; content: string }> = [],
   signal?: AbortSignal,
   chatMode: ChatMode = "agent",
+  modelTier: ModelTierSelection = "auto",
+  telemetryCtx?: { tierDowngraded: boolean; requestedTier: string },
 ): Promise<void> {
   ensureDbMemoryAdapter();
   const requestStart = Date.now();
+
+  const emitRouteTelemetry = (routeMeta: RouteMeta | undefined) => {
+    if (!routeMeta) return;
+    const latencyMs = Date.now() - requestStart;
+    const payload = {
+      mode: chatMode,
+      effective_model_tier: modelTier,
+      primary_model_id: routeMeta.primary_model_id,
+      final_model_id: routeMeta.final_model_id,
+      fallback_chain: routeMeta.fallback_chain,
+      fallback_count: routeMeta.fallback_count,
+      intent: routeMeta.intent,
+      route_mode: routeMeta.route_mode,
+      tier_downgraded: telemetryCtx?.tierDowngraded ?? false,
+      latency_ms: latencyMs,
+    };
+    workflowLog("model:route:outcome", identity, payload);
+    onEvent({
+      type: "model:route:summary",
+      data: payload,
+    });
+    if (MODEL_TELEMETRY) {
+      const line = {
+        _type: "viper.route.telemetry",
+        ts: new Date().toISOString(),
+        request_id: identity.request_id,
+        workspace_id: identity.workspace_id,
+        conversation_id: identity.conversation_id,
+        ...payload,
+      };
+      process.stdout.write(JSON.stringify(line) + "\n");
+    }
+  };
+
   // request:start logs the pinned/default model; a per-request routed decision (if enabled)
   // is logged after intent classification at model:route:selected.
   if (DEBUG_ASSISTANT && OPENAI_MODEL !== RESOLVED_MODEL_ID) {
@@ -1833,6 +2066,45 @@ export async function runAssistantStreamPipeline(
       return;
     }
 
+    const resumeFailoverEnabled = modelFailoverEnabledForRoute(
+      MODEL_FAILOVER_ENABLED_OVERRIDE,
+      MODEL_ROUTE_DEFAULT,
+    );
+    const resumeMaxFbSpecs = Math.min(2, Math.max(0, MODEL_FAILOVER_MAX_ATTEMPTS - 1));
+    let resumeRouted: { modelId: string; fallbackModelIds: string[] };
+    if (modelTier === "premium" || modelTier === "fast") {
+      const selected = getDefaultModelForTier(modelTier);
+      resumeRouted = {
+        modelId: String(selected.id),
+        fallbackModelIds: resumeFailoverEnabled
+          ? buildFallbackChainForAuto(selected, resumeMaxFbSpecs).map((s) => s.id)
+          : [],
+      };
+    } else if (MODEL_ROUTE_DEFAULT === "pinned") {
+      resumeRouted = {
+        modelId: RESOLVED_MODEL_ID,
+        fallbackModelIds: resumeFailoverEnabled
+          ? buildFallbackChainForAuto(
+              resolveModelSpec(OPENAI_MODEL) ?? getDefaultModelForTier("fast"),
+              resumeMaxFbSpecs,
+            ).map((s) => s.id)
+          : [],
+      };
+    } else {
+      const d = selectModel({
+        chatMode,
+        intentType: resumeState.intentSummary.intent,
+        hasAttachments: false,
+        isStreaming: true,
+      });
+      resumeRouted = {
+        modelId: String(d.selected.id),
+        fallbackModelIds: resumeFailoverEnabled
+          ? buildFallbackChainForAuto(d.selected, resumeMaxFbSpecs).map((s) => s.id)
+          : [],
+      };
+    }
+
     const agenticResult = await withAbort(
       runAgenticStreamPath(
         prompt,
@@ -1841,7 +2113,10 @@ export async function runAssistantStreamPipeline(
         onEvent,
         resumeState.intentSummary,
         identity,
-        RESOLVED_MODEL_ID,
+        resumeRouted.modelId,
+        resumeFailoverEnabled,
+        resumeRouted.fallbackModelIds,
+        MODEL_FAILOVER_MAX_ATTEMPTS,
         signal,
         conversationId,
         resumeState,
@@ -1852,6 +2127,7 @@ export async function runAssistantStreamPipeline(
       signal,
     );
 
+    emitRouteTelemetry(agenticResult.routeMeta);
     onEvent({ type: "result", data: agenticResult });
     onEvent({ type: "done", data: {} });
     workflowLog("request:complete", identity, {
@@ -1910,6 +2186,7 @@ export async function runAssistantStreamPipeline(
     const routeMode = MODEL_ROUTE_DEFAULT;
     const routed = routeModelForRequest({
       routeMode,
+      clientModelTier: modelTier,
       chatMode,
       intentType: intentResult.intent.intentType,
       isStreaming: true,
@@ -1922,14 +2199,21 @@ export async function runAssistantStreamPipeline(
       signals: routed.signals,
       routeMode,
       mode: chatMode,
+      client_model_tier: modelTier,
+      tier_override_from_client: modelTier === "premium" || modelTier === "fast",
     });
 
     workflowLog("route:direct-llm", identity, { intent: intentResult.intent.intentType });
     if (DEBUG_ASSISTANT) log("Direct LLM response (GENERIC, no workspace tools)");
     const result = await withAbort(
-      runDirectLLMStream(prompt, lastMessages, onEvent, identity, routed.modelId, intentSummary, { chatMode }),
+      runDirectLLMStream(prompt, lastMessages, onEvent, identity, routed.modelId, intentSummary, {
+        chatMode,
+        fallbackModelIds: routed.fallbackModelIds,
+        modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
+      }),
       signal,
     );
+    emitRouteTelemetry(result.routeMeta);
     onEvent({ type: "result", data: result });
     onEvent({ type: "done", data: {} });
     workflowLog("request:complete", identity, {
@@ -1947,6 +2231,7 @@ export async function runAssistantStreamPipeline(
   const routeMode = MODEL_ROUTE_DEFAULT;
   const routed = routeModelForRequest({
     routeMode,
+    clientModelTier: modelTier,
     chatMode,
     intentType: intentResult.intent.intentType,
     isStreaming: true,
@@ -1959,6 +2244,8 @@ export async function runAssistantStreamPipeline(
     signals: routed.signals,
     routeMode,
     mode: chatMode,
+    client_model_tier: modelTier,
+    tier_override_from_client: modelTier === "premium" || modelTier === "fast",
   });
 
   // Kick off codebase analysis (for embedding index) with a short warmup window.
@@ -2047,6 +2334,9 @@ export async function runAssistantStreamPipeline(
       intentSummary,
       identity,
       routed.modelId,
+      routed.failoverEnabled,
+      routed.fallbackModelIds,
+      MODEL_FAILOVER_MAX_ATTEMPTS,
       signal,
       conversationId,
       undefined,
@@ -2058,6 +2348,7 @@ export async function runAssistantStreamPipeline(
   );
   workflowLog("agentic-loop:complete", identity, { paused: Boolean(agenticResult.paused) });
 
+  emitRouteTelemetry(agenticResult.routeMeta);
   onEvent({ type: "result", data: agenticResult });
   onEvent({ type: "done", data: {} });
   workflowLog("request:complete", identity, {

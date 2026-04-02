@@ -6,6 +6,8 @@ import {
   Scan,
   Code2,
   Sparkles,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
@@ -22,7 +24,10 @@ import {
   applyPatch as apiApplyPatch,
   rejectPatch as apiRejectPatch,
   buildV2rayTunSubscriptionImportDeepLink,
+  sendFeedback,
   type ChatResponse,
+  type ModelTier,
+  type FeedbackRating,
 } from "../services/agent-api";
 import { filterPatchByHunks, buildInitialHunkStatuses } from "../lib/filter-patch";
 import { buildFileDiffWithHunks } from "../lib/hunk-model";
@@ -76,6 +81,9 @@ export function ChatPanel() {
     appendCommandOutput,
     setAwaitingApproval,
     setChatMode,
+    setModelTier,
+    setRequestId,
+    setFeedbackRating,
   } = useChat();
   const { workspace } = useWorkspaceContext();
   const { addPendingEdit } = usePendingEdits();
@@ -91,6 +99,7 @@ export function ChatPanel() {
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages ?? [];
   const currentMode: ChatMode = activeSession?.chatMode ?? "agent";
+  const currentModelTier: ModelTier = activeSession?.modelTier ?? "auto";
 
   useEffect(() => {
     scrollToBottom();
@@ -141,6 +150,12 @@ export function ChatPanel() {
           workspacePath,
           (event) => {
             switch (event.type) {
+              case "stream:open": {
+                const rid = event.data.request_id as string | undefined;
+                if (rid) setRequestId(sid, assistantId, rid);
+                break;
+              }
+
               case "intent":
                 setStreamingPhase(sid, assistantId,
                   currentMode === "plan" ? "planning" : "intent");
@@ -244,7 +259,9 @@ export function ChatPanel() {
               }
 
               case "retrieval:confidence":
-                // B.6: structured ranking confidence — UI parity deferred; ignore without breaking stream.
+              case "model:tier:downgraded":
+              case "model:route:summary":
+              case "keepalive":
                 break;
 
               case "context:retrieved": {
@@ -464,6 +481,7 @@ export function ChatPanel() {
           lastMessages,
           undefined,
           currentMode,
+          currentModelTier,
         );
       } catch (err) {
         const errorText = err instanceof Error ? err.message : "Request failed";
@@ -502,6 +520,8 @@ export function ChatPanel() {
       setAwaitingApproval,
       addPendingEdit,
       currentMode,
+      currentModelTier,
+      setRequestId,
     ],
   );
 
@@ -698,6 +718,30 @@ export function ChatPanel() {
     handleSend("Stop here, that's enough for now.");
   }, [streaming, handleSend]);
 
+  const handleFeedback = useCallback(
+    (messageId: string, rating: FeedbackRating) => {
+      if (!activeSessionId) return;
+      const session = sessions.find((s) => s.id === activeSessionId);
+      const msg = session?.messages.find((m) => m.id === messageId);
+      if (!msg?.requestId) return;
+      const current = msg.feedbackRating;
+      const next: "up" | "down" | null = current === rating ? null : rating;
+      setFeedbackRating(activeSessionId, messageId, next);
+      if (next) {
+        const wsId = workspace?.root
+          ? workspace.root.replace(/\\/g, "/").replace(/\/$/, "")
+          : "unknown";
+        void sendFeedback({
+          request_id: msg.requestId,
+          message_id: messageId,
+          rating: next,
+          workspace_id: wsId,
+        });
+      }
+    },
+    [activeSessionId, sessions, setFeedbackRating, workspace?.root],
+  );
+
   const pastChats = sessions.slice(0, 10).sort((a, b) => b.createdAt - a.createdAt);
 
   return (
@@ -854,19 +898,50 @@ export function ChatPanel() {
           )}
 
           {messages.map((m) => (
-            <ChatMessage
-              key={m.id}
-              message={m}
-              onApplySelected={handleApplySelected}
-              onRejectProposal={handleRejectProposal}
-              onIncludeAll={handleIncludeAll}
-              onHunkAccept={handleHunkAccept}
-              onHunkReject={handleHunkReject}
-              onFileAcceptAll={handleFileAcceptAll}
-              onFileRejectAll={handleFileRejectAll}
-              onContinueStep={handleContinueStep}
-              onStopStep={handleStopStep}
-            />
+            <div key={m.id}>
+              <ChatMessage
+                message={m}
+                onApplySelected={handleApplySelected}
+                onRejectProposal={handleRejectProposal}
+                onIncludeAll={handleIncludeAll}
+                onHunkAccept={handleHunkAccept}
+                onHunkReject={handleHunkReject}
+                onFileAcceptAll={handleFileAcceptAll}
+                onFileRejectAll={handleFileRejectAll}
+                onContinueStep={handleContinueStep}
+                onStopStep={handleStopStep}
+              />
+              {m.role === "assistant" && !m.streaming && m.requestId && m.content.trim() && (
+                <div className="flex items-center gap-1 mt-0.5 ml-1 opacity-0 hover:opacity-100 transition-opacity group-hover:opacity-100"
+                  style={{ opacity: m.feedbackRating ? 1 : undefined }}
+                >
+                  <button
+                    type="button"
+                    title="Helpful"
+                    onClick={() => handleFeedback(m.id, "up")}
+                    className={`p-1 rounded transition-colors ${
+                      m.feedbackRating === "up"
+                        ? "text-green-400"
+                        : "text-v-text3 hover:text-v-text hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <ThumbsUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Not helpful"
+                    onClick={() => handleFeedback(m.id, "down")}
+                    className={`p-1 rounded transition-colors ${
+                      m.feedbackRating === "down"
+                        ? "text-red-400"
+                        : "text-v-text3 hover:text-v-text hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <ThumbsDown size={12} />
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
           <div ref={bottomRef} />
         </div>
@@ -888,6 +963,29 @@ export function ChatPanel() {
               } disabled:opacity-40 disabled:pointer-events-none`}
             >
               {m}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1">
+          {(
+            [
+              { tier: "auto" as const, label: "Auto" },
+              { tier: "premium" as const, label: "Premium" },
+              { tier: "fast" as const, label: "Fast" },
+            ] as const
+          ).map(({ tier, label }) => (
+            <button
+              key={tier}
+              type="button"
+              disabled={streaming}
+              onClick={() => activeSessionId && setModelTier(activeSessionId, tier)}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                currentModelTier === tier
+                  ? "bg-v-accent/15 text-v-accent"
+                  : "text-v-text3 hover:bg-white/[0.04] hover:text-v-text"
+              } disabled:opacity-40 disabled:pointer-events-none`}
+            >
+              {label}
             </button>
           ))}
         </div>

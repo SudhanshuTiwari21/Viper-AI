@@ -23,12 +23,18 @@ export const VALID_WORKFLOW_STAGES = [
   "auto-repair:result",
   "mode:tool:blocked",
   "model:route:selected",
+  "model:route:fallback",
+  "model:route:outcome",
+  "model:tier:denied",
   "result:emitted",
 
   // A.1 request lifecycle (emitted by workflowLog in this repo)
   "request:start",
   "request:resume",
   "request:complete",
+
+  // D.21 quality feedback
+  "feedback:received",
 
   // Existing edit gate / analysis background stages (emitted by workflowLog in this repo)
   "edit-gate:blocked",
@@ -58,7 +64,7 @@ export const WorkflowLogEventSchema = z
   })
   .passthrough()
   .superRefine((val, ctx) => {
-    // `latency_ms` only belongs to request lifecycle completion logs.
+    const stagesWithLatency: ReadonlySet<string> = new Set(["request:complete", "model:route:outcome"]);
     if (val.workflow_stage === "request:complete") {
       if (val.latency_ms === undefined) {
         ctx.addIssue({
@@ -67,11 +73,11 @@ export const WorkflowLogEventSchema = z
           message: "latency_ms is required for request:complete",
         });
       }
-    } else if (val.latency_ms !== undefined) {
+    } else if (val.latency_ms !== undefined && !stagesWithLatency.has(val.workflow_stage)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["latency_ms"],
-        message: "latency_ms is only allowed for request:complete",
+        message: "latency_ms is only allowed for request:complete or model:route:outcome",
       });
     }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { selectModel } from "./model-router.js";
+import { buildFallbackChainForAuto, selectModel } from "./model-router.js";
+import { getDefaultModelForTier } from "@repo/model-registry";
 
 describe("model-router (D.17)", () => {
   it("ask routes to fast", () => {
@@ -52,6 +53,24 @@ describe("model-router (D.17)", () => {
       isStreaming: true,
     });
     expect(d.selected.tier).toBe("fast");
+  });
+});
+
+describe("model-router fallback chain (D.18)", () => {
+  it("fast primary gets premium fallback; de-dupes / caps", () => {
+    const fast = getDefaultModelForTier("fast");
+    const chain = buildFallbackChainForAuto(fast, 2);
+    expect(chain).toHaveLength(1);
+    expect(chain[0]!.tier).toBe("premium");
+    expect(chain[0]!.id).not.toBe(fast.id);
+    expect(buildFallbackChainForAuto(fast, 0)).toEqual([]);
+  });
+
+  it("premium primary gets fast fallback", () => {
+    const premium = getDefaultModelForTier("premium");
+    const chain = buildFallbackChainForAuto(premium, 2);
+    expect(chain).toHaveLength(1);
+    expect(chain[0]!.tier).toBe("fast");
   });
 });
 

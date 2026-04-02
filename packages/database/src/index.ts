@@ -21,3 +21,15 @@ export {
   searchMemoryByKeywords,
   type ConversationMemoryRow,
 } from "./conversation-memory.repository";
+export {
+  upsertConversationModelPreference,
+  getConversationModelPreference,
+  type ConversationModelTier,
+} from "./conversation-model-preferences.repository";
+export {
+  insertChatFeedback,
+  getChatFeedbackStats,
+  type FeedbackRating,
+  type ChatFeedbackRow,
+  type FeedbackStats,
+} from "./chat-feedback.repository";

@@ -3,6 +3,7 @@ import {
   parseWorkflowRuntimeConfig,
   parseMinRetrievalConfidenceForEdits,
   parsePostEditAutoRepairMaxExtraValidationRuns,
+  modelFailoverEnabledForRoute,
 } from "./workflow-flags.js";
 
 function env(partial: Record<string, string | undefined>): NodeJS.ProcessEnv {
@@ -24,6 +25,11 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(c.resolvedModelProvider).toBe("openai");
     expect(c.resolvedModelTier).toBeTruthy();
     expect(c.modelRouteDefault).toBe("pinned");
+    expect(c.modelFailoverMaxAttempts).toBe(3);
+    expect(c.modelFailoverEnabledOverride).toBeUndefined();
+    expect(c.entitledModelTiers.has("auto")).toBe(true);
+    expect(c.entitledModelTiers.has("fast")).toBe(true);
+    expect(c.entitledModelTiers.has("premium")).toBe(true);
     expect(c.disableLlmCache).toBe(false);
     expect(c.directLlmCacheTtl).toBe(900);
     expect(c.chatHistoryLimit).toBe(10);
@@ -56,6 +62,46 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "auto" })).modelRouteDefault).toBe("auto");
     expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "AUTO" })).modelRouteDefault).toBe("auto");
     expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "something-else" })).modelRouteDefault).toBe("pinned");
+  });
+
+  it("VIPER_MODEL_FAILOVER_MAX_ATTEMPTS clamps 1–5 (default 3)", () => {
+    expect(parseWorkflowRuntimeConfig(env({})).modelFailoverMaxAttempts).toBe(3);
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_FAILOVER_MAX_ATTEMPTS: "1" })).modelFailoverMaxAttempts).toBe(1);
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_FAILOVER_MAX_ATTEMPTS: "5" })).modelFailoverMaxAttempts).toBe(
+      5,
+    );
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_FAILOVER_MAX_ATTEMPTS: "99" })).modelFailoverMaxAttempts).toBe(
+      5,
+    );
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_FAILOVER_MAX_ATTEMPTS: "nope" })).modelFailoverMaxAttempts).toBe(
+      3,
+    );
+  });
+
+  it("VIPER_MODEL_FAILOVER_ENABLED override + derived defaults", () => {
+    expect(parseWorkflowRuntimeConfig(env({})).modelFailoverEnabledOverride).toBeUndefined();
+    expect(
+      modelFailoverEnabledForRoute(
+        parseWorkflowRuntimeConfig(env({})).modelFailoverEnabledOverride,
+        parseWorkflowRuntimeConfig(env({})).modelRouteDefault,
+      ),
+    ).toBe(false);
+    expect(
+      modelFailoverEnabledForRoute(
+        parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "auto" })).modelFailoverEnabledOverride,
+        parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "auto" })).modelRouteDefault,
+      ),
+    ).toBe(true);
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_FAILOVER_ENABLED: "1" })).modelFailoverEnabledOverride).toBe(
+      true,
+    );
+    expect(
+      modelFailoverEnabledForRoute(
+        parseWorkflowRuntimeConfig(env({ VIPER_MODEL_FAILOVER_ENABLED: "0", VIPER_MODEL_ROUTE_DEFAULT: "auto" }))
+          .modelFailoverEnabledOverride,
+        "auto",
+      ),
+    ).toBe(false);
   });
 
   it("VIPER_DEBUG_ASSISTANT and VIPER_DEBUG_WORKFLOW only when === \"1\"", () => {
@@ -179,6 +225,12 @@ describe("parseWorkflowRuntimeConfig", () => {
         }),
       ).postEditAutoRepairTimeoutMs,
     ).toBe(5000);
+  });
+
+  it("VIPER_MODEL_TELEMETRY: only enabled with '1'", () => {
+    expect(parseWorkflowRuntimeConfig(env({})).modelTelemetry).toBe(false);
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_TELEMETRY: "1" })).modelTelemetry).toBe(true);
+    expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_TELEMETRY: "true" })).modelTelemetry).toBe(false);
   });
 
   it("VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: default 0, clamp [0,1], invalid → 0", () => {

@@ -5,6 +5,7 @@ export type {
   AgenticLoopResult,
   AgenticLoopPausedState,
   FileSnapshot,
+  CreateChatCompletionStream,
 } from "./loop/agentic-loop.types.js";
 
 export { buildAgenticSystemPrompt } from "./prompt/build-agentic-system-prompt.js";

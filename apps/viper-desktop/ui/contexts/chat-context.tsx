@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import type { CodePatch } from "../lib/patch-types";
+import type { ModelTier } from "../services/agent-api";
 import { useWorkspaceContext } from "./workspace-context";
 import type { HunkApprovalStatus } from "../components/inline-diff-viewer";
 
@@ -81,6 +82,10 @@ export interface ChatMessage {
     editedFiles: string[];
     stepNumber: number;
   };
+  /** D.21: backend request_id captured from SSE for feedback submission. */
+  requestId?: string;
+  /** D.21: user feedback rating. */
+  feedbackRating?: "up" | "down" | null;
 }
 
 export interface ToolCallEntry {
@@ -103,6 +108,8 @@ export interface ChatSession {
   createdAt: number;
   attachedPaths?: string[];
   chatMode?: ChatMode;
+  /** D.19: model tier for API requests; default `auto` when omitted (legacy localStorage). */
+  modelTier?: ModelTier;
 }
 
 interface ChatContextValue {
@@ -138,6 +145,9 @@ interface ChatContextValue {
   appendCommandOutput: (sessionId: string, messageId: string, chunk: string) => void;
   setAwaitingApproval: (sessionId: string, messageId: string, data: ChatMessage["awaitingApproval"]) => void;
   setChatMode: (sessionId: string, mode: ChatMode) => void;
+  setModelTier: (sessionId: string, tier: ModelTier) => void;
+  setRequestId: (sessionId: string, messageId: string, requestId: string) => void;
+  setFeedbackRating: (sessionId: string, messageId: string, rating: "up" | "down" | null) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -146,12 +156,17 @@ function newId() {
   return crypto.randomUUID();
 }
 
+function normalizeModelTier(raw: unknown): ModelTier {
+  return raw === "premium" || raw === "fast" ? raw : "auto";
+}
+
 function createNewSession(): ChatSession {
   return {
     id: newId(),
     title: "New Chat",
     messages: [],
     createdAt: Date.now(),
+    modelTier: "auto",
   };
 }
 
@@ -202,7 +217,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         activeSessionId?: string | null;
       };
       if (Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
-        setSessions(parsed.sessions);
+        setSessions(
+          parsed.sessions.map((s) => ({
+            ...s,
+            modelTier: normalizeModelTier((s as ChatSession).modelTier),
+          })),
+        );
       } else {
         setSessions([createNewSession()]);
       }
@@ -527,6 +547,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const setModelTier = useCallback((sessionId: string, tier: ModelTier) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, modelTier: tier } : s)),
+    );
+  }, []);
+
+  const setRequestId = useCallback(
+    (sessionId: string, messageId: string, requestId: string) => {
+      setSessions((prev) => updateMsg(prev, sessionId, messageId, (m) => ({ ...m, requestId })));
+    },
+    [],
+  );
+
+  const setFeedbackRating = useCallback(
+    (sessionId: string, messageId: string, rating: "up" | "down" | null) => {
+      setSessions((prev) => updateMsg(prev, sessionId, messageId, (m) => ({ ...m, feedbackRating: rating })));
+    },
+    [],
+  );
+
   const value: ChatContextValue = {
     sessions,
     activeSessionId,
@@ -560,6 +600,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     appendCommandOutput,
     setAwaitingApproval,
     setChatMode,
+    setModelTier,
+    setRequestId,
+    setFeedbackRating,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

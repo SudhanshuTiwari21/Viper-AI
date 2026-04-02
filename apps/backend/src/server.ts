@@ -8,6 +8,7 @@ import { chatRoutes } from "./routes/chat.routes.js";
 import { contextRoutes } from "./routes/context.routes.js";
 import { patchRoutes } from "./routes/patch.routes.js";
 import { debugRoutes } from "./routes/debug.routes.js";
+import { feedbackRoutes } from "./routes/feedback.routes.js";
 
 const app = Fastify({
   logger: true,
@@ -37,6 +38,7 @@ await app.register(analysisRoutes);
 await app.register(chatRoutes);
 await app.register(contextRoutes);
 await app.register(patchRoutes);
+await app.register(feedbackRoutes);
 
 const port = Number(process.env.PORT) || 4000;
 const host = process.env.HOST || "0.0.0.0";

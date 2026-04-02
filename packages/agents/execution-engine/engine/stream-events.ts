@@ -125,6 +125,10 @@ export type StreamEvent =
         error?: string;
       };
     }
+  /** D.21: route telemetry summary emitted before `done`. */
+  | { type: "model:route:summary"; data: Record<string, unknown> }
+  | { type: "command:output"; data: { content: string } }
+  | { type: "context:searching"; data: Record<string, never> }
   | { type: "result"; data: unknown }
   | { type: "error"; data: { message: string } }
   | {
