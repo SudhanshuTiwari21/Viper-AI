@@ -36,6 +36,24 @@ export const VALID_WORKFLOW_STAGES = [
   // D.21 quality feedback
   "feedback:received",
 
+  // E.22 multimodal attachments
+  "multimodal:attachments:received",
+
+  // E.23 media upload / resolution
+  "multimodal:media:uploaded",
+  "multimodal:media:resolved",
+
+  // E.26 browser runner (WS6)
+  "browser:session:start",
+  "browser:navigate",
+  "browser:screenshot",
+  "browser:session:end",
+  "browser:policy:denied",
+
+  // E.27 validation recipe (WS6: browser:assert:pass|fail)
+  "browser:assert:pass",
+  "browser:assert:fail",
+
   // Existing edit gate / analysis background stages (emitted by workflowLog in this repo)
   "edit-gate:blocked",
   "edit-gate:passed",

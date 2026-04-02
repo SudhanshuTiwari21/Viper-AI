@@ -27,6 +27,7 @@
     "@repo/shared": "*",
     "@repo/workspace-tools": "*",
     "@repo/agentic-loop": "*",
+    "@repo/browser-runner": "*",
     "@repo/model-registry": "*",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",

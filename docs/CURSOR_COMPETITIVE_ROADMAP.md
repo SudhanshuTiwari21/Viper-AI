@@ -797,13 +797,322 @@ Milestones in this group use the **C** series (**C.11**–**C.15**) alongside th
 
 ### Step Group E — Multimodal and browser verification
 
-22. Extend API schemas for image attachments.
-23. Build secure upload and media reference system.
-24. Add multimodal routing and vision-capable prompt templates.
-25. Add desktop image attachment UX.
-26. Build browser-runner tool service (permissioned).
-27. Add frontend validation recipe library (navigate/assert/screenshot).
-28. Stream browser evidence back into chat events.
+22. ~~Extend API schemas for image attachments.~~ **COMPLETE**
+
+#### E.22 Status: COMPLETE
+
+- **Attachment model (Zod, in `request.schemas.ts`):**
+  - `AttachmentSchema` — discriminated union on `kind`. Only `"image"` for E.22.
+  - Two source variants, discriminated on `source.type`:
+    - **`media_ref`** (canonical/production): `{ type: "media_ref", mediaId: string }` — opaque ID resolved in E.23.
+    - **`inline_base64`** (dev-only): `{ type: "inline_base64", mimeType, data }` — strict limits: mimeType allowlist (`image/png`, `image/jpeg`, `image/webp`, `image/gif`), max ~6 MiB decoded per image, max 12 MiB total across all inline attachments, max 8 attachments per request.
+  - Unknown `kind` or `source.type` rejected with clear Zod errors.
+  - Exported: `AttachmentSchema`, `ImageAttachmentSchema`, `Attachment`, `ImageAttachment`, `INLINE_IMAGE_MIME_ALLOWLIST`, `INLINE_IMAGE_MAX_BYTES`, `INLINE_IMAGES_MAX_TOTAL_BYTES`, `ATTACHMENT_MAX_COUNT`.
+- **`ChatRequestSchema`:** new optional `attachments` field. Omitting it is a no-op — full backward compatibility with pre-E.22 clients.
+- **Fastify body schema (`chat.routes.ts`):** both `/chat` and `/chat/stream` now declare `attachments` (loose JSON Schema; Zod is authoritative for validation).
+- **Plumbing:** `postChat` + `postChatStream` destructure and forward `attachments` to `runAssistantPipeline` / `runAssistantStreamPipeline` (new optional last arg). Both pipeline functions accept and safely ignore attachments for LLM calls. Debug log `multimodal:attachments:received` (new workflow stage) emitted when `DEBUG_ASSISTANT=1` and attachments are present.
+- **Tests:** 15 new cases in `request.schemas.test.ts` — valid `media_ref`, valid `inline_base64`, invalid mime, oversize per-image, total-oversize, unknown kind, unknown source.type, missing mediaId, max count exceeded, empty array, omitted field, sanitize preserves attachments. All 170 tests green.
+- **Not done (explicit deferrals):**
+  - E.23: presigned upload, blob storage, media lifecycle, mediaId resolution.
+  - E.24: vision-model routing, prompt templates with image parts.
+  - E.25: file picker and send-from-desktop UX.
+  - `inline_base64` env-configurable limits (deferred to E.23).
+
+23. ~~Build secure upload and media reference system.~~ **COMPLETE**
+
+#### E.23 Status: COMPLETE
+
+- **Database (Postgres):**
+  - Migration `008_create_chat_media.sql` → table `chat_media` with columns: `id TEXT PK`, `workspace_id`, `mime_type`, `byte_size`, `sha256`, `storage_key`, `created_at`, `expires_at` (nullable TTL). Index on `(workspace_id, created_at)`.
+  - Repository (`packages/database/src/chat-media.repository.ts`): `insertChatMedia`, `getChatMedia` (workspace-scoped), `deleteChatMedia`, `listExpiredChatMedia` (for cleanup sweeps).
+  - `packages/database/src/index.ts` exports all four functions + `ChatMediaRow`.
+- **Storage driver (`apps/backend/src/lib/media-storage.ts`):**
+  - `writeMediaBytes` / `readMediaBytes` / `deleteMediaBytes` — local-disk driver using `VIPER_MEDIA_STORAGE_DIR` (default `<os.tmpdir()>/.viper-media`). Path-traversal guard on all operations. Swap for S3/GCS in E.23.1.
+- **Media store (`apps/backend/src/lib/media-store.ts`):**
+  - Same D.20/D.21 fallback pattern: no `DATABASE_URL` → both metadata and bytes held in-memory Maps (dev/test only); with `DATABASE_URL` → Postgres + disk.
+  - `saveMedia({ workspaceId, mimeType, data })`: validates MIME in allowlist + magic-bytes sniff (detects PNG/JPEG/GIF/WEBP); rejects mismatch; issues `med_<24-hex>` mediaId; optionally sets `expires_at` when `VIPER_MEDIA_TTL_HOURS` is configured.
+  - `getMediaMeta(workspaceId, mediaId)`: returns null on workspace mismatch (isolation).
+  - `resolveMediaBuffer(workspaceId, mediaId)`: E.24 hook — returns `Buffer | null`; checks expiry; callable from `assistant.service` once vision routing is wired.
+  - `deleteMedia(workspaceId, mediaId)`: workspace-scoped deletion.
+- **API routes (`apps/backend/src/routes/media.routes.ts`):**
+  - `POST /media/upload` — JSON body `{ workspace_id, mimeType, dataBase64 }`. Validates MIME allowlist, per-file 6 MiB limit, magic-bytes agreement. Response: `{ mediaId, mimeType, byteSize, sha256 }`. Works from curl: `curl -X POST -H 'Content-Type: application/json' -d '{"workspace_id":"...","mimeType":"image/png","dataBase64":"..."}' http://localhost:4000/media/upload`
+  - `POST /media/upload/multipart` — multipart/form-data path (requires `@fastify/multipart` registered; controller degrades gracefully to 501 if plugin is absent). Production path for E.23.1.
+  - `GET /media/:mediaId?workspace_id=<id>` (or `x-workspace-id` header) — returns raw bytes + `Content-Type`. 404 on missing/workspace mismatch; 410 on expired (TTL).
+- **Observability:** workflow stages `multimodal:media:uploaded` + `multimodal:media:resolved` added to `VALID_WORKFLOW_STAGES`; logged (when `DEBUG_ASSISTANT=1`) with `{ media_id, mime_type, byte_size }`.
+- **Env vars:** `VIPER_MEDIA_STORAGE_DIR`, `VIPER_MEDIA_TTL_HOURS` — see `docs/ENV.md`.
+- **Tests:** 24 unit tests in `media-store.test.ts` (sniff, validate, save/get/resolve/delete, expiry, wrong-workspace) + 10 route integration tests in `media.routes.test.ts` (full round-trip, workspace isolation, 404, 413, 400 MIME mismatch, header-based workspace_id). 204 total tests green.
+- **Evidence:** `cd apps/backend && npx vitest run && npm run check-types` + `cd packages/database && npm run check-types`.
+- **Not done (explicit deferrals):**
+  - E.23.1: S3/GCS storage driver (swap `media-storage.ts` driver functions).
+  - E.23.1: `@fastify/multipart` plugin registration in `server.ts` for the multipart upload path.
+  - E.23.1: Automatic cleanup job for expired objects (use `listExpiredChatMedia()` manually until then).
+  - E.24: Vision routing — `resolveMediaBuffer` is the stub hook, unused in LLM calls until E.24.
+  - E.25: Desktop file-picker and UI for selecting/sending attachments.
+- **Rollback:** Remove migration 008; drop `chat_media` table; remove `media.routes.ts`, `media.controller.ts`, `media-store.ts`, `media-storage.ts`; remove exports from `packages/database/src/index.ts`; remove `multimodal:media:*` from `VALID_WORKFLOW_STAGES`; unset `VIPER_MEDIA_STORAGE_DIR`, `VIPER_MEDIA_TTL_HOURS`.
+
+24. ~~Add multimodal routing and vision-capable prompt templates.~~ **COMPLETE**
+
+#### E.24 Status: COMPLETE
+
+- **Multimodal content builder (`apps/backend/src/lib/multimodal-content.ts`):**
+  - `buildMultimodalUserContent(prompt, attachments, workspaceId)` → `ContentPart[]` for the OpenAI user message.
+  - Leading `{ type: "text", text: prompt }` part followed by one `{ type: "image_url", … }` per attachment in stable input order.
+  - `inline_base64` → constructs `data:<mime>;base64,<data>` URL directly (already validated by E.22 schema).
+  - `media_ref` → calls `getMediaMeta` (expiry + workspace check) then `resolveMediaBuffer` (E.23) → data URL.
+  - `MultimodalResolutionError` (statusCode 400 | 502): missing media, wrong workspace, expired TTL, or storage inconsistency.
+- **Vision routing (`apps/backend/src/lib/model-router.ts`):**
+  - `selectModel`: if `hasAttachments`, sets `signals.vision_required = true`; if selected model lacks `capabilities.vision`, upgrades to premium default (reason `"vision_upgrade_to_premium"`, `signals.vision_upgraded = true`, `visionUpgraded: true` on `RouteDecision`).
+  - `VisionNotSupportedError` exported — thrown by `routeModelForRequest` in `assistant.service.ts` if no vision-capable model is found after upgrade attempt (→ 400 in controller).
+- **`routeModelForRequest` (assistant.service.ts):**
+  - Added `hasAttachments?: boolean` param; threaded to `selectModel` (auto path) and post-selection vision check (pinned / client-tier paths).
+  - All three `routeModelForRequest` calls in `runAssistantPipeline` + `runAssistantStreamPipeline` (GENERIC + agentic + resume) now pass `hasAttachments: Boolean(attachments?.length)`.
+- **LLM wiring:**
+  - `runDirectLLM`: added `attachments?`, cache-bust (`canUseCache &&= !hasAttachments`), vision system addendum via `getMultimodalSystemAddendum(chatMode)`, multimodal `userContent` resolved before `buildRequest`.
+  - `runDirectLLMStream`: same; content resolved before `streamBody` is constructed.
+  - `runAgenticStreamPath`: added `attachments?`; multimodal `userContent` used for both fresh and resume paths (current turn only); agentic system prompt extended with vision addendum when images present.
+- **System prompt addendum (`apps/backend/src/lib/mode-narration.ts`):**
+  - `getMultimodalSystemAddendum(mode)`: short, mode-aware instruction appended only when `attachments?.length > 0`. Debug mode emphasises error messages / stack traces in images; plan mode focuses on incorporating visual context.
+- **Controller error handling:**
+  - `chat.controller.ts`: `VisionNotSupportedError` → 400; `MultimodalResolutionError` → 400 (or 502). Applied to both stream and non-stream paths. Logged at `warn` level (not `error`).
+- **Cache policy:** LLM response cache disabled for any request carrying image attachments (two identical prompts with different images must always reach the model).
+- **History:** only the current user turn carries image parts (E.22 semantics). History messages remain plain strings.
+- **Tests:**
+  - `multimodal-content.test.ts`: 11 unit tests covering inline_base64, media_ref round-trip (mocked store), wrong-workspace 400, expired 400, unavailable bytes 502, multiple attachments in order, empty list.
+  - `model-router.test.ts`: 4 new vision-routing tests: `vision_required` signal, no unneeded upgrade with vision-capable models, `VisionNotSupportedError` shape.
+  - 218 total tests green.
+- **Evidence:** `cd apps/backend && npx vitest run && npm run check-types`
+- **No new env vars** (MIME allowlist, per-file limits, and storage vars defined in E.22/E.23).
+- **Not done (explicit deferrals):**
+  - ~~E.25: Desktop file-picker, thumbnail previews, upload orchestration in the UI.~~ **DONE in E.25.**
+  - Multimodal history: images in `messages[].content` (deferred, documented in E.22 as follow-up).
+  - Cloud vision provider / model expansion beyond OpenAI (E.26+).
+- **Rollback:** Remove `multimodal-content.ts`; revert `model-router.ts` (remove `VisionNotSupportedError`, `visionUpgraded`, `vision_required`/`vision_upgraded` signals); revert `routeModelForRequest` + LLM call sites in `assistant.service.ts` to prior signatures; revert `mode-narration.ts`; revert controller catch blocks.
+
+~~25. Add desktop image attachment UX.~~ **COMPLETE**
+
+---
+
+### E.25 Status: COMPLETE
+
+**What was built:**
+
+- **`apps/viper-desktop/ui/lib/workspace-id.ts`** — `deriveWorkspaceId(path): Promise<string>` mirrors the backend's `createHash("sha256").update(normalised).digest("hex").slice(0,16)` algorithm using `crypto.subtle`. Platform-sensitive case-fold (lowercase on macOS/Windows, match on Linux) via `navigator.platform`. Exports `normalizePath` and `isPlatformCaseFold` for testing.
+- **`apps/viper-desktop/ui/services/agent-api.ts`** — Added:
+  - `ATTACHMENT_MIME_ALLOWLIST`, `ATTACHMENT_MAX_BYTES` (6 MiB), `ATTACHMENT_MAX_COUNT` (8) constants.
+  - `MediaRefAttachment` type matching E.22 schema.
+  - `uploadChatMedia({ workspaceId, file }): Promise<MediaUploadResponse>` — reads file as `ArrayBuffer → base64`, sends JSON body `{ workspace_id, mimeType, dataBase64 }` to `POST /media/upload`, with client-side MIME allowlist + 6 MiB pre-validation.
+  - Extended `sendChat` and `sendChatStream` signatures with optional `attachments?: MediaRefAttachment[]`; the `attachments` key is only included in the JSON body when non-empty (backward compatibility guaranteed).
+- **`apps/viper-desktop/ui/contexts/chat-context.tsx`** — Added `PendingAttachment` type (`mediaId`, `mimeType`, `fileName`, `previewObjectUrl`); added `pendingAttachments: PendingAttachment[]` state + `addPendingAttachment`, `removePendingAttachment` (revokes object URL), `clearPendingAttachments` (revokes all) to context. Session switch revokes and clears stale attachments.
+- **`apps/viper-desktop/ui/components/chat-panel.tsx`** — Full attachment UX:
+  - Hidden `<input type="file" accept="…" multiple>` behind a `<Paperclip>` attach button (disabled while streaming or uploading).
+  - Per-file `uploadChatMedia` (uses `deriveWorkspaceId` for `workspaceId`) with inline error display.
+  - Thumbnail strip (48×48 px object-URL previews) with per-item remove button (revokes URL).
+  - Count guard: rejects pick if `existing + new > ATTACHMENT_MAX_COUNT`.
+  - On send: snapshot pending attachments → `sendChatStream(..., attachments)` → `clearPendingAttachments()`. Attachments are cleared on send start (error path: stale media persists on server, user can re-attach if needed).
+  - Attach button accent-colored while files are pending, pulsing while uploading.
+
+**Evidence commands:**
+```bash
+# Desktop tests (workspace-id vectors + attachment body shape)
+cd apps/viper-desktop && npm test
+# → Test Files 1 passed (1), Tests 20 passed (20)
+
+# Backend tests (no regressions)
+cd apps/backend && npx vitest run
+# → Test Files 25 passed (25), Tests 218 passed (218)
+```
+
+**Not done (explicit deferrals):**
+- E.26+: Browser-runner toolchain (screenshots, UI validation).
+- Multimodal message history: images in `messages[].content` (still deferred from E.22/E.24).
+- Drag-and-drop file attach (can layer on top of the hidden `<input>` without further backend changes).
+- Upload progress indicator (POST /media/upload is typically fast for ≤6 MiB; the `uploading` state pulse is the current signal).
+
+**Rollback:** Remove `workspace-id.ts`; revert `agent-api.ts` (remove `uploadChatMedia`, attachment types, `attachments` param from `sendChat`/`sendChatStream`); revert `chat-context.tsx` (remove `PendingAttachment`, pending-attachment state + callbacks); revert `chat-panel.tsx` (remove Paperclip import, `handleAttachFiles`, thumbnail strip, file input, `sendAttachments` construction).
+
+---
+
+~~26. Build browser-runner tool service (permissioned).~~ **COMPLETE**
+
+---
+
+### E.26 Status: COMPLETE
+
+**Architecture:** In-process Playwright facade (`packages/browser-runner`) — no separate microservice. Session is per agentic-loop request, lazy-opened on first tool use, force-closed after loop completion (or on session lifetime expiry).
+
+**What was built:**
+
+- **`packages/browser-runner/`** (new package `@repo/browser-runner`):
+  - `src/url-allowlist.ts` — `isUrlAllowed(url, extraOrigins?)`: default-allows `http(s)://localhost` and `http(s)://127.0.0.1`; blocks `file:`, `data:`, `javascript:`, `blob:` unconditionally; extra origins via `VIPER_BROWSER_ALLOWED_ORIGINS`. `parseAllowedOrigins()` parses the env var.
+  - `src/browser-session.ts` — `BrowserSession` class: lazy `open()`, `navigate(url)` (URL policy checked before Playwright call), `screenshot({ fullPage? })` (base64-encoded PNG, truncated to `VIPER_BROWSER_SCREENSHOT_MAX_BYTES`), `close()`. Hard session lifetime timer. Playwright loaded via dynamic `import('playwright')` so the package is installable without the browsers; throws `BrowserRunnerError` if not installed.
+  - `src/index.ts` — exports `isBrowserToolsEnabled()` (reads `VIPER_BROWSER_TOOLS`), `BROWSER_TOOL_NAMES`, `BrowserSession`, `createBrowserSession`, `BrowserRunnerError`, URL helpers.
+- **`packages/agents/agentic-loop/prompt/browser-tool-defs.ts`** — `buildBrowserTools(getSession, enabled, callbacks?)`: returns `[]` when `enabled=false` (env kill-switch off); returns 2 `AgenticToolDefinition` entries (`browser_navigate`, `browser_screenshot`) when enabled. Session factory is injected so the loop core stays decoupled from the runner package.
+- **`packages/agents/agentic-loop/index.ts`** — exports `buildBrowserTools`, `BrowserToolSession`, `BrowserToolCallbacks`.
+- **`apps/backend/src/lib/mode-tool-policy.ts`** — Added `BROWSER_TOOLS` set (`browser_navigate`, `browser_screenshot`); extended `DEBUG_WITH_BROWSER` and `ALL_WITH_BROWSER` sets; `debug` and `agent` modes see browser tools; `ask` and `plan` never do. Added `isBrowserTool()` helper.
+- **`apps/backend/src/types/workflow-log-schema.ts`** — Added `browser:session:start`, `browser:navigate`, `browser:screenshot`, `browser:session:end`, `browser:policy:denied` to `VALID_WORKFLOW_STAGES`.
+- **`apps/backend/src/services/assistant.service.ts`** — In `runAgenticStreamPath`: builds `browserTools` via `buildBrowserTools(getBrowserSession, isBrowserToolsEnabled(), callbacks)`; merges into `allToolsWithBrowser`; session is closed + `browser:session:end` logged after `runAgenticLoop` returns. Workflow log emitted on session start, navigate, screenshot, and policy denial.
+- **`docs/ENV.md`** — 6 new env vars documented.
+
+**Evidence commands:**
+```bash
+# Browser-runner unit tests (URL allowlist + session mocking)
+cd packages/browser-runner && npm test
+# → Test Files 2 passed (2), Tests 38 passed (38)
+
+# Backend tests (mode gating + buildBrowserTools + all previous tests)
+cd apps/backend && npx vitest run
+# → Test Files 25 passed (25), Tests 232 passed (232)
+
+# Backend type check
+cd apps/backend && npm run check-types
+# → (no output = clean)
+
+# Local e2e setup (requires Playwright)
+npm install playwright
+npx playwright install chromium
+VIPER_BROWSER_TOOLS=1 npm run dev -w @repo/backend
+```
+
+**Regression guarantee:**
+- `VIPER_BROWSER_TOOLS` unset (default): `buildBrowserTools(..., false)` returns `[]`; no browser tool definitions passed to the model; agentic loop, edits, and existing tools unchanged.
+- `ask` / `plan` modes: browser tools absent from `getAllowedToolNames` result; runtime allowedToolNames check blocks them even if `VIPER_BROWSER_TOOLS=1`.
+
+**Not done (explicit deferrals):**
+- ~~E.27: selector/assert recipe library~~ — shipped in E.27.
+- E.28: streaming browser sub-events into SSE beyond `tool:start` / `tool:result`.
+- Cloud browser providers (BrowserStack, Sauce Labs).
+- Screenshot diffing / visual regression.
+
+**Rollback:** Remove `packages/browser-runner/`; remove `buildBrowserTools` export from `@repo/agentic-loop/index.ts`; remove `packages/agents/agentic-loop/prompt/browser-tool-defs.ts`; revert `mode-tool-policy.ts` (remove `BROWSER_TOOLS`, `isBrowserTool`, browser sets); revert `workflow-log-schema.ts` (remove browser stages); revert `assistant.service.ts` imports + session wiring; remove `@repo/browser-runner` from `apps/backend/package.json`.
+
+---
+
+### E.27 Status: COMPLETE
+
+**What was implemented:**
+
+1. **`packages/browser-runner/src/env-helpers.ts`** — Extracted `envInt` helper (shared by `browser-session.ts` and the new recipe module).
+2. **`packages/browser-runner/src/validation-recipe.ts`** — Core recipe library:
+   - `RecipeStep` discriminated union: `navigate | wait_for_selector | assert_text | screenshot`.
+   - `validateRecipeStep` — per-step validation (selector length, url presence, substring non-empty).
+   - `parseRecipeSteps(raw, maxSteps?)` — validates and normalises unknown input into typed steps.
+   - `runRecipeSteps(session, steps, callbacks?)` — executes steps in order; stops on first failure (screenshot is non-fatal); fires `onAssertPass` / `onAssertFail` hooks.
+   - `formatRecipeResult` — compact multi-line summary for the model; appends screenshot base64 when present.
+   - `assertPageText` — duck-typed Playwright page helper (testable without real browser).
+   - Constants + env overrides: `VIPER_BROWSER_MAX_RECIPE_STEPS` (default 20), `VIPER_BROWSER_ASSERT_TIMEOUT_MS` (default 5 s), `VIPER_BROWSER_MAX_SELECTOR_LEN` (default 512).
+3. **`packages/browser-runner/src/index.ts`** — Exports all new types and functions; extended `BROWSER_TOOL_NAMES` to 5 entries.
+4. **`packages/agents/agentic-loop/prompt/browser-tool-defs.ts`** — Added three new agent tools alongside the E.26 pair:
+   - `browser_assert_text` — asserts a text substring on the page or within a CSS selector.
+   - `browser_wait_for_selector` — waits until a CSS selector is visible.
+   - `browser_run_recipe` — runs an ordered list of recipe steps as a single atomic call.
+   - All three honour the same env kill-switch and session factory as E.26 tools.
+   - Added `onAssertPass` / `onAssertFail` to `BrowserToolCallbacks`.
+5. **`apps/backend/src/lib/mode-tool-policy.ts`** — Added three new tool names to `BROWSER_TOOLS`; `debug` and `agent` modes inherit them automatically.
+6. **`apps/backend/src/types/workflow-log-schema.ts`** — Added `browser:assert:pass` and `browser:assert:fail` stages (WS6-aligned).
+7. **`apps/backend/src/services/assistant.service.ts`** — Wired `onAssertPass` / `onAssertFail` callbacks to emit the new workflow stages.
+
+**Evidence commands:**
+```bash
+# Recipe + allowlist + session unit tests
+cd packages/browser-runner && npm test
+# → 86 tests pass (48 new E.27 recipe tests + 38 prior E.26)
+
+# Backend tests (mode policy, new tools, workflow stages)
+cd apps/backend && npx vitest run
+# → 249 tests pass
+
+# Type checks
+cd packages/browser-runner && npm run check-types  # clean
+cd apps/backend && npm run check-types              # clean
+```
+
+**Regression guarantee:**
+- `VIPER_BROWSER_TOOLS` unset: `buildBrowserTools(..., false)` returns `[]`; none of the 5 browser tools (E.26 or E.27) are registered.
+- `ask` / `plan` modes: all browser tools absent from `getAllowedToolNames`; mode gate blocks them even if the env switch is on.
+- E.26 tools (`browser_navigate`, `browser_screenshot`) unchanged in behaviour.
+
+**Not done (explicit deferrals):**
+- ~~E.28: streaming browser sub-events into SSE~~ — shipped in E.28.
+- Visual diff / pixel comparison.
+- Non-local origins beyond `VIPER_BROWSER_ALLOWED_ORIGINS`.
+
+**Rollback E.27 only:** Delete `validation-recipe.ts`; revert `index.ts` exports; remove the 3 new tools from `browser-tool-defs.ts` and `BROWSER_TOOLS`; remove `browser:assert:pass|fail` from `workflow-log-schema.ts`; remove `onAssertPass`/`onAssertFail` callbacks from `assistant.service.ts`.
+
+---
+
+### E.28 Status: COMPLETE
+
+**What was implemented:**
+
+1. **`packages/agents/execution-engine/engine/stream-events.ts`** — Added `browser:step` StreamEvent variant with a `BrowserStepEventPayload` shape:
+   - `phase`: `"session:start" | "navigate" | "screenshot" | "assert:pass" | "assert:fail" | "policy:denied" | "session:end"`
+   - Optional: `stepIndex`, `detail` (capped at 200 chars), `url`, `rawBytes`, `kind`
+   - Intentionally small — no base64, no raw HTML.
+2. **`apps/backend/src/execution-engine.d.ts`** — Mirror of the new event type for the backend's ambient declaration.
+3. **`packages/agents/agentic-loop/prompt/browser-tool-defs.ts`** — Extended `BrowserToolCallbacks` with `onBrowserStreamEvent?: (payload: BrowserStepEventPayload) => void`. Wired it into every tool's execute path:
+   - `browser_navigate`: emits `session:start` (before navigate), `navigate` (on success) or `policy:denied` (on block).
+   - `browser_screenshot`: emits `screenshot` with `rawBytes` and capped `detail`.
+   - `browser_assert_text`: emits `assert:pass` or `assert:fail` with `kind: "assert_text"`.
+   - `browser_wait_for_selector`: emits `assert:pass` or `assert:fail` with `kind: "wait_for_selector"`.
+   - `browser_run_recipe`: bridges recipe `onAssertPass`/`onAssertFail` callbacks to `onBrowserStreamEvent` with the correct `stepIndex`.
+   - Exported `BrowserStepEventPayload` from `@repo/agentic-loop/index.ts`.
+4. **`apps/backend/src/services/assistant.service.ts`** — Added `onBrowserStreamEvent` callback that calls `onEvent({ type: "browser:step", data: payload })`. Also emits `session:end` SSE event when the browser session is torn down after the loop completes.
+5. **`apps/viper-desktop/ui/components/chat-panel.tsx`** — Added `case "browser:step": break;` no-op in the stream event switch, preventing unknown-event errors and ensuring the desktop stream stays compatible.
+6. **`apps/backend/src/lib/browser-sse.test.ts`** — 15 new unit tests covering:
+   - Env-off: no events emitted when `enabled=false`.
+   - `browser_navigate`: `session:start` → `navigate` ordering; `policy:denied` on block; no events for empty URL.
+   - `browser_screenshot`: `screenshot` phase with `rawBytes`.
+   - `browser_assert_text` / `browser_wait_for_selector`: `assert:pass` / `assert:fail` with `kind`.
+   - `browser_run_recipe`: per-step `stepIndex` in events; no SSE before validation error.
+   - Detail capping: `detail` never exceeds 200 chars for long titles or policy reasons.
+   - Multi-step ordering: `session:start` → `navigate` → `assert:pass`.
+
+**Event names (stable, versioned by phase field):**
+```
+browser:step  { phase: "session:start" }
+browser:step  { phase: "navigate",  url, detail }
+browser:step  { phase: "screenshot", rawBytes, detail }
+browser:step  { phase: "assert:pass", kind, stepIndex?, detail }
+browser:step  { phase: "assert:fail", kind, stepIndex?, detail }
+browser:step  { phase: "policy:denied", detail }
+browser:step  { phase: "session:end" }
+```
+
+**Evidence commands:**
+```bash
+# New E.28 SSE tests
+cd apps/backend && npx vitest run src/lib/browser-sse.test.ts
+# → 15 tests pass
+
+# Full backend suite
+cd apps/backend && npx vitest run
+# → 264 tests pass
+
+# Browser-runner suite (E.26 + E.27, unchanged)
+cd packages/browser-runner && npm test
+# → 86 tests pass
+
+# Type checks
+cd apps/backend && npm run check-types   # clean
+```
+
+**Regression guarantee:**
+- `VIPER_BROWSER_TOOLS` unset: `buildBrowserTools(..., false)` returns `[]`; `onBrowserStreamEvent` is never called; no `browser:step` events are emitted.
+- Non-browser agentic chats: no `browser:step` events in the SSE stream.
+- Desktop without new UI: `case "browser:step": break;` ensures the stream completes without errors on any unknown phase.
+- E.26/E.27 tool text output (`Navigated to: …`, `PASS: …`, etc.) is unchanged.
+
+**Not done (explicit deferrals):**
+- Pixel diff / visual regression (screenshot comparison).
+- Streaming full screenshots to the UI (use tool result only).
+- Step Group F auth/billing.
+
+**Rollback E.28 only:** Revert `stream-events.ts` and `execution-engine.d.ts` (remove `browser:step` variant); remove `onBrowserStreamEvent` from `BrowserToolCallbacks` and all call sites in `browser-tool-defs.ts`; revert `assistant.service.ts` (remove `onBrowserStreamEvent` callback and `session:end` SSE emit); remove `case "browser:step"` from `chat-panel.tsx`; delete `browser-sse.test.ts`.
+
+---
+
+~~27. Add frontend validation recipe library (navigate/assert/screenshot).~~ **COMPLETE**
+~~28. Stream browser evidence back into chat events.~~ **COMPLETE**
 
 ### Step Group F — Product platform (auth, metering, billing)
 

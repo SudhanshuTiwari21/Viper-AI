@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { ChatRequestSchema, ChatModeSchema, ModelTierSelectionSchema, ChatFeedbackSchema, FeedbackStatsQuerySchema } from "./request.schemas.js";
+import {
+  ChatRequestSchema,
+  ChatModeSchema,
+  ModelTierSelectionSchema,
+  ChatFeedbackSchema,
+  FeedbackStatsQuerySchema,
+  AttachmentSchema,
+  INLINE_IMAGE_MAX_BYTES,
+  ATTACHMENT_MAX_COUNT,
+} from "./request.schemas.js";
 
 describe("ChatRequestSchema (C.11 mode)", () => {
   it("omitted mode → parses as agent", () => {
@@ -189,6 +198,165 @@ describe("ChatFeedbackSchema (D.21)", () => {
       workspace_id: "ws-1",
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("AttachmentSchema (E.22)", () => {
+  it("accepts a valid media_ref image attachment", () => {
+    const r = AttachmentSchema.safeParse({
+      kind: "image",
+      source: { type: "media_ref", mediaId: "media-abc-123" },
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.kind).toBe("image");
+      expect(r.data.source.type).toBe("media_ref");
+    }
+  });
+
+  it("accepts a valid inline_base64 image attachment within size limit", () => {
+    const data = "a".repeat(100); // well under limit
+    const r = AttachmentSchema.safeParse({
+      kind: "image",
+      source: { type: "inline_base64", mimeType: "image/png", data },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects inline_base64 with disallowed mimeType", () => {
+    const r = AttachmentSchema.safeParse({
+      kind: "image",
+      source: { type: "inline_base64", mimeType: "image/tiff", data: "abc" },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects inline_base64 over per-image size limit", () => {
+    const maxB64Chars = Math.ceil(INLINE_IMAGE_MAX_BYTES * (4 / 3));
+    const data = "a".repeat(maxB64Chars + 1);
+    const r = AttachmentSchema.safeParse({
+      kind: "image",
+      source: { type: "inline_base64", mimeType: "image/jpeg", data },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects unknown kind", () => {
+    const r = AttachmentSchema.safeParse({
+      kind: "video",
+      source: { type: "media_ref", mediaId: "abc" },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects unknown source.type", () => {
+    const r = AttachmentSchema.safeParse({
+      kind: "image",
+      source: { type: "url", url: "https://example.com/img.png" },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects media_ref without mediaId", () => {
+    const r = AttachmentSchema.safeParse({
+      kind: "image",
+      source: { type: "media_ref" },
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("ChatRequestSchema attachments (E.22)", () => {
+  const base = { prompt: "hello", workspacePath: "/w" };
+
+  it("omitting attachments preserves backward compatibility", () => {
+    const r = ChatRequestSchema.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.attachments).toBeUndefined();
+  });
+
+  it("empty attachments array is valid", () => {
+    const r = ChatRequestSchema.safeParse({ ...base, attachments: [] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.attachments).toEqual([]);
+  });
+
+  it("accepts a single media_ref attachment", () => {
+    const r = ChatRequestSchema.safeParse({
+      ...base,
+      attachments: [{ kind: "image", source: { type: "media_ref", mediaId: "mid-1" } }],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.attachments).toHaveLength(1);
+      expect(r.data.attachments![0]!.kind).toBe("image");
+    }
+  });
+
+  it("accepts a valid inline_base64 attachment", () => {
+    const r = ChatRequestSchema.safeParse({
+      ...base,
+      attachments: [
+        {
+          kind: "image",
+          source: { type: "inline_base64", mimeType: "image/webp", data: "abc123==" },
+        },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it(`rejects more than ${ATTACHMENT_MAX_COUNT} attachments`, () => {
+    const many = Array.from({ length: ATTACHMENT_MAX_COUNT + 1 }, (_, i) => ({
+      kind: "image" as const,
+      source: { type: "media_ref" as const, mediaId: `mid-${i}` },
+    }));
+    const r = ChatRequestSchema.safeParse({ ...base, attachments: many });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects invalid mime on inline attachment inside request", () => {
+    const r = ChatRequestSchema.safeParse({
+      ...base,
+      attachments: [
+        {
+          kind: "image",
+          source: { type: "inline_base64", mimeType: "application/pdf", data: "abc" },
+        },
+      ],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects oversize single inline attachment inside request", () => {
+    const maxB64Chars = Math.ceil(INLINE_IMAGE_MAX_BYTES * (4 / 3));
+    const r = ChatRequestSchema.safeParse({
+      ...base,
+      attachments: [
+        {
+          kind: "image",
+          source: {
+            type: "inline_base64",
+            mimeType: "image/png",
+            data: "a".repeat(maxB64Chars + 1),
+          },
+        },
+      ],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("sanitizeChatMessages preserves attachments", () => {
+    const r = ChatRequestSchema.safeParse({
+      ...base,
+      messages: [{ role: "user", content: "prev" }],
+      attachments: [{ kind: "image", source: { type: "media_ref", mediaId: "mid-1" } }],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.attachments).toHaveLength(1);
+      expect(r.data.messages).toHaveLength(1);
+    }
   });
 });
 

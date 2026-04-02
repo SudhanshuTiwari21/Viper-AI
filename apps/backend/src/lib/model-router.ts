@@ -2,6 +2,25 @@ import type { ModelSpec, ModelTier } from "@repo/model-registry";
 import { getDefaultModelForTier } from "@repo/model-registry";
 import type { ChatMode } from "../validators/request.schemas.js";
 
+// ---------------------------------------------------------------------------
+// E.24 — Vision-routing error (surfaced as 400 by the controller)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by routeModelForRequest when attachments are present but the selected
+ * model does not support vision and no upgrade path exists in the registry.
+ */
+export class VisionNotSupportedError extends Error {
+  constructor(modelId: string) {
+    super(
+      `Selected model "${modelId}" does not support vision. ` +
+        "No vision-capable model is available for this request configuration. " +
+        "Remove image attachments or choose a vision-capable model tier.",
+    );
+    this.name = "VisionNotSupportedError";
+  }
+}
+
 export type ModelRouteMode = "auto" | "pinned";
 
 export interface RouteInputs {
@@ -20,6 +39,11 @@ export interface RouteDecision {
   signals: Record<string, number | string | boolean | null | undefined>;
   /** Cross-tier failover targets for `auto` routing (D.18); empty when failover disabled. */
   fallbackChain?: ModelSpec[];
+  /**
+   * E.24: true when the tier was upgraded to premium specifically because the
+   * original selection lacked vision capability and the premium default supports vision.
+   */
+  visionUpgraded?: boolean;
 }
 
 function pickTier(inputs: RouteInputs): { tier: ModelTier; reason: string; signals: RouteDecision["signals"] } {
@@ -63,9 +87,30 @@ function pickTier(inputs: RouteInputs): { tier: ModelTier; reason: string; signa
 }
 
 export function selectModel(inputs: RouteInputs): RouteDecision {
-  const { tier, reason, signals } = pickTier(inputs);
-  const selected = getDefaultModelForTier(tier);
-  return { selected, reason, signals };
+  const { tier, reason: tierReason, signals } = pickTier(inputs);
+  let selected = getDefaultModelForTier(tier);
+  let reason = tierReason;
+  let visionUpgraded = false;
+
+  // E.24: if attachments are present, ensure the routed model supports vision.
+  // Upgrade to premium default if the fast default lacks vision; mark the decision.
+  if (inputs.hasAttachments) {
+    signals.vision_required = true;
+    if (!selected.capabilities.vision) {
+      const premiumSpec = getDefaultModelForTier("premium");
+      if (premiumSpec.capabilities.vision) {
+        selected = premiumSpec;
+        reason = "vision_upgrade_to_premium";
+        visionUpgraded = true;
+        signals.vision_upgraded = true;
+      } else {
+        // No vision-capable model found — caller (routeModelForRequest) will throw.
+        signals.vision_no_capable_model = true;
+      }
+    }
+  }
+
+  return { selected, reason, signals, visionUpgraded };
 }
 
 /**

@@ -5,6 +5,26 @@ import type { ModelTier } from "../services/agent-api";
 import { useWorkspaceContext } from "./workspace-context";
 import type { HunkApprovalStatus } from "../components/inline-diff-viewer";
 
+// ---------------------------------------------------------------------------
+// E.25 — Pending attachment state (uploaded, not yet sent)
+// ---------------------------------------------------------------------------
+
+/**
+ * An image attachment that has been uploaded to /media/upload and is waiting
+ * to be included in the next send.  previewObjectUrl is a revocable blob URL
+ * for showing thumbnails; callers must revoke it on remove / clear.
+ */
+export interface PendingAttachment {
+  /** Server-issued mediaId from POST /media/upload. */
+  mediaId: string;
+  /** Validated MIME type returned by the server. */
+  mimeType: string;
+  /** Optional name for display (from the original File). */
+  fileName?: string;
+  /** Revocable object URL for thumbnail preview — revoke when no longer needed. */
+  previewObjectUrl?: string;
+}
+
 export interface ExecutionStep {
   stepId: string;
   stepType: string;
@@ -122,6 +142,14 @@ interface ChatContextValue {
   setSessionTitle: (sessionId: string, title: string) => void;
   addAttachedPath: (sessionId: string, path: string) => void;
   addAttachedPathToNewSession: (path: string) => string;
+  /** E.25: pending image attachments for the next send. */
+  pendingAttachments: PendingAttachment[];
+  /** Add an uploaded attachment to the pending list. */
+  addPendingAttachment: (attachment: PendingAttachment) => void;
+  /** Remove one pending attachment by mediaId, revoking its preview URL. */
+  removePendingAttachment: (mediaId: string) => void;
+  /** Clear all pending attachments (revokes preview URLs). Call after send or on session switch. */
+  clearPendingAttachments: () => void;
   appendTokens: (sessionId: string, messageId: string, tokens: string) => void;
   finalizeTokenBuffer: (sessionId: string, messageId: string) => void;
   appendThinkingTokens: (sessionId: string, messageId: string, tokens: string) => void;
@@ -191,6 +219,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<ChatSession[]>(() => [initialSession]);
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(() => initialSession.id);
 
+  // E.25: pending attachments — reset on session switch
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+
   const normalizeWorkspaceKey = useCallback((rootPath: string) => {
     return rootPath.replace(/\\/g, "/").replace(/\/$/, "");
   }, []);
@@ -247,9 +278,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [storageKey, sessions, activeSessionId]);
 
-  const setActiveSessionId = useCallback((id: string | null) => {
-    setActiveSessionIdState(id);
-  }, []);
+  const setActiveSessionId = useCallback(
+    (id: string | null) => {
+      setActiveSessionIdState(id);
+      // Clear pending attachments when switching sessions to avoid stale media refs.
+      setPendingAttachments((prev) => {
+        for (const a of prev) {
+          if (a.previewObjectUrl) URL.revokeObjectURL(a.previewObjectUrl);
+        }
+        return [];
+      });
+    },
+    [],
+  );
 
   const createSession = useCallback((): string => {
     const session = createNewSession();
@@ -567,6 +608,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // E.25 — pending attachment callbacks
+
+  const addPendingAttachment = useCallback((attachment: PendingAttachment) => {
+    setPendingAttachments((prev) => [...prev, attachment]);
+  }, []);
+
+  const removePendingAttachment = useCallback((mediaId: string) => {
+    setPendingAttachments((prev) => {
+      const target = prev.find((a) => a.mediaId === mediaId);
+      if (target?.previewObjectUrl) URL.revokeObjectURL(target.previewObjectUrl);
+      return prev.filter((a) => a.mediaId !== mediaId);
+    });
+  }, []);
+
+  const clearPendingAttachments = useCallback(() => {
+    setPendingAttachments((prev) => {
+      for (const a of prev) {
+        if (a.previewObjectUrl) URL.revokeObjectURL(a.previewObjectUrl);
+      }
+      return [];
+    });
+  }, []);
+
   const value: ChatContextValue = {
     sessions,
     activeSessionId,
@@ -603,6 +667,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setModelTier,
     setRequestId,
     setFeedbackRating,
+    pendingAttachments,
+    addPendingAttachment,
+    removePendingAttachment,
+    clearPendingAttachments,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

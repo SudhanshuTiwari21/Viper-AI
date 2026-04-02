@@ -28,6 +28,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
               },
             },
           },
+          /** E.22: image attachments — Zod is authoritative for full validation. */
+          attachments: {
+            type: "array",
+            maxItems: 8,
+            items: {
+              type: "object",
+              required: ["kind", "source"],
+              properties: {
+                kind: { type: "string", enum: ["image"] },
+                source: { type: "object" },
+              },
+            },
+          },
         },
       },
     },
@@ -64,6 +77,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
               properties: {
                 role: { type: "string", enum: ["user", "assistant"] },
                 content: { type: "string" },
+              },
+            },
+          },
+          /** E.22: image attachments — Zod is authoritative for full validation. */
+          attachments: {
+            type: "array",
+            maxItems: 8,
+            items: {
+              type: "object",
+              required: ["kind", "source"],
+              properties: {
+                kind: { type: "string", enum: ["image"] },
+                source: { type: "object" },
               },
             },
           },

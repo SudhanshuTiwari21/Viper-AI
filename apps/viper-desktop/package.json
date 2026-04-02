@@ -14,7 +14,8 @@
     "build:vite": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -41,11 +42,13 @@
     "cross-env": "^7.0.3",
     "electron": "33.2.0",
     "electron-builder": "^25.1.8",
-    "postcss": "^8.4.49",
+    "happy-dom": "^20.8.9",
     "node-pty": "^1.0.0",
+    "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.7.2",
     "vite": "^6.0.1",
+    "vitest": "^4.1.2",
     "wait-on": "^8.0.1"
   },
   "build": {
@@ -62,13 +65,21 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis", "zip"]
+      "target": [
+        "nsis",
+        "zip"
+      ]
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     }
   }
 }

@@ -136,6 +136,24 @@ declare module "@repo/execution-engine" {
     | { type: "reasoning:start"; data: Record<string, never> }
     | { type: "reasoning:complete"; data: Record<string, never> }
     | { type: "model:route:summary"; data: Record<string, unknown> }
+    | {
+        type: "browser:step";
+        data: {
+          phase:
+            | "session:start"
+            | "navigate"
+            | "screenshot"
+            | "assert:pass"
+            | "assert:fail"
+            | "policy:denied"
+            | "session:end";
+          stepIndex?: number;
+          detail?: string;
+          url?: string;
+          rawBytes?: number;
+          kind?: string;
+        };
+      }
     | { type: "command:output"; data: { content: string } }
     | { type: "context:searching"; data: Record<string, never> }
     | { type: "result"; data: unknown }

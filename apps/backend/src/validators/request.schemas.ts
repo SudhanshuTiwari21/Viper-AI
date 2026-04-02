@@ -4,6 +4,102 @@ import { z } from "zod";
 export const ChatModeSchema = z.enum(["ask", "plan", "debug", "agent"]);
 export type ChatMode = z.infer<typeof ChatModeSchema>;
 
+// ---------------------------------------------------------------------------
+// E.22 — Image attachment model
+// ---------------------------------------------------------------------------
+
+/** Allowed MIME types for inline_base64 attachments. */
+export const INLINE_IMAGE_MIME_ALLOWLIST = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
+
+/** Max decoded bytes per single inline image (6 MiB). */
+export const INLINE_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
+
+/** Max total decoded bytes across all inline images in one request (12 MiB). */
+export const INLINE_IMAGES_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+
+/** Max number of attachments per request. */
+export const ATTACHMENT_MAX_COUNT = 8;
+
+/**
+ * Canonical source type for production — opaque mediaId resolved by E.23.
+ * No size limits (the bytes live outside this request).
+ */
+const MediaRefSourceSchema = z.object({
+  type: z.literal("media_ref"),
+  mediaId: z.string().min(1),
+});
+
+/**
+ * Dev / test inline source — base64-encoded image bytes sent directly.
+ * Strict per-image and total-request limits enforced in Zod.
+ *
+ * Base64 encoding overhead: decoded ≈ chars × (3/4).
+ * Max chars = ceil(INLINE_IMAGE_MAX_BYTES × 4/3).
+ */
+const INLINE_IMAGE_MAX_B64_CHARS = Math.ceil(INLINE_IMAGE_MAX_BYTES * (4 / 3));
+
+const InlineBase64SourceSchema = z.object({
+  type: z.literal("inline_base64"),
+  mimeType: z.enum(INLINE_IMAGE_MIME_ALLOWLIST),
+  data: z
+    .string()
+    .min(1)
+    .refine(
+      (s) => s.length <= INLINE_IMAGE_MAX_B64_CHARS,
+      {
+        message: `Inline image base64 exceeds per-image limit (~${INLINE_IMAGE_MAX_BYTES / (1024 * 1024)} MiB decoded)`,
+      },
+    ),
+});
+
+const ImageSourceSchema = z.discriminatedUnion("type", [
+  MediaRefSourceSchema,
+  InlineBase64SourceSchema,
+]);
+
+/**
+ * E.22: single image attachment.
+ * `kind` discriminates the attachment type; only `"image"` for now.
+ */
+export const ImageAttachmentSchema = z.object({
+  kind: z.literal("image"),
+  source: ImageSourceSchema,
+});
+
+/**
+ * Top-level attachment discriminated union.
+ * Add new kinds (e.g. `"file"`) here as future steps are implemented.
+ */
+export const AttachmentSchema = z.discriminatedUnion("kind", [ImageAttachmentSchema]);
+
+/** Validated array of attachments with per-item and total size enforcement. */
+const AttachmentsSchema = z
+  .array(AttachmentSchema)
+  .max(ATTACHMENT_MAX_COUNT, { message: `Max ${ATTACHMENT_MAX_COUNT} attachments per request` })
+  .refine(
+    (arr) => {
+      let totalB64Chars = 0;
+      for (const a of arr) {
+        if (a.kind === "image" && a.source.type === "inline_base64") {
+          totalB64Chars += a.source.data.length;
+        }
+      }
+      return totalB64Chars * 0.75 <= INLINE_IMAGES_MAX_TOTAL_BYTES;
+    },
+    {
+      message: `Total inline image data exceeds ${INLINE_IMAGES_MAX_TOTAL_BYTES / (1024 * 1024)} MiB`,
+    },
+  )
+  .optional();
+
+export type Attachment = z.infer<typeof AttachmentSchema>;
+export type ImageAttachment = z.infer<typeof ImageAttachmentSchema>;
+
 /** D.19: model tier selector (`auto` = D.17 router + D.18 failover; `premium`/`fast` = registry defaults). */
 export const ModelTierSelectionSchema = z.enum(["auto", "premium", "fast"]);
 export type ModelTierSelection = z.infer<typeof ModelTierSelectionSchema>;
@@ -59,6 +155,13 @@ export const ChatRequestSchema = z.preprocess(
       if (raw === undefined || raw === null || raw === "") return undefined;
       return String(raw).trim().toLowerCase();
     }, ModelTierSelectionSchema.optional()),
+    /**
+     * E.22: optional image attachments for the current user turn.
+     * Canonical shape: `{ kind: "image", source: { type: "media_ref", mediaId } }` (production).
+     * Dev-only: `{ kind: "image", source: { type: "inline_base64", mimeType, data } }`.
+     * Omitting this field preserves full backward compatibility with pre-E.22 clients.
+     */
+    attachments: AttachmentsSchema,
   }),
 );
 

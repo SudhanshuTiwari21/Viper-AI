@@ -127,6 +127,43 @@ export type StreamEvent =
     }
   /** D.21: route telemetry summary emitted before `done`. */
   | { type: "model:route:summary"; data: Record<string, unknown> }
+  /**
+   * E.28: browser tool progress events (navigate, assert, screenshot, recipe steps).
+   * Payload is intentionally small — no base64 / full HTML.
+   * Only emitted when VIPER_BROWSER_TOOLS=1 on the agentic path.
+   *
+   * Phases:
+   *   "session:start"   — browser session opened (first tool use).
+   *   "navigate"        — navigation completed (or failed); `url` populated.
+   *   "screenshot"      — screenshot taken; `rawBytes` summarises size.
+   *   "assert:pass"     — assertion/wait succeeded; `detail` has short text.
+   *   "assert:fail"     — assertion/wait failed; `detail` has short text.
+   *   "policy:denied"   — URL rejected by allowlist; `detail` has reason.
+   *   "session:end"     — browser session closed.
+   */
+  | {
+      type: "browser:step";
+      data: {
+        phase:
+          | "session:start"
+          | "navigate"
+          | "screenshot"
+          | "assert:pass"
+          | "assert:fail"
+          | "policy:denied"
+          | "session:end";
+        /** Step index within a recipe (0-based). Absent for single-tool calls. */
+        stepIndex?: number;
+        /** Short human-readable detail — capped at 200 chars. */
+        detail?: string;
+        /** Navigated URL (phase: navigate). */
+        url?: string;
+        /** Raw screenshot bytes (phase: screenshot) — metadata only, not base64. */
+        rawBytes?: number;
+        /** Assertion kind, e.g. "assert_text", "wait_for_selector" (phase: assert:pass|fail). */
+        kind?: string;
+      };
+    }
   | { type: "command:output"; data: { content: string } }
   | { type: "context:searching"; data: Record<string, never> }
   | { type: "result"; data: unknown }

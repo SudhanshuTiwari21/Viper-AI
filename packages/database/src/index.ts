@@ -33,3 +33,10 @@ export {
   type ChatFeedbackRow,
   type FeedbackStats,
 } from "./chat-feedback.repository";
+export {
+  insertChatMedia,
+  getChatMedia,
+  deleteChatMedia,
+  listExpiredChatMedia,
+  type ChatMediaRow,
+} from "./chat-media.repository";

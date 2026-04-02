@@ -1,9 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import {
   ClientDisconnectedError,
+  VisionNotSupportedError,
   runAssistantPipeline,
   runAssistantStreamPipeline,
 } from "../services/assistant.service.js";
+import { MultimodalResolutionError } from "../lib/multimodal-content.js";
 import { sseCorsHeaders } from "../lib/sse-cors-headers.js";
 import { verifyWorkspaceExists } from "../services/workspace.service.js";
 import type { ChatRequest } from "../validators/request.schemas.js";
@@ -17,7 +19,7 @@ export async function postChat(
   request: FastifyRequest<{ Body: ChatRequest }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const { prompt, workspacePath, conversationId, messages, mode: chatMode } = request.body;
+  const { prompt, workspacePath, conversationId, messages, mode: chatMode, attachments } = request.body;
 
   const exists = await verifyWorkspaceExists(workspacePath);
   if (!exists) {
@@ -50,6 +52,7 @@ export async function postChat(
       messages,
       chatMode,
       tierRes.effective,
+      attachments,
     );
 
     const routeTelemetry = result.routeMeta
@@ -82,6 +85,17 @@ export async function postChat(
       routeTelemetry,
     });
   } catch (err) {
+    // E.24: vision / multimodal errors are client errors → 400.
+    if (err instanceof VisionNotSupportedError || err instanceof MultimodalResolutionError) {
+      request.log.warn({
+        err,
+        request_id: identity.request_id,
+        workspace_id: identity.workspace_id,
+      }, "Chat request rejected: multimodal/vision error");
+      const status = err instanceof MultimodalResolutionError ? err.statusCode : 400;
+      await reply.status(status).send({ error: err.message });
+      return;
+    }
     request.log.error({
       err,
       request_id: identity.request_id,
@@ -98,7 +112,7 @@ export async function postChatStream(
   request: FastifyRequest<{ Body: ChatRequest }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const { prompt, workspacePath, conversationId, messages, mode: chatMode } = request.body;
+  const { prompt, workspacePath, conversationId, messages, mode: chatMode, attachments } = request.body;
 
   const exists = await verifyWorkspaceExists(workspacePath);
   if (!exists) {
@@ -211,6 +225,7 @@ export async function postChatStream(
       chatMode,
       tierRes.effective,
       { tierDowngraded: tierRes.downgraded, requestedTier: tierRes.requested },
+      attachments,
     );
   } catch (err) {
     if (err instanceof ClientDisconnectedError) {
@@ -220,6 +235,20 @@ export async function postChatStream(
         conversation_id: identity.conversation_id,
         reason: "client_disconnected",
       }, "Chat stream ended: client disconnected (pipeline aborted)");
+    } else if (err instanceof VisionNotSupportedError || err instanceof MultimodalResolutionError) {
+      // E.24: vision / multimodal client errors — log at warn, surface via SSE error event.
+      request.log.warn({
+        err,
+        request_id: identity.request_id,
+        workspace_id: identity.workspace_id,
+      }, "Chat stream rejected: multimodal/vision error");
+      send({
+        type: "error",
+        data: {
+          request_id: identity.request_id,
+          message: err.message,
+        },
+      });
     } else {
       request.log.error({
         err,

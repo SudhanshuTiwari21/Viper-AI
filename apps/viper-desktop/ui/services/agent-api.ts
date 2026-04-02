@@ -55,6 +55,129 @@ export type ChatMode = "ask" | "plan" | "debug" | "agent";
 /** D.19: per-request model tier (matches backend `modelTier`). */
 export type ModelTier = "auto" | "premium" | "fast";
 
+// ---------------------------------------------------------------------------
+// E.25 — Image attachment types (mirrors E.22 backend schema)
+// ---------------------------------------------------------------------------
+
+/** Subset of E.22 INLINE_IMAGE_MIME_ALLOWLIST used for client-side pre-validation. */
+export const ATTACHMENT_MIME_ALLOWLIST = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
+
+export type AttachmentMimeType = (typeof ATTACHMENT_MIME_ALLOWLIST)[number];
+
+/** E.22/E.23 media_ref attachment shape sent to /chat and /chat/stream. */
+export interface MediaRefAttachment {
+  kind: "image";
+  source: { type: "media_ref"; mediaId: string };
+}
+
+/** Response from POST /media/upload. */
+export interface MediaUploadResponse {
+  mediaId: string;
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+}
+
+/** Max bytes per file — must match E.22/E.23 INLINE_IMAGE_MAX_BYTES (6 MiB). */
+export const ATTACHMENT_MAX_BYTES = 6 * 1024 * 1024;
+/** Max number of attachments per send — must match E.22 ATTACHMENT_MAX_COUNT. */
+export const ATTACHMENT_MAX_COUNT = 8;
+
+// ---------------------------------------------------------------------------
+// E.25 — Upload a single image file to /media/upload
+// ---------------------------------------------------------------------------
+
+/**
+ * Upload a single image file (File or Blob) to POST /media/upload.
+ *
+ * The workspace_id MUST be derived with deriveWorkspaceId(workspacePath) so
+ * it matches the value the backend uses when resolving E.22 media_ref
+ * attachments in E.24.
+ *
+ * Client-side validation (MIME allowlist + 6 MiB cap) is performed before the
+ * request — matching the E.22/E.23 server-side limits — to give immediate
+ * feedback without a round-trip.
+ *
+ * @throws Error with a user-readable message on validation or network failure.
+ */
+export async function uploadChatMedia(params: {
+  workspaceId: string;
+  file: File | Blob;
+  /** Explicit MIME type. Falls back to file.type when omitted. */
+  mimeType?: string;
+}): Promise<MediaUploadResponse> {
+  const { workspaceId, file } = params;
+
+  // Resolve MIME: explicit override → File.type → extension sniff
+  const rawMime = params.mimeType ?? (file instanceof File ? file.type : "");
+  const mimeType = resolveMimeType(rawMime, file instanceof File ? file.name : "");
+
+  if (!ATTACHMENT_MIME_ALLOWLIST.includes(mimeType as AttachmentMimeType)) {
+    throw new Error(
+      `Unsupported image type: "${mimeType}". ` +
+        `Allowed: ${ATTACHMENT_MIME_ALLOWLIST.join(", ")}.`,
+    );
+  }
+
+  if (file.size > ATTACHMENT_MAX_BYTES) {
+    const mib = (file.size / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `Image is too large (${mib} MiB). Maximum allowed size is 6 MiB per file.`,
+    );
+  }
+
+  // Read file → base64
+  const arrayBuffer = await file.arrayBuffer();
+  const dataBase64 = arrayBufferToBase64(arrayBuffer);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/media/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: workspaceId, mimeType, dataBase64 }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error?: string }).error ?? `Upload failed: ${res.status}`);
+  }
+  return res.json() as Promise<MediaUploadResponse>;
+}
+
+/** Convert an ArrayBuffer to a base64 string without the data-URL prefix. */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
+}
+
+/** Resolve MIME from a type string + optional filename extension fallback. */
+function resolveMimeType(type: string, filename: string): string {
+  if (type && type !== "application/octet-stream") return type;
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  const EXT_MAP: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+  };
+  return EXT_MAP[ext] ?? type;
+}
+
 /** POST /chat — run assistant pipeline (intent + context ranking). Returns intent + context. */
 export async function sendChat(
   prompt: string,
@@ -63,6 +186,7 @@ export async function sendChat(
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
   mode?: ChatMode,
   modelTier: ModelTier = "auto",
+  attachments?: MediaRefAttachment[],
 ): Promise<ChatResponse> {
   let res: Response;
   try {
@@ -76,6 +200,8 @@ export async function sendChat(
         messages,
         ...(mode ? { mode } : {}),
         modelTier,
+        // E.25: only include attachments key when non-empty (backward compat)
+        ...(attachments?.length ? { attachments } : {}),
       }),
       signal: AbortSignal.timeout(120_000),
     });
@@ -108,6 +234,8 @@ export async function sendChatStream(
   signal?: AbortSignal,
   mode?: ChatMode,
   modelTier: ModelTier = "auto",
+  /** E.25: validated media_ref attachments to include in the request body. */
+  attachments?: MediaRefAttachment[],
 ): Promise<void> {
   let res: Response;
   try {
@@ -121,6 +249,8 @@ export async function sendChatStream(
         messages,
         ...(mode ? { mode } : {}),
         modelTier,
+        // E.25: only include attachments key when non-empty (backward compat)
+        ...(attachments?.length ? { attachments } : {}),
       }),
       signal: signal ?? AbortSignal.timeout(300_000),
     });

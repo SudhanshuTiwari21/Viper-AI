@@ -4,7 +4,7 @@ import { buildExecutionPlan, type ExecutionPlan } from "@repo/planner-agent";
 import { executePlan } from "@repo/execution-engine";
 import type { OnStreamEvent } from "@repo/execution-engine";
 import type { RequestIdentity } from "../types/request-identity.js";
-import type { ChatMode, ModelTierSelection } from "../validators/request.schemas.js";
+import type { ChatMode, ModelTierSelection, Attachment } from "../validators/request.schemas.js";
 import { validateWorkflowLog } from "../types/workflow-log-schema.js";
 // runAutonomousLoop no longer used in the streaming path (replaced by agentic loop)
 import {
@@ -53,12 +53,22 @@ import {
 import { attachAnalysisGateForEdits } from "../lib/analysis-edit-gate.js";
 import { runPostEditValidationWithOptionalAutoRepair } from "../lib/post-edit-validation.js";
 import { getAllowedToolNames } from "../lib/mode-tool-policy.js";
-import { getModePromptAddendum, enforceOutputContract } from "../lib/mode-narration.js";
+import {
+  getModePromptAddendum,
+  enforceOutputContract,
+  getMultimodalSystemAddendum,
+} from "../lib/mode-narration.js";
+import {
+  buildMultimodalUserContent,
+  MultimodalResolutionError,
+} from "../lib/multimodal-content.js";
 import {
   buildFallbackChainForAuto,
   selectModel,
+  VisionNotSupportedError,
   type ModelRouteMode,
 } from "../lib/model-router.js";
+export { VisionNotSupportedError };
 import {
   createAgenticChatStreamWithFailover,
   runChatCompletionWithFailover,
@@ -69,8 +79,14 @@ import {
   runAgenticLoop,
   buildAgenticSystemPrompt,
   buildWorkspaceTools,
+  buildBrowserTools,
   type AgenticLoopPausedState,
 } from "@repo/agentic-loop";
+import {
+  isBrowserToolsEnabled,
+  createBrowserSession,
+  type BrowserSession,
+} from "@repo/browser-runner";
 import { workflowRuntimeConfig, modelFailoverEnabledForRoute } from "../config/workflow-flags.js";
 import type { RouteMeta } from "../types/route-telemetry.js";
 import type { ModelSpec } from "@repo/model-registry";
@@ -360,6 +376,8 @@ function routeModelForRequest(params: {
   intentType: string;
   isStreaming: boolean;
   retrievalConfidence?: number;
+  /** E.24: when true, validate that the selected model supports vision. */
+  hasAttachments?: boolean;
 }): {
   modelId: string;
   provider: string;
@@ -376,12 +394,14 @@ function routeModelForRequest(params: {
   );
   const maxFbSpecs = Math.min(2, Math.max(0, MODEL_FAILOVER_MAX_ATTEMPTS - 1));
 
+  let result: ReturnType<typeof routeModelForRequest>;
+
   if (params.clientModelTier === "premium" || params.clientModelTier === "fast") {
     const selected = getDefaultModelForTier(params.clientModelTier);
     const fallbackChain = failoverEnabled
       ? buildFallbackChainForAuto(selected, maxFbSpecs)
       : [];
-    return {
+    result = {
       modelId: String(selected.id),
       provider: selected.provider,
       tier: selected.tier,
@@ -395,14 +415,12 @@ function routeModelForRequest(params: {
       failoverEnabled,
       fallbackModelIds: fallbackChain.map((s) => s.id),
     };
-  }
-
-  if (params.routeMode === "pinned") {
+  } else if (params.routeMode === "pinned") {
     const resolvedSpec = resolveModelSpec(OPENAI_MODEL) ?? getDefaultModelForTier("fast");
     const fallbackChain = failoverEnabled
       ? buildFallbackChainForAuto(resolvedSpec, maxFbSpecs)
       : [];
-    return {
+    result = {
       modelId: RESOLVED_MODEL_ID,
       provider: RESOLVED_MODEL_PROVIDER,
       tier: RESOLVED_MODEL_TIER,
@@ -416,28 +434,43 @@ function routeModelForRequest(params: {
       failoverEnabled,
       fallbackModelIds: fallbackChain.map((s) => s.id),
     };
+  } else {
+    // E.24: pass hasAttachments so selectModel can apply the vision-upgrade rule.
+    const decision = selectModel({
+      chatMode: params.chatMode,
+      intentType: params.intentType,
+      hasAttachments: params.hasAttachments ?? false,
+      isStreaming: params.isStreaming,
+      retrievalConfidence: params.retrievalConfidence,
+    });
+    const fallbackChain = failoverEnabled
+      ? buildFallbackChainForAuto(decision.selected, maxFbSpecs)
+      : [];
+    result = {
+      modelId: String(decision.selected.id),
+      provider: decision.selected.provider,
+      tier: decision.selected.tier,
+      reason: decision.reason,
+      signals: { ...(decision.signals as Record<string, unknown>), clientModelTier: "auto" },
+      fallbackChain,
+      failoverEnabled,
+      fallbackModelIds: fallbackChain.map((s) => s.id),
+    };
   }
 
-  const decision = selectModel({
-    chatMode: params.chatMode,
-    intentType: params.intentType,
-    hasAttachments: false,
-    isStreaming: params.isStreaming,
-    retrievalConfidence: params.retrievalConfidence,
-  });
-  const fallbackChain = failoverEnabled
-    ? buildFallbackChainForAuto(decision.selected, maxFbSpecs)
-    : [];
-  return {
-    modelId: String(decision.selected.id),
-    provider: decision.selected.provider,
-    tier: decision.selected.tier,
-    reason: decision.reason,
-    signals: { ...(decision.signals as Record<string, unknown>), clientModelTier: "auto" },
-    fallbackChain,
-    failoverEnabled,
-    fallbackModelIds: fallbackChain.map((s) => s.id),
-  };
+  // E.24: vision safety check — all routing paths must yield a vision-capable model
+  // when the request carries image attachments.  The auto path handles upgrade via
+  // selectModel; pinned and client-tier paths surface an error so the caller can
+  // choose a compatible tier or remove attachments.
+  if (params.hasAttachments) {
+    const spec = resolveModelSpec(result.modelId);
+    if (!spec?.capabilities.vision) {
+      throw new VisionNotSupportedError(result.modelId);
+    }
+    result.signals.vision_required = true;
+  }
+
+  return result;
 }
 
 function logModelFailover(identity: RequestIdentity | null, meta: FailoverMeta): void {
@@ -907,8 +940,12 @@ async function runDirectLLM(
     identity?: RequestIdentity | null;
     fallbackModelIds?: string[];
     modelFailoverMaxAttempts?: number;
+    /** E.24: image attachments to embed in the user turn as multimodal content parts. */
+    attachments?: import("../validators/request.schemas.js").Attachment[];
   },
 ): Promise<AssistantPipelineResult> {
+  const hasAttachments = Boolean(args.attachments?.length);
+
   const cacheKey = `direct-llm:${buildCacheKey({
     workspaceKey: args.workspaceKey,
     conversationId: args.conversationId,
@@ -919,10 +956,13 @@ async function runDirectLLM(
       ? hashString(args.projectContextBlock.slice(0, 16000))
       : "",
   })}`;
+  // E.24: never cache multimodal requests — image data is request-specific and
+  // two identical prompts with different images must always reach the model.
   const canUseCache =
     DIRECT_LLM_CACHE_TTL > 0 &&
     Boolean(args.conversationId) &&
-    !args.projectContextBlock;
+    !args.projectContextBlock &&
+    !hasAttachments;
   if (canUseCache) {
     const cached = await directLLMCache.get(cacheKey);
     if (cached !== null) {
@@ -949,6 +989,20 @@ async function runDirectLLM(
     const maxAtt = args.modelFailoverMaxAttempts ?? MODEL_FAILOVER_MAX_ATTEMPTS;
     let dlFinalModel = args.modelId;
     let dlFbCount = 0;
+
+    // E.24: system prompt gets a short vision addendum when images are present.
+    const systemContent =
+      DIRECT_LLM_SYSTEM_PROMPT +
+      getModePromptAddendum(args.chatMode) +
+      (hasAttachments ? getMultimodalSystemAddendum(args.chatMode) : "");
+
+    // E.24: resolve multimodal content before entering the (sync) buildRequest.
+    const workspaceId = args.identity?.workspace_id ?? args.workspaceKey;
+    const userContent: string | import("openai").default.Chat.ChatCompletionContentPart[] =
+      hasAttachments
+        ? await buildMultimodalUserContent(prompt, args.attachments!, workspaceId)
+        : prompt;
+
     const response = await runChatCompletionWithFailover({
       client,
       primaryModelId: args.modelId,
@@ -964,7 +1018,7 @@ async function runDirectLLM(
         messages: [
           {
             role: "system",
-            content: DIRECT_LLM_SYSTEM_PROMPT + getModePromptAddendum(args.chatMode),
+            content: systemContent,
           },
           ...(ctx
             ? [
@@ -978,7 +1032,7 @@ async function runDirectLLM(
             role: m.role,
             content: m.content,
           })),
-          { role: "user", content: prompt },
+          { role: "user" as const, content: userContent },
         ],
         temperature: 0.3,
       }),
@@ -1051,8 +1105,17 @@ export async function runAssistantPipeline(
   chatMode: ChatMode = "agent",
   /** D.20: effective tier after persistence + entitlements (controller-resolved). */
   modelTier: ModelTierSelection = "auto",
+  /** E.22: validated image attachments for the current user turn (ignored by LLM calls until E.24). */
+  attachments?: Attachment[],
 ): Promise<AssistantPipelineResult> {
   if (DEBUG_ASSISTANT) log("Chat pipeline (C.11 mode — tool policy in C.12)", { chatMode });
+  if (attachments?.length && DEBUG_ASSISTANT) {
+    workflowLog("multimodal:attachments:received", identity, {
+      count: attachments.length,
+      kinds: [...new Set(attachments.map((a) => a.kind))],
+      source_types: [...new Set(attachments.map((a) => a.source.type))],
+    });
+  }
   const lastMessages = messages.slice(-CHAT_HISTORY_LIMIT);
   const workspaceKey = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
   const historyAwarePrompt =
@@ -1105,6 +1168,7 @@ export async function runAssistantPipeline(
     chatMode,
     intentType: intentResult.intent.intentType,
     isStreaming: false,
+    hasAttachments: Boolean(attachments?.length),
   });
   workflowLog("model:route:selected", identity, {
     model_id: routed.modelId,
@@ -1135,6 +1199,7 @@ export async function runAssistantPipeline(
       identity,
       fallbackModelIds: routed.fallbackModelIds,
       modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
+      attachments,
     });
   }
 
@@ -1184,6 +1249,7 @@ export async function runAssistantPipeline(
       identity,
       fallbackModelIds: routed.fallbackModelIds,
       modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
+      attachments,
     });
   }
 
@@ -1327,6 +1393,8 @@ async function runDirectLLMStream(
     chatMode?: ChatMode;
     fallbackModelIds?: string[];
     modelFailoverMaxAttempts?: number;
+    /** E.24: image attachments to embed in the user turn as multimodal content parts. */
+    attachments?: import("../validators/request.schemas.js").Attachment[];
   },
 ): Promise<AssistantPipelineResult> {
   const client = getOpenAIClient();
@@ -1334,7 +1402,20 @@ async function runDirectLLMStream(
   const preamble =
     options?.workspaceContextPreamble ??
     "Workspace context from the project index (use for accurate run/install commands):\n\n";
-  const modeAddendum = getModePromptAddendum(options?.chatMode ?? "agent");
+  const mode = options?.chatMode ?? "agent";
+  const hasAttachments = Boolean(options?.attachments?.length);
+
+  // E.24: system prompt gets a short vision addendum when images are present.
+  const systemContent =
+    DIRECT_LLM_SYSTEM_PROMPT +
+    getModePromptAddendum(mode) +
+    (hasAttachments ? getMultimodalSystemAddendum(mode) : "");
+
+  // E.24: resolve multimodal content before building the (static) streamBody.
+  const userContent: string | import("openai").default.Chat.ChatCompletionContentPart[] =
+    hasAttachments
+      ? await buildMultimodalUserContent(prompt, options!.attachments!, identity.workspace_id)
+      : prompt;
 
   let content = "";
   let dsFinalModel = modelId;
@@ -1348,7 +1429,7 @@ async function runDirectLLMStream(
       messages: [
         {
           role: "system",
-          content: DIRECT_LLM_SYSTEM_PROMPT + modeAddendum,
+          content: systemContent,
         },
         ...(ctx
           ? [
@@ -1362,7 +1443,7 @@ async function runDirectLLMStream(
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
-        { role: "user", content: prompt },
+        { role: "user" as const, content: userContent },
       ],
       temperature: 0.3,
     },
@@ -1432,6 +1513,8 @@ async function runAgenticStreamPath(
   gateState?: { analysisReady: boolean },
   retrievalEditGate?: { overall: number; threshold: number; schemaVersion?: string },
   chatMode: ChatMode = "agent",
+  /** E.24: image attachments for the current user turn (not injected into history). */
+  attachments?: import("../validators/request.schemas.js").Attachment[],
 ): Promise<AssistantPipelineResult & { paused?: boolean }> {
   const client = getOpenAIClient();
   const useAgenticFailover = failoverEnabled && fallbackModelIds.length > 0;
@@ -1617,9 +1700,55 @@ async function runAgenticStreamPath(
       return { allowed: true as const };
     },
   });
+  // E.26: per-request browser session (lazy — opened on first tool use, closed after loop).
+  // Use an object wrapper so TypeScript doesn't narrow the reference to 'never' across
+  // the closure boundary inside getBrowserSession.
+  const _browserRef = { session: null as BrowserSession | null };
+  let _sessionStarted = false;
+  const getBrowserSession = async (): Promise<BrowserSession> => {
+    if (!_browserRef.session || _browserRef.session.isClosed) {
+      _browserRef.session = await createBrowserSession();
+    }
+    return _browserRef.session;
+  };
+
+  const browserTools = buildBrowserTools(
+    getBrowserSession,
+    isBrowserToolsEnabled(),
+    {
+      onSessionStart: () => {
+        if (!_sessionStarted) {
+          _sessionStarted = true;
+          workflowLog("browser:session:start", identity, { chatMode });
+        }
+      },
+      onNavigate: (url) => {
+        workflowLog("browser:navigate", identity, { url });
+      },
+      onScreenshot: (rawBytes) => {
+        workflowLog("browser:screenshot", identity, { rawBytes });
+      },
+      onPolicyDenied: (reason) => {
+        workflowLog("browser:policy:denied", identity, { reason });
+      },
+      onAssertPass: (stepIndex, kind, detail) => {
+        workflowLog("browser:assert:pass", identity, { step_index: stepIndex, kind, detail });
+      },
+      onAssertFail: (stepIndex, kind, detail) => {
+        workflowLog("browser:assert:fail", identity, { step_index: stepIndex, kind, detail });
+      },
+      // E.28 — forward browser progress as structured SSE events (browser:step).
+      onBrowserStreamEvent: (payload) => {
+        onEvent({ type: "browser:step", data: payload });
+      },
+    },
+  );
+
+  const allToolsWithBrowser = [...allTools, ...browserTools];
+
   const tools = chatMode === "agent"
-    ? allTools
-    : allTools.filter((t) => allowedToolNames.has(t.definition.function.name));
+    ? allToolsWithBrowser
+    : allToolsWithBrowser.filter((t) => allowedToolNames.has(t.definition.function.name));
 
   const memKey: SessionKey | null = conversationId
     ? { workspacePath, conversationId }
@@ -1638,6 +1767,16 @@ async function runAgenticStreamPath(
     }
   }
 
+  // E.24: resolve multimodal content for the current user turn when images are present.
+  // Only the current turn carries images (E.22 semantics); history stays as strings.
+  const hasAttachments = Boolean(attachments?.length);
+  const systemContentWithAddendum =
+    systemPrompt + (hasAttachments ? getMultimodalSystemAddendum(chatMode) : "");
+  const userContent: string | import("openai").default.Chat.ChatCompletionContentPart[] =
+    hasAttachments
+      ? await buildMultimodalUserContent(prompt, attachments!, identity.workspace_id)
+      : prompt;
+
   let openaiMessages: Parameters<typeof runAgenticLoop>[0]["messages"];
   let stepNumber = 1;
 
@@ -1645,17 +1784,18 @@ async function runAgenticStreamPath(
     stepNumber = resumeState.stepNumber + 1;
     openaiMessages = [
       ...resumeState.state.messages,
-      { role: "user", content: prompt },
+      // Current turn may carry images (resume with new attachments is valid per E.22).
+      { role: "user" as const, content: userContent },
     ];
     if (DEBUG_ASSISTANT) log(`Resuming agentic loop from step ${stepNumber}`);
   } else {
     openaiMessages = [
-      { role: "system", content: systemPrompt },
+      { role: "system" as const, content: systemContentWithAddendum },
       ...lastMessages.slice(-CHAT_HISTORY_LIMIT).map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       })),
-      { role: "user", content: prompt },
+      { role: "user" as const, content: userContent },
     ];
   }
 
@@ -1671,7 +1811,7 @@ async function runAgenticStreamPath(
   const result = await runAgenticLoop({
     client,
     model: modelId,
-    systemPrompt,
+    systemPrompt: systemContentWithAddendum,
     messages: openaiMessages,
     tools,
     workspacePath,
@@ -1789,6 +1929,20 @@ async function runAgenticStreamPath(
       if (DEBUG_ASSISTANT) log(`Agentic loop paused at step ${stepNumber}`, { summary, editedFiles: pauseEditedFiles });
     },
   });
+
+  // E.26 / E.28: close the browser session (if opened) after the loop completes.
+  const _bs = _browserRef.session;
+  if (_bs && !_bs.isClosed) {
+    workflowLog("browser:session:end", identity, {
+      navCount: _bs.navigationCount,
+      chatMode,
+    });
+    // E.28: emit session:end SSE so the desktop can show browser activity is done.
+    onEvent({ type: "browser:step", data: { phase: "session:end" } });
+    void _bs.close().catch((err: unknown) => {
+      if (DEBUG_ASSISTANT) log("Browser session close error", err);
+    });
+  }
 
   if (exploredFiles.length > 0) {
     onEvent({
@@ -1909,9 +2063,18 @@ export async function runAssistantStreamPipeline(
   chatMode: ChatMode = "agent",
   modelTier: ModelTierSelection = "auto",
   telemetryCtx?: { tierDowngraded: boolean; requestedTier: string },
+  /** E.22: validated image attachments for the current user turn (ignored by LLM calls until E.24). */
+  attachments?: Attachment[],
 ): Promise<void> {
   ensureDbMemoryAdapter();
   const requestStart = Date.now();
+  if (attachments?.length && DEBUG_ASSISTANT) {
+    workflowLog("multimodal:attachments:received", identity, {
+      count: attachments.length,
+      kinds: [...new Set(attachments.map((a) => a.kind))],
+      source_types: [...new Set(attachments.map((a) => a.source.type))],
+    });
+  }
 
   const emitRouteTelemetry = (routeMeta: RouteMeta | undefined) => {
     if (!routeMeta) return;
@@ -2094,7 +2257,7 @@ export async function runAssistantStreamPipeline(
       const d = selectModel({
         chatMode,
         intentType: resumeState.intentSummary.intent,
-        hasAttachments: false,
+        hasAttachments: Boolean(attachments?.length),
         isStreaming: true,
       });
       resumeRouted = {
@@ -2123,6 +2286,7 @@ export async function runAssistantStreamPipeline(
         gateStateResume,
         retrievalEditGateResume,
         chatMode,
+        attachments,
       ),
       signal,
     );
@@ -2190,6 +2354,7 @@ export async function runAssistantStreamPipeline(
       chatMode,
       intentType: intentResult.intent.intentType,
       isStreaming: true,
+      hasAttachments: Boolean(attachments?.length),
     });
     workflowLog("model:route:selected", identity, {
       model_id: routed.modelId,
@@ -2210,6 +2375,7 @@ export async function runAssistantStreamPipeline(
         chatMode,
         fallbackModelIds: routed.fallbackModelIds,
         modelFailoverMaxAttempts: MODEL_FAILOVER_MAX_ATTEMPTS,
+        attachments,
       }),
       signal,
     );
@@ -2235,6 +2401,7 @@ export async function runAssistantStreamPipeline(
     chatMode,
     intentType: intentResult.intent.intentType,
     isStreaming: true,
+    hasAttachments: Boolean(attachments?.length),
   });
   workflowLog("model:route:selected", identity, {
     model_id: routed.modelId,
@@ -2343,6 +2510,7 @@ export async function runAssistantStreamPipeline(
       gateState,
       retrievalEditGate,
       chatMode,
+      attachments,
     ),
     signal,
   );

@@ -137,3 +137,27 @@ export function enforceOutputContract(content: string, mode: ChatMode): string {
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/**
+ * E.24 — Short system addendum appended to the base system prompt ONLY when
+ * image attachments are present in the user turn.
+ *
+ * Kept deliberately brief — long instructions bloat every vision call.
+ * Mode-specific phrasing mirrors the getModePromptAddendum pattern.
+ */
+export function getMultimodalSystemAddendum(mode: ChatMode): string {
+  const base =
+    "\n\nUser has attached image(s) to this message. " +
+    "Carefully examine them and describe what you observe before providing code suggestions, analysis, or answers.";
+
+  if (mode === "debug") {
+    return (
+      base +
+      " Pay particular attention to any error messages, stack traces, or UI anomalies visible in the images."
+    );
+  }
+  if (mode === "plan") {
+    return base + " Incorporate what you see into your implementation plan.";
+  }
+  return base;
+}

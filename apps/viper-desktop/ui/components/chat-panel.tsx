@@ -8,6 +8,8 @@ import {
   Sparkles,
   ThumbsUp,
   ThumbsDown,
+  Paperclip,
+  X,
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
@@ -25,10 +27,15 @@ import {
   rejectPatch as apiRejectPatch,
   buildV2rayTunSubscriptionImportDeepLink,
   sendFeedback,
+  uploadChatMedia,
   type ChatResponse,
   type ModelTier,
   type FeedbackRating,
+  type MediaRefAttachment,
+  ATTACHMENT_MIME_ALLOWLIST,
+  ATTACHMENT_MAX_COUNT,
 } from "../services/agent-api";
+import { deriveWorkspaceId } from "../lib/workspace-id";
 import { filterPatchByHunks, buildInitialHunkStatuses } from "../lib/filter-patch";
 import { buildFileDiffWithHunks } from "../lib/hunk-model";
 import { useSmartScroll } from "../hooks/use-smart-scroll";
@@ -84,6 +91,10 @@ export function ChatPanel() {
     setModelTier,
     setRequestId,
     setFeedbackRating,
+    pendingAttachments,
+    addPendingAttachment,
+    removePendingAttachment,
+    clearPendingAttachments,
   } = useChat();
   const { workspace } = useWorkspaceContext();
   const { addPendingEdit } = usePendingEdits();
@@ -91,6 +102,9 @@ export function ChatPanel() {
   const [analysing, setAnalysing] = useState(false);
   const [pastChatsOpen, setPastChatsOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** Synchronous guard — two rapid sends can both see streaming===false before re-render (duplicate /chat/stream). */
   const streamInFlightRef = useRef(false);
 
@@ -142,6 +156,16 @@ export function ChatPanel() {
 
       const sid = activeSessionId;
       const steps: ExecutionStep[] = [];
+
+      // E.25: snapshot pending attachments for this send, then clear them so
+      // the next message starts clean.  On error, attachments are intentionally
+      // left cleared (uploaded media persists on the server and can be re-sent
+      // by the user if needed — avoids confusion from re-attaching stale refs).
+      const sendAttachments: MediaRefAttachment[] = pendingAttachments.map((a) => ({
+        kind: "image" as const,
+        source: { type: "media_ref" as const, mediaId: a.mediaId },
+      }));
+      clearPendingAttachments();
 
       setStreaming(true);
       try {
@@ -323,6 +347,12 @@ export function ChatPanel() {
                 // B.9 (WS9): bounded shell repair after validation failure; safe no-op for the desktop parser.
                 break;
 
+              case "browser:step":
+                // E.28: browser tool progress events (navigate, assert, screenshot, session lifecycle).
+                // No-op in the desktop stream parser; future UI polish can consume
+                // event.data.phase / detail here without breaking the stream.
+                break;
+
               case "workflow:gate": {
                 const d = event.data as {
                   gate: "edit";
@@ -482,6 +512,7 @@ export function ChatPanel() {
           undefined,
           currentMode,
           currentModelTier,
+          sendAttachments.length > 0 ? sendAttachments : undefined,
         );
       } catch (err) {
         const errorText = err instanceof Error ? err.message : "Request failed";
@@ -522,6 +553,8 @@ export function ChatPanel() {
       currentMode,
       currentModelTier,
       setRequestId,
+      pendingAttachments,
+      clearPendingAttachments,
     ],
   );
 
@@ -717,6 +750,54 @@ export function ChatPanel() {
     if (streaming) return;
     handleSend("Stop here, that's enough for now.");
   }, [streaming, handleSend]);
+
+  // ─── E.25: file attachment handler ───
+
+  const handleAttachFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const workspacePath = workspace?.root ?? "";
+      if (!workspacePath) return;
+
+      // Total count guard (existing + new)
+      const incoming = Array.from(files);
+      const total = pendingAttachments.length + incoming.length;
+      if (total > ATTACHMENT_MAX_COUNT) {
+        setAttachError(
+          `Too many images. Maximum ${ATTACHMENT_MAX_COUNT} per message (currently have ${pendingAttachments.length}).`,
+        );
+        return;
+      }
+
+      setAttachError(null);
+      setUploading(true);
+
+      try {
+        const workspaceId = await deriveWorkspaceId(workspacePath);
+        for (const file of incoming) {
+          try {
+            const result = await uploadChatMedia({ workspaceId, file });
+            const previewObjectUrl = URL.createObjectURL(file);
+            addPendingAttachment({
+              mediaId: result.mediaId,
+              mimeType: result.mimeType,
+              fileName: file.name,
+              previewObjectUrl,
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Upload failed";
+            setAttachError(`${file.name}: ${msg}`);
+            // Continue with remaining files
+          }
+        }
+      } finally {
+        setUploading(false);
+        // Reset input so the same file can be re-selected after removal
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [workspace?.root, pendingAttachments.length, addPendingAttachment],
+  );
 
   const handleFeedback = useCallback(
     (messageId: string, rating: FeedbackRating) => {
@@ -989,7 +1070,77 @@ export function ChatPanel() {
             </button>
           ))}
         </div>
-        <ChatInput onSend={handleSend} disabled={streaming} />
+
+        {/* E.25 — pending attachment thumbnails */}
+        {pendingAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {pendingAttachments.map((a) => (
+              <div
+                key={a.mediaId}
+                className="relative group shrink-0 w-12 h-12 rounded-md overflow-hidden border border-v-border bg-v-bg2"
+                title={a.fileName ?? a.mimeType}
+              >
+                {a.previewObjectUrl ? (
+                  <img
+                    src={a.previewObjectUrl}
+                    alt={a.fileName ?? "attachment"}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-v-text3 text-[9px]">
+                    img
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePendingAttachment(a.mediaId)}
+                  className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-full p-px text-white hover:bg-black/80"
+                  title="Remove"
+                >
+                  <X size={9} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* E.25 — upload error */}
+        {attachError && (
+          <p className="text-[11px] text-red-400 leading-tight">
+            {attachError}
+          </p>
+        )}
+
+        {/* E.25 — composer row: attach button + text input */}
+        <div className="flex items-end gap-1">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ATTACHMENT_MIME_ALLOWLIST.map((m) => `.${m.split("/")[1]}`).join(",")}
+            multiple
+            className="sr-only"
+            onChange={(e) => { void handleAttachFiles(e.target.files); }}
+          />
+          <button
+            type="button"
+            disabled={streaming || uploading}
+            title={uploading ? "Uploading…" : "Attach image"}
+            onClick={() => fileInputRef.current?.click()}
+            className={`shrink-0 p-1.5 rounded-lg transition-colors ${
+              uploading
+                ? "text-v-accent animate-pulse"
+                : pendingAttachments.length > 0
+                  ? "text-v-accent hover:bg-v-accent/10"
+                  : "text-v-text3 hover:bg-white/[0.04] hover:text-v-text"
+            } disabled:opacity-40 disabled:pointer-events-none`}
+          >
+            <Paperclip size={14} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <ChatInput onSend={handleSend} disabled={streaming} />
+          </div>
+        </div>
       </div>
     </div>
   );
