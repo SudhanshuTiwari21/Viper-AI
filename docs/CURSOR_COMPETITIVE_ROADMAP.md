@@ -1116,13 +1116,444 @@ cd apps/backend && npm run check-types   # clean
 
 ### Step Group F — Product platform (auth, metering, billing)
 
-29. Add user/workspace auth and membership schema.
-30. Implement entitlement service and middleware.
-31. Emit billing-grade usage events for every request.
-32. Build usage aggregation jobs and storage.
-33. Implement quota checks and hard/soft enforcement.
-34. Integrate subscription provider + webhook ingestion.
-35. Build usage/billing/admin product surfaces.
+~~29. Add user/workspace auth and membership schema.~~ **COMPLETE**
+
+### F.29 Status: COMPLETE
+
+**What was implemented:**
+
+**Schema (additive — no existing tables touched):**
+- `users` — UUID PK, email (unique case-insensitive functional index), display_name, auth_provider + external_subject nullable placeholders for F.30 OAuth/JWT.
+- `workspaces` — UUID PK, name, optional unique slug, created_by_user_id FK → users (ON DELETE SET NULL).
+- `workspace_memberships` — composite PK (workspace_id, user_id), both FKs ON DELETE CASCADE, role CHECK: `owner | admin | member`.
+- Indexes: `idx_users_email_lower` (functional unique), `idx_workspace_memberships_user_id`, `idx_workspace_memberships_workspace_id`.
+
+**Migration:** `packages/database/migrations/009_create_auth_core.sql` — idempotent `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`.
+
+**schema.sql** updated with the same DDL for greenfield installs.
+
+**Repository layer (packages/database/src/):**
+- `auth-users.repository.ts` — `createUser`, `getUserByEmail` (case-insensitive), `getUserById`, `getUserByExternalSubject`, `updateUser`, `deleteUser`.
+- `auth-workspaces.repository.ts` — `createWorkspace`, `getWorkspaceById`, `getWorkspaceBySlug`, `updateWorkspace`, `deleteWorkspace`.
+- `auth-memberships.repository.ts` — `upsertMembership` (INSERT … ON CONFLICT DO UPDATE), `getMembership`, `listMembersForWorkspace`, `listWorkspacesForUser`, `removeMembership`.
+- All exported from `packages/database/src/index.ts`.
+
+**Tests:** 37 unit tests in `packages/database/src/__tests__/auth-repositories.test.ts` using mock Pool (no real Postgres required in CI). Covers happy paths, null handling, uniqueness violations (code 23505), and FK cascade documentation.
+
+**workspace_id mapping design note:**
+Today's `workspace_id TEXT` column in `chat_feedback`, `chat_media`, and related tables is a path-derived 16-hex string (from `deriveWorkspaceId`). The new `workspaces.id UUID` is the F.30+ identity anchor. The two will be connected in F.30 via either:
+1. A `path_key TEXT UNIQUE` column on `workspaces` (preferred — allows one-row lookup), or
+2. A separate `workspace_path_keys` mapping table for many-to-one (e.g. multiple path aliases per workspace UUID).
+No breaking change to existing `/chat`, `/media/*`, or `/feedback/*` APIs is required at this step.
+
+**Evidence commands:**
+```bash
+# New repository tests (mock Pool, no real Postgres)
+cd packages/database && npm test
+# → 37 tests pass
+
+# Type check
+cd packages/database && npm run check-types  # clean
+
+# Full backend regression
+cd apps/backend && npx vitest run   # 264 tests pass
+cd apps/backend && npm run check-types       # clean
+```
+
+**Regression guarantee:** No existing routes were changed. Migrations are idempotent (`IF NOT EXISTS`). Existing `workspace_id TEXT` keys in chat/media/feedback tables are untouched.
+
+**Not done (explicit deferrals):**
+- F.30: JWT/session middleware, entitlement service, blocking unauthenticated chat. → **DONE — see F.30 below.**
+- Desktop login UI, token storage.
+- Replacing client-supplied `workspace_id` string on `/chat` (breaking — deferred).
+- `path_key` backfill migration connecting `workspaces.id` ↔ existing path-keyed rows. → **DONE in F.30 via `workspaces.path_key` column + `upsertWorkspaceByPathKey`.**
+
+**Rollback:** Drop tables in reverse order (`workspace_memberships`, `workspaces`, `users`); drop `idx_users_email_lower`; remove `009_create_auth_core.sql`; revert `schema.sql`; remove three repository files + `index.ts` exports.
+
+---
+
+### F.30 Status: COMPLETE
+
+**What was built:**
+
+**Schema (additive migrations — idempotent):**
+- `packages/database/migrations/010_add_workspace_path_key.sql` — Adds `path_key TEXT UNIQUE NULLABLE` column to `workspaces` with a partial index. Bridges `workspaces.id UUID` ↔ path-derived 16-hex keys used by existing `chat_*` tables.
+- `packages/database/migrations/011_create_workspace_entitlements.sql` — Creates `workspace_entitlements` table (`workspace_id FK PK`, `allowed_modes JSONB`, `allowed_model_tiers JSONB`, `flags JSONB`, `updated_at`). Default: no row = allow-all (safe rollout default).
+- `packages/database/schema.sql` — `workspaces` table gains `path_key TEXT UNIQUE`; `workspace_entitlements` DDL appended.
+
+**Repositories (`packages/database/src/`):**
+- `auth-workspaces.repository.ts` — Updated `WorkspaceRow` / `CreateWorkspaceParams` / `UpdateWorkspaceParams` to include `path_key`. Added `getWorkspaceByPathKey(pool, key)` and `upsertWorkspaceByPathKey(pool, key, name?)` (lazy upsert — auto-creates workspace rows on first request).
+- `auth-entitlements.repository.ts` (new) — `upsertWorkspaceEntitlements`, `getWorkspaceEntitlements`, `deleteWorkspaceEntitlements`. Exported from `packages/database/src/index.ts`.
+
+**Entitlement service (`apps/backend/src/lib/entitlements.service.ts`):**
+- `resolvePathKey(workspacePath)` — replicates `deriveWorkspaceId` algorithm exactly: normalize path (platform-aware lowercase, strip trailing slash), SHA-256, first 16 hex chars.
+- `resolveWorkspaceContext(workspacePath, authHeader, config)` — fast no-op when `VIPER_ENTITLEMENTS_ENFORCE` is off; otherwise: derives `path_key`, upserts workspace, resolves user from bearer token (dev path: `VIPER_DEV_BEARER_TOKEN` + `VIPER_DEV_USER_EMAIL`; F.30 stub: token = user UUID), checks membership, loads `workspace_entitlements`, returns `ResolvedEntitlements`.
+- `mergeEntitlements(planRow, config)` — pure logic, D.20 ∩ DB composition rule: `effective_tiers = intersection(DB.allowed_model_tiers ?? ALL, D.20 env entitledModelTiers)`. `effective_modes = DB.allowed_modes ?? ALL`.
+- `assertModeAllowed(resolved, mode)` / `assertModelTierAllowed(resolved, tier)` — throw `EntitlementError(403)` on violation; no-op when `resolved` is null (enforcement off).
+- `EntitlementError` — typed error with HTTP `statusCode` (401 | 403 | 404).
+
+**Middleware (`apps/backend/src/middleware/entitlements.middleware.ts`):**
+- Fastify `preHandler` hook. Fast no-op path when enforcement is off (< 1 µs, no DB calls). On enforcement: resolves context, attaches `request.entitlements`, emits `workflowLog("entitlement:checked" | "entitlement:denied")`.
+- Registered on both `POST /chat` and `POST /chat/stream` in `chat.routes.ts`.
+
+**Controller integration (`apps/backend/src/controllers/chat.controller.ts`):**
+- `postChat` and `postChatStream` both call `assertModeAllowed(request.entitlements, chatMode)` before tier resolution, and `assertModelTierAllowed(request.entitlements, tierRes.effective)` after. EntitlementErrors map to 401/403 responses before any DB or LLM work begins.
+
+**Workflow stages:** `entitlement:checked` and `entitlement:denied` added to `VALID_WORKFLOW_STAGES`.
+
+**Tests:**
+- `apps/backend/src/lib/entitlements.test.ts` — 41 unit tests covering:
+  - `resolvePathKey` vs `deriveWorkspaceId` vector equality
+  - `extractBearerToken` parsing
+  - `isEntitlementsEnforced` env kill-switch
+  - `mergeEntitlements` (null row, mode-only restriction, tier-only restriction, both, D.20 intersection)
+  - `assertModeAllowed` / `assertModelTierAllowed` happy + violation paths
+  - DB repositories: `getWorkspaceByPathKey`, `upsertWorkspaceByPathKey`, `upsertWorkspaceEntitlements`, `getWorkspaceEntitlements`, `deleteWorkspaceEntitlements` — all mocked pool.
+
+**Evidence commands:**
+```bash
+cd apps/backend && npx vitest run          # 305 tests pass
+cd apps/backend && npm run check-types     # 0 errors
+cd packages/database && npm run check-types  # 0 errors
+```
+
+**Composition rule (D.20 ∩ DB):**
+```
+effective_modes       = DB.allowed_modes ?? ALL_MODES
+effective_model_tiers = (DB.allowed_model_tiers ?? ALL_TIERS) ∩ config.entitledModelTiers
+```
+D.20 env is a global ceiling; DB narrows per workspace. When no DB row exists → allow-all (safe default).
+
+**path_key bridge:**
+`workspaces.path_key` is the 16-hex value from `resolvePathKey(workspacePath)`, identical to `deriveWorkspaceId(workspacePath)` used in `request-identity.ts` and existing `chat_*` tables. `upsertWorkspaceByPathKey` auto-creates workspace rows on first request so no manual seeding is needed.
+
+**Not done (explicit deferrals):**
+- F.31: usage event emission — **DONE, see F.31 below.**
+- Full OAuth/OIDC (JWT verify, PKCE, refresh tokens) — token is currently treated as a UUID or matched via `VIPER_DEV_BEARER_TOKEN`.
+- Desktop login UI and token storage.
+- Replacing client-supplied `workspace_id` on `/feedback` and `/media/*` routes (still path-keyed TEXT; no breaking change).
+- Membership auto-provisioning on new token (currently throws 403 if user is not in `workspace_memberships`; an admin route or seed script is needed for production).
+
+**Rollback:** Remove `010_*.sql` and `011_*.sql`; revert `schema.sql` (drop `workspace_entitlements`, remove `path_key` column from workspaces DDL); remove `auth-entitlements.repository.ts`; revert `auth-workspaces.repository.ts` and `index.ts` exports; remove `entitlements.service.ts`, `entitlements.middleware.ts`, `entitlements.test.ts`; revert `chat.routes.ts` and `chat.controller.ts` to pre-F.30 versions; revert `workflow-log-schema.ts`.
+
+---
+
+~~30. Implement entitlement service and middleware.~~
+
+### F.31 Status: COMPLETE
+
+**What was built:**
+
+**Schema (additive, idempotent):**
+- `packages/database/migrations/012_create_usage_events.sql` — Creates append-only `usage_events` table: UUID PK, `occurred_at`, `request_id TEXT UNIQUE`, `workspace_path_key TEXT`, `workspace_uuid UUID NULL`, `user_uuid UUID NULL`, `conversation_id TEXT NULL`, `mode`, `intent`, `provider`, `primary_model_id`, `final_model_id`, `route_mode`, `effective_model_tier`, `tier_downgraded`, `fallback_count`, `latency_ms`, nullable token columns (`input_tokens`, `output_tokens`, `total_tokens`), `tool_call_count INT NULL`, and `metadata JSONB`. Indexes on `(workspace_path_key, occurred_at DESC)` and `(occurred_at DESC)`.
+- `packages/database/schema.sql` — `usage_events` DDL appended for greenfield installs.
+
+**Repository (`packages/database/src/usage-events.repository.ts`):**
+- `insertUsageEvent(pool, params)` — `ON CONFLICT (request_id) DO NOTHING` for idempotency; returns the inserted row or `null` on conflict.
+- `getUsageEventByRequestId(pool, id)` — for tests and reconciliation.
+- Exported from `packages/database/src/index.ts`.
+
+**Emitter (`apps/backend/src/lib/usage-events.ts`):**
+- `recordUsageEvent(params)` — composes `RouteTelemetry` + F.30 entitlement context into a DB row and calls `insertUsageEvent`. Fire-and-forget via `void`; DB errors are caught and logged as `usage:event:skipped` — never crash the chat request.
+- `isUsageEventsEnabled()` / `isUsageEventsStdoutEnabled()` — env kill-switch helpers (evaluated at call time for test isolation).
+- Provider resolved from `@repo/model-registry` spec; falls back to `"openai"`.
+- `VIPER_USAGE_EVENTS_STDOUT=1` emits `{ _type: "viper.usage.event", ts, ...fields }` to stdout independently of the DB switch.
+
+**Wiring (`apps/backend/src/controllers/chat.controller.ts`):**
+- `postChat` (non-stream): calls `recordUsageEvent` after `buildRouteTelemetry` succeeds. Early-exit error paths (auth, workspace-not-found, vision errors) do not record a billing event.
+- `postChatStream`: intercepts the `model:route:summary` SSE event via a wrapper around `send`, then calls `recordUsageEvent` on successful pipeline completion only (not on error/abort paths).
+
+**Token accounting in F.31:**
+- Both paths pass `tokens: null`. Token fields (`input_tokens`, `output_tokens`, `total_tokens`) are nullable in the DB and remain NULL in F.31.
+- Non-stream path: deferred until `AssistantPipelineResult` is extended with a `usage` field (F.32).
+- Stream path: deferred until streaming usage deltas are aggregated from the OpenAI SDK (F.32+).
+
+**Workflow stages:** `usage:event:emitted` and `usage:event:skipped` added to `VALID_WORKFLOW_STAGES`.
+
+**Tests:**
+- `packages/database/src/__tests__/usage-events.test.ts` — 12 new mock-pool tests covering `insertUsageEvent` (happy path, null fields, conflict → null, metadata JSON serialization, token/workspace_uuid/user_uuid fields) and `getUsageEventByRequestId`.
+- `apps/backend/src/lib/usage-events.test.ts` — 16 unit tests covering kill-switch env parsing, no-DB-call when off, no-DB-call without `DATABASE_URL`, DB insert with correct field mapping, idempotency (null return), error swallowing, stdout emission, and stdout-off behavior.
+
+**Evidence commands:**
+```bash
+cd apps/backend && npx vitest run          # 321 tests pass
+cd apps/backend && npm run check-types     # 0 errors
+cd packages/database && npm test           # 49 tests pass
+cd packages/database && npm run check-types  # 0 errors
+```
+
+**Env vars added to `docs/ENV.md`:** `VIPER_USAGE_EVENTS`, `VIPER_USAGE_EVENTS_STDOUT`.
+
+**Not done (explicit deferrals):**
+- F.32: token field instrumentation (wire `usage` from OpenAI response through `AssistantPipelineResult`), aggregation jobs, rollups.
+- ~~F.33: quota enforcement.~~ (completed)
+- ~~F.34: Stripe webhooks, billing plans.~~ (completed)
+- `tool_call_count` population (currently NULL; requires tool-round counting through `RouteMeta`).
+
+**Rollback:** Remove `012_create_usage_events.sql`; revert `schema.sql` (drop `usage_events` DDL); remove `usage-events.repository.ts`, `usage-events.test.ts`; remove `usage-events.ts` from `apps/backend/src/lib/`; revert `chat.controller.ts` (remove `recordUsageEvent` calls and `streamRouteTelemetryData` capture); revert `workflow-log-schema.ts`; remove `usage-events.test.ts` in backend; revert `index.ts` exports.
+
+---
+
+~~31. Emit billing-grade usage events for every request.~~
+
+### F.32 Status: COMPLETE
+
+**What was built:**
+
+**Schema (additive, idempotent):**
+- `packages/database/migrations/013_create_usage_rollups.sql` — Creates `usage_rollups_daily` (grain: `PRIMARY KEY (bucket_date DATE, workspace_path_key TEXT)`) with measures: `request_count`, `stream_request_count`, `total_latency_ms`, nullable token sums (`sum_input_tokens`, `sum_output_tokens`, `sum_total_tokens`), `tier_downgraded_count`, `sum_fallback_count`, and JSONB breakdowns `mode_breakdown` / `model_breakdown`. Creates `usage_aggregation_cursor` (PK: `job_name TEXT`) to persist the watermark. Seeds a `('daily', NULL)` cursor row.
+- `packages/database/schema.sql` — Both tables appended for greenfield installs.
+
+**UTC bucket rule:**  
+`bucket_date = (occurred_at AT TIME ZONE 'UTC')::date` — fully timezone-independent, re-runnable.
+
+**Repository (`packages/database/src/usage-rollups.repository.ts`):**
+- `aggregateUsageEventsDaily(pool, { fromDate, toDate })` — CTE-based INSERT ... ON CONFLICT DO UPDATE (full recompute per window). Computes mode and model breakdowns via nested sub-aggregates. Returns `{ daysProcessed, rowsUpserted }`.
+- `getRollupForWorkspaceDay(pool, pathKey, day)` — single-row point lookup for F.33 quota reads.
+- `listRollupsForWorkspace(pool, pathKey, fromDate, toDate)` — date-range list.
+- `getAggregationCursor(pool, jobName?)` — read watermark.
+- `advanceAggregationCursor(pool, newClosedDay, jobName?)` — advance watermark with upsert.
+- `resolveAggregationWindow(pool, lookbackDays?, jobName?)` — computes `{ fromDate, toDate }` from cursor; returns `null` when already up-to-date. Falls back to earliest event day when cursor is null.
+- All exported from `packages/database/src/index.ts`.
+
+**CLI script (`packages/database/src/scripts/run-usage-aggregation.ts`):**  
+Run with `cd packages/database && npm run aggregate-usage`.  
+- Reads `VIPER_USAGE_AGGREGATE_ENABLED` (kill-switch; exits 0 when unset).
+- Reads `VIPER_USAGE_AGGREGATE_LOOKBACK_DAYS` (default `2`).
+- Resolves window from cursor → aggregates → advances cursor → logs `days_processed` + `rows_upserted`.
+- Suitable for cron / GitHub Actions. Never touches the server hot path.
+
+**Idempotency:**  
+Re-running `aggregate-usage` for the same date range replaces existing rollup rows with freshly computed values. Safe to call multiple times — produces the same result.
+
+**Workflow stage:** `usage:aggregate:complete` added to `VALID_WORKFLOW_STAGES` for future server-side trigger logging.
+
+**Tests (`packages/database/src/__tests__/usage-rollups.test.ts`):**  
+20 mock-pool tests covering: `aggregateUsageEventsDaily` (row count, day count, SQL shape, params, idempotency/empty), `getRollupForWorkspaceDay` (found/null), `listRollupsForWorkspace`, `getAggregationCursor`, `advanceAggregationCursor`, `resolveAggregationWindow` (up-to-date → null, past cursor, null cursor + earliest day, null cursor + no events).
+
+**Evidence commands:**
+```bash
+cd packages/database && npm test            # 69 tests pass (all 3 test files)
+cd packages/database && npm run check-types # 0 errors
+cd apps/backend && npx vitest run           # 321 tests pass (unchanged)
+cd apps/backend && npm run check-types      # 0 errors
+
+# Smoke test (requires DATABASE_URL + VIPER_USAGE_AGGREGATE_ENABLED=1):
+cd packages/database && VIPER_USAGE_AGGREGATE_ENABLED=1 npm run aggregate-usage
+```
+
+**Not done (explicit deferrals):**
+- ~~F.33: quota enforcement using rollup reads.~~ (completed)
+- ~~F.34: Stripe webhooks, billing plans.~~ (completed)
+- ~~F.35: usage dashboards, product surfaces.~~ (completed)
+- Token field population in `usage_events` (deferred from F.31 — requires wiring `AssistantPipelineResult.usage`; rollup sums will auto-populate once tokens land).
+- HTTP trigger endpoint for aggregation (deferred; CLI cron is sufficient for F.32).
+
+**Rollback:** Remove `013_create_usage_rollups.sql`; revert `schema.sql` (drop `usage_rollups_daily`, `usage_aggregation_cursor`); remove `usage-rollups.repository.ts`, `usage-rollups.test.ts`, `run-usage-aggregation.ts`; revert `index.ts` exports; revert `package.json` aggregate-usage script; revert `workflow-log-schema.ts`.
+
+---
+
+~~32. Build usage aggregation jobs and storage.~~
+
+### F.33 Status: COMPLETE
+
+**What was built:**
+
+**Database (`packages/database/src/usage-events.repository.ts`):**
+- `countUsageEventsForDay(pool, workspacePathKey, dayUtc)` — counts raw events for a workspace on a specific UTC date (live-tail for today). Uses half-open interval `[day, day+1)` in UTC. Exported from `index.ts`. 4 new mock-pool tests.
+
+**Quota service (`apps/backend/src/lib/quota.service.ts`):**
+- `isQuotaEnforced()` — reads `VIPER_QUOTA_ENFORCE` env kill-switch.
+- `getDefaultMonthlyQuota()` — reads `VIPER_QUOTA_DEFAULT_MONTHLY_REQUESTS`; returns `null` when absent (unlimited).
+- `parseQuotaConfig(flags)` — parses `monthly_request_quota` and `quota_soft_threshold_ratio` from `workspace_entitlements.flags`; flag takes precedence over env default; missing = null (unlimited).
+- `currentUtcMonthWindow(todayUtc)` — pure helper returning `{ firstDay, lastDay }` for the UTC calendar month.
+- `computeMonthlyUsage(pathKey, todayUtc)` — sums `request_count` from `usage_rollups_daily` for closed days (first_day → yesterday UTC) + `COUNT(*)` from `usage_events` for today; all arithmetic in **BigInt** to handle large counts safely.
+- `checkMonthlyQuota(pathKey, entitlements, identity, todayUtc?)` — orchestrates enforcement: fast no-op when kill-switch off or limit is null; throws `QuotaError(429)` on hard limit; emits `workflowLog("quota:check", …, { status: "soft_warning" })` at soft threshold; injectable `todayUtc` for test isolation.
+- `QuotaError` — typed error with `statusCode: 429` and `quota: QuotaSnapshot` for structured response.
+
+**Auth coupling:**  
+Quota works **by path_key only** — `VIPER_ENTITLEMENTS_ENFORCE` is NOT required. When `request.entitlements` is present the flags come from there; otherwise the service does a direct DB lookup of `workspace_entitlements` by path_key. This means quota enforcement is available in local/anonymous mode as long as a DB row exists and `VIPER_QUOTA_ENFORCE=1`.
+
+**HTTP status choice:**  
+**429 Too Many Requests** (RFC 6585) — distinguishable from 403 (permission denied). Response body: `{ "error": "...", "quota": { "used", "limit", "remaining", "status" } }`.
+
+**Controller wiring (`apps/backend/src/controllers/chat.controller.ts`):**  
+`checkMonthlyQuota` is called in both `postChat` and `postChatStream` **after** entitlement asserts and **before** `reply.hijack()` (so 429 returns a normal HTTP response, not an SSE stream). `QuotaError` maps to a 429 JSON response.
+
+**Workflow stage:** `quota:check` added to `VALID_WORKFLOW_STAGES`. Emitted on both soft warnings and hard denials with distinguishable `status` field (`"soft_warning"` | `"exceeded"`).
+
+**Tests (`apps/backend/src/lib/quota.service.test.ts`):**  
+33 unit tests covering: kill-switch env (on/off), default quota env parsing, `parseQuotaConfig` (flag precedence, env fallback, invalid values), month window calculation (mid-month, Jan, Feb leap/non-leap, Dec), `computeMonthlyUsage` (rollup sum + today, first-of-month skip, empty rollups, BigInt large numbers), `checkMonthlyQuota` (enforcement off → no DB, unlimited → no DB, hard deny 429 + log, soft warn + log, below threshold → no log).
+
+**Evidence commands:**
+```bash
+cd packages/database && npm test            # 73 tests pass
+cd packages/database && npm run check-types # 0 errors
+cd apps/backend && npx vitest run           # 354 tests pass
+cd apps/backend && npm run check-types      # 0 errors
+```
+
+**Limit source precedence:**
+```
+1. workspace_entitlements.flags.monthly_request_quota (per-workspace)
+2. VIPER_QUOTA_DEFAULT_MONTHLY_REQUESTS env (server-wide default)
+3. Neither → unlimited (allow-all, matching F.30 missing-row = allow-all)
+```
+
+**Quota computation:**
+```
+used = SUM(usage_rollups_daily.request_count WHERE bucket_date IN [month_start, yesterday])
+     + COUNT(usage_events WHERE workspace_path_key=key AND occurred_at IN [today 00:00 UTC, now))
+```
+
+**Not done (explicit deferrals):**
+- ~~F.34: Stripe linkage, subscription plan webhooks.~~ (completed)
+- ~~F.35: billing dashboards, product UI.~~ (completed)
+- Token-based quotas (only request-count quotas in F.33).
+- Per-user quotas (workspace-level only).
+- SSE soft-warning event (quota:check is logged server-side; no SSE emission yet).
+- Quota reset notification (no webhook or email on approaching/reaching limit).
+
+**Rollback:** Remove `quota.service.ts`, `quota.service.test.ts`; revert `chat.controller.ts` (remove `checkMonthlyQuota` calls and imports); remove `countUsageEventsForDay` from `usage-events.repository.ts` + test + `index.ts` export; revert `workflow-log-schema.ts`; revert `ENV.md`.
+
+---
+
+~~33. Implement quota checks and hard/soft enforcement.~~
+
+### F.34 Status: COMPLETE
+
+**What was built:**
+
+**Schema (additive, idempotent):**
+- `packages/database/migrations/014_create_billing_tables.sql` — Creates `billing_webhook_events` (PK: `stripe_event_id TEXT`) as the Stripe idempotency log with columns: `event_type`, `workspace_id` (UUID FK → `workspaces`), `processing_status` (`applied | ignored | error | duplicate`), `received_at`, `error_message`. Adds `stripe_customer_id TEXT UNIQUE NULL` and `stripe_subscription_id TEXT UNIQUE NULL` nullable columns to `workspaces`.
+- `packages/database/schema.sql` — `billing_webhook_events` DDL appended for greenfield installs; `workspaces` columns updated.
+
+**Repository (`packages/database/src/billing-webhook-events.repository.ts`):**
+- `insertWebhookEventIfNew(pool, params)` — `ON CONFLICT (stripe_event_id) DO NOTHING`; returns `null` on duplicate. Idempotency gate — duplicate Stripe deliveries never double-apply entitlements.
+- `updateWebhookEventStatus(pool, stripeEventId, status, errorMessage?)` — used to update status after async processing.
+- `getWebhookEvent(pool, stripeEventId)` — point lookup for admin queries.
+- All exported from `packages/database/src/index.ts`.
+
+**Stripe SDK:** `stripe` npm package added to `apps/backend`.
+
+**Service (`apps/backend/src/lib/stripe-webhook.service.ts`):**
+- `isStripeWebhookEnabled()` — reads `VIPER_STRIPE_WEBHOOK_ENABLED`.
+- `getWebhookSecret()` — reads `STRIPE_WEBHOOK_SECRET` (or fallback `VIPER_STRIPE_WEBHOOK_SECRET`).
+- `loadPlanEntitlements()` — parses `VIPER_STRIPE_PRICE_ENTITLEMENTS` JSON. Fails open (empty map) on malformed JSON.
+- `verifyStripeEvent(rawBody, signature, secret)` — uses Stripe SDK `constructEvent` for HMAC verification.
+- `processStripeWebhook(event)` — orchestrates: idempotency check → workspace routing via `metadata.workspace_id` → dispatch → DB writes.
+  - `customer.subscription.updated` → `upsertWorkspaceEntitlements` with price-mapped config.
+  - `customer.subscription.deleted` → `deleteWorkspaceEntitlements` (reverts to F.30 allow-all default).
+  - `checkout.session.completed` → links `stripe_customer_id` / `stripe_subscription_id` on workspace + optionally applies plan if line item price is in map.
+  - Unhandled event types → `status: "ignored"` (2xx returned, Stripe does not retry).
+
+**Controller (`apps/backend/src/controllers/billing-webhook.controller.ts`):**
+- 404 when `VIPER_STRIPE_WEBHOOK_ENABLED` off (endpoint doesn't exist to scanners).
+- 400 on missing `Stripe-Signature` header or invalid signature.
+- 200 on accepted event (applied / ignored / duplicate / error) — avoids Stripe retry noise for persistent bad configs.
+
+**Route (`apps/backend/src/routes/billing.routes.ts`):**
+- Registers `POST /webhooks/stripe`.
+- Uses scoped `addContentTypeParser("application/json", { parseAs: "buffer" })` so raw bytes reach the controller before any JSON re-serialization that would corrupt the HMAC.
+
+**Workspace routing:**  
+Events must carry `metadata.workspace_id = <workspaces.id UUID>`. If absent → `status: "ignored"` (2xx, no DB writes). Avoids infinite Stripe retries for misconfigured subscriptions.
+
+**Idempotency:**  
+`billing_webhook_events.stripe_event_id` PRIMARY KEY + `ON CONFLICT DO NOTHING` guarantees duplicate deliveries are safely skipped. Second call returns `status: "duplicate"`.
+
+**Plan → entitlement mapping:**  
+Data-driven via `VIPER_STRIPE_PRICE_ENTITLEMENTS` JSON env var. No hard-coded secrets. Unknown price IDs → `ignored`. Subscription deleted → `deleteWorkspaceEntitlements` (F.30 allow-all fallback).
+
+**Workflow stages added to `VALID_WORKFLOW_STAGES`:**
+- `billing:webhook:received` — every inbound event
+- `billing:webhook:applied` — entitlements changed
+- `billing:webhook:ignored` — missing metadata / unhandled type
+- `billing:webhook:duplicate` — already processed
+
+**Tests (`apps/backend/src/lib/stripe-webhook.service.test.ts`):**  
+23 unit tests covering: `isStripeWebhookEnabled`, `getWebhookSecret`, `loadPlanEntitlements`, `verifyStripeEvent` (success + failure), `processStripeWebhook` (duplicate, missing workspace_id, subscription.updated applied, subscription.updated ignored for unknown price, subscription.deleted, checkout.session.completed, unhandled event type, workflowLog emit verification).
+
+**`packages/database/src/__tests__/billing-webhook-events.test.ts`:**  
+8 mock-pool tests for `insertWebhookEventIfNew` (new row, duplicate, SQL params, null workspace_id), `updateWebhookEventStatus`, `getWebhookEvent`.
+
+**Evidence commands:**
+```bash
+cd packages/database && npm test            # 81 tests pass (4 test files)
+cd packages/database && npm run check-types # 0 errors
+cd apps/backend && npx vitest run           # 377 tests pass (30 test files)
+cd apps/backend && npm run check-types      # 0 errors
+```
+
+**Not done (explicit deferrals):**
+- ~~F.35: Admin UI / billing dashboard (MVP shipped).~~ (completed — see below)
+- Checkout API (Stripe-hosted Payment Links / Checkout Sessions) — no server-side session creation in F.34.
+- Multi-workspace per Stripe customer (currently 1:1).
+- Stripe Connect / platform billing.
+- Tax (Stripe Tax, VAT).
+- Per-user quotas (F.34 operates on workspace granularity only).
+- Token-based quotas (request-count only in F.33–F.34).
+- `stripe_customer_id` lookup path for events missing `metadata.workspace_id` (deferred).
+- Webhook event replay / dead-letter queue UI.
+
+**Rollback:** Remove `apps/backend/src/lib/stripe-webhook.service.ts`, `apps/backend/src/lib/stripe-webhook.service.test.ts`, `apps/backend/src/controllers/billing-webhook.controller.ts`, `apps/backend/src/routes/billing.routes.ts`; revert `server.ts` (remove `billingRoutes` import + register); revert `workflow-log-schema.ts` (remove 4 `billing:webhook:*` stages); remove `packages/database/migrations/014_create_billing_tables.sql`; revert `packages/database/schema.sql` (drop `billing_webhook_events` DDL + remove `workspaces` stripe columns); remove `packages/database/src/billing-webhook-events.repository.ts` + test; revert `packages/database/src/index.ts` exports; revert `apps/backend/src/lib/auth-workspaces.repository.ts` (remove stripe columns from `WorkspaceRow`); remove `stripe` from `apps/backend/package.json`; revert `docs/ENV.md`.
+
+---
+
+~~34. Integrate subscription provider + webhook ingestion.~~
+
+### F.35 Status: COMPLETE
+
+**What was built:**
+
+**Backend — `POST /usage/summary`:**
+- New service `apps/backend/src/lib/usage-summary.service.ts` — computes usage snapshot by:
+  - Calling `computeMonthlyUsage(pathKey, today)` (reuses F.33 logic: rollup sum + live tail via `countUsageEventsForDay`) — no duplicated date-window logic.
+  - Calling `parseQuotaConfig(flags)` for effective limit (flags → env default → unlimited).
+  - Loading `getWorkspaceEntitlements` + `getWorkspaceByPathKey` for entitlement snapshot and Stripe IDs when `DATABASE_URL` is available.
+  - `isUsageUiEnabled()` kill-switch reads `VIPER_USAGE_UI_ENABLED`.
+- New routes `apps/backend/src/routes/usage.routes.ts` — `POST /usage/summary`:
+  - 404 when `VIPER_USAGE_UI_ENABLED` off (hidden endpoint pattern, matches F.34).
+  - 400 on missing `workspacePath`.
+  - Attaches `entitlementsPreHandler` — when `VIPER_ENTITLEMENTS_ENFORCE=1` only workspace members can read their own data; when off → dev-trust (same as `/chat`).
+  - `todayUtc` injectable for tests; ignored in `production` `NODE_ENV`.
+  - Registered in `apps/backend/src/server.ts`.
+- Response shape: `{ pathKey, month: { firstDay, lastDay }, usedRequests, limit, remaining, entitlements: { allowed_modes, allowed_model_tiers, flags }, stripe }` — all BigInt fields serialised as decimal strings.
+
+**Desktop — Usage & Plan panel:**
+- `apps/viper-desktop/ui/components/usage-panel.tsx` — panel with 4 states: loading, disabled (hidden when 404), error, data.
+  - Data state: month label + Stripe subscription badge, usage counter + progress bar (green < 80%, amber ≥ 80%, red ≥ 100%), remaining count, entitlement rows (modes + model tiers as tag chips).
+  - Refresh button, graceful error card, never blocks chat.
+- `apps/viper-desktop/ui/services/agent-api.ts` — `fetchUsageSummary(workspacePath)` using `POST /usage/summary`; returns `null` on 404 (disabled); throws with `humanizeNetworkError` on other failures.
+- `apps/viper-desktop/ui/components/activity-bar.tsx` — added `"usage"` view with `BarChart3` icon and "Usage & Plan" title.
+- `apps/viper-desktop/ui/components/workbench-sidebar.tsx` — renders `<UsagePanel workspacePath={workspace?.root} />` for the `"usage"` active view.
+
+**Tests:**
+- `apps/backend/src/routes/usage.routes.test.ts` — 9 route tests using Fastify inject + mocked DB: kill-switch 404, no-DB 200 (zero/unlimited), mocked rollup + live-tail sum, limit/remaining with entitlements, remaining=0 when over-limit, stripe null when unlinked.
+
+**Evidence commands:**
+```bash
+cd packages/database && npm test            # 81 tests pass
+cd packages/database && npm run check-types # 0 errors
+cd apps/backend && npx vitest run           # 386 tests pass (31 test files)
+cd apps/backend && npm run check-types      # 0 errors
+```
+
+**Not done (explicit deferrals):**
+- Stripe Checkout Session creation / Customer Portal redirect link.
+- Invoice PDFs, tax.
+- Editable entitlements from UI (read-only only in F.35).
+- Token-based usage breakdown (F.31 tokens still mostly null; chart deferred).
+- Cross-workspace admin console (multi-tenant RBAC).
+- Optional admin webhook log read (`billing_webhook_events` GET) — deferred; document as F.36 slice if needed.
+- `VIPER_ADMIN_BILLING_READ_SECRET` / admin read endpoint — out of scope for F.35.
+- Desktop unit test for `UsagePanel` (no React Testing Library harness in the project; manual verification documented).
+
+**Rollback:** Remove `apps/backend/src/lib/usage-summary.service.ts`, `apps/backend/src/routes/usage.routes.ts`, `apps/backend/src/routes/usage.routes.test.ts`; revert `apps/backend/src/server.ts` (remove `usageRoutes`); remove `apps/viper-desktop/ui/components/usage-panel.tsx`; revert `activity-bar.tsx` (remove `"usage"` view + `BarChart3` import); revert `workbench-sidebar.tsx` (remove `UsagePanel` + usage view branch); revert `agent-api.ts` (remove `fetchUsageSummary` + types); revert `docs/ENV.md`.
+
+---
+
+~~35. Build usage/billing/admin product surfaces.~~
 
 ### Step Group G — Advanced parity and differentiation
 

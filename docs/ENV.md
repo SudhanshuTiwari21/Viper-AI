@@ -25,7 +25,30 @@
 | `VIPER_BROWSER_MAX_RECIPE_STEPS` | E.27: max number of steps allowed in a single `browser_run_recipe` call. | No | `20` |
 | `VIPER_BROWSER_ASSERT_TIMEOUT_MS` | E.27: timeout (ms) for `browser_wait_for_selector` and `browser_assert_text` operations. | No | `5000` (5 s) |
 | `VIPER_BROWSER_MAX_SELECTOR_LEN` | E.27: max length (chars) of a CSS selector passed to recipe steps. Rejects suspiciously long selectors. | No | `512` |
+| `VIPER_ENTITLEMENTS_ENFORCE` | F.30: `1` or `true` enables workspace entitlement enforcement on `/chat` and `/chat/stream`. When off (default) the middleware is a fast no-op — **all existing clients and tests behave as today with no token required**. When on, requests must supply `Authorization: Bearer <token>` and the resolved user must be a member of the workspace. | No | off (`0`) |
+| `VIPER_DEV_BEARER_TOKEN` | F.30: dev-mode bearer token string. When a request's `Authorization: Bearer <value>` matches this, the backend resolves the user via `VIPER_DEV_USER_EMAIL` instead of a real OAuth flow. Only active when `VIPER_ENTITLEMENTS_ENFORCE=1`. | No | unset |
+| `VIPER_DEV_USER_EMAIL` | F.30: email of the dev user resolved when `VIPER_DEV_BEARER_TOKEN` matches. Must correspond to a row in the `users` table. | No | unset |
+| `VIPER_USAGE_EVENTS` | F.31: `1` or `true` enables DB insert of one `usage_events` row per successful `/chat` and `/chat/stream` request. Default **off** — zero DB work and no behavior change when unset. Requires `DATABASE_URL`. | No | off |
+| `VIPER_USAGE_EVENTS_STDOUT` | F.31: `1` or `true` emits a JSON line to stdout per usage event (`_type: "viper.usage.event"`) independently of the DB switch. Useful for log pipelines without enabling full debug mode. | No | off |
+| `VIPER_USAGE_AGGREGATE_ENABLED` | F.32: `1` or `true` required for `npm run aggregate-usage` (CLI script) to execute. Safety kill-switch so accidental cron misconfiguration does nothing. Default **off** — the script exits 0 with a message when unset. | No | off |
+| `VIPER_USAGE_AGGREGATE_LOOKBACK_DAYS` | F.32: number of recent days to re-process on each aggregation run (for late-arriving events). The job sets `fromDate = max(cursor+1day, yesterday - N)`. Default `2`. | No | `2` |
+| `VIPER_QUOTA_ENFORCE` | F.33: `1` or `true` enables monthly request quota checks on `/chat` and `/chat/stream`. When off (default), quota logic is a **complete no-op** — no DB calls, identical behavior to today. | No | off |
+| `VIPER_QUOTA_DEFAULT_MONTHLY_REQUESTS` | F.33: optional server-wide default monthly request limit (positive integer). Applied when `workspace_entitlements.flags.monthly_request_quota` is absent. Empty/unset = **unlimited** (matching F.30 allow-all default). | No | unset (unlimited) |
+| `VIPER_STRIPE_WEBHOOK_ENABLED` | F.34: `1` or `true` required for `POST /webhooks/stripe` to do anything. When off (default), the endpoint returns **404** — the route appears to not exist to external scanners. | No | off |
+| `STRIPE_WEBHOOK_SECRET` | F.34: Stripe webhook signing secret (starts with `whsec_`). Required when `VIPER_STRIPE_WEBHOOK_ENABLED=1`. Never logged — only referenced during HMAC verification. Alias: `VIPER_STRIPE_WEBHOOK_SECRET`. | Yes (when enabled) | unset |
+| `VIPER_STRIPE_WEBHOOK_SECRET` | F.34: Fallback alias for `STRIPE_WEBHOOK_SECRET`. `STRIPE_WEBHOOK_SECRET` is preferred. | Yes (when enabled) | unset |
+| `VIPER_STRIPE_PRICE_ENTITLEMENTS` | F.34: JSON object mapping **Stripe Price ID → entitlement config** `{ allowed_modes?, allowed_model_tiers?, flags? }`. Example: `{"price_pro":{"allowed_model_tiers":["standard","premium"],"flags":{"monthly_request_quota":1000}}}`. If unset or empty, all price IDs are treated as `ignored` (events are accepted but no entitlements change). | No | unset |
+| `VIPER_USAGE_UI_ENABLED` | F.35: `1` or `true` enables `POST /usage/summary` endpoint. When off (default), the endpoint returns **404** — hidden from scanners, same pattern as F.34. When on, the endpoint returns month-to-date usage, quota limit, and entitlement snapshot for the supplied `workspacePath`. | No | off |
 | Redis URL      | Not read from env. Pass `options.redisUrl` into `runRepoScanner()` or into `RedisQueueService` in your orchestrator. | No | — |
+
+### F.33 `workspace_entitlements.flags` keys
+
+These JSONB keys are stored per-workspace in the `workspace_entitlements` table (managed via `upsertWorkspaceEntitlements`):
+
+| Flag key | Type | Description |
+|---|---|---|
+| `monthly_request_quota` | `number` | Max completed chat requests per UTC calendar month. 0 or absent = unlimited (falls through to env default). |
+| `quota_soft_threshold_ratio` | `number` (0, 1] | Fraction of limit at which `workflowLog("quota:check", ..., { status: "soft_warning" })` fires. Default `0.8`. |
 
 ## Summary
 

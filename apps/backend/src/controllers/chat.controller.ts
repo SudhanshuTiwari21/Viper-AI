@@ -14,6 +14,14 @@ import { resolveEffectiveModelTier } from "../lib/resolve-effective-model-tier.j
 import { workflowLog } from "../services/assistant.service.js";
 import { workflowRuntimeConfig } from "../config/workflow-flags.js";
 import { buildRouteTelemetry } from "../types/route-telemetry.js";
+import {
+  EntitlementError,
+  assertModeAllowed,
+  assertModelTierAllowed,
+  resolvePathKey,
+} from "../lib/entitlements.service.js";
+import { recordUsageEvent } from "../lib/usage-events.js";
+import { checkMonthlyQuota, QuotaError } from "../lib/quota.service.js";
 
 export async function postChat(
   request: FastifyRequest<{ Body: ChatRequest }>,
@@ -29,6 +37,18 @@ export async function postChat(
 
   const identity = createRequestIdentity(workspacePath, conversationId);
 
+  // F.30: assert mode + tier allowed by workspace entitlements (no-op when enforcement is off).
+  const entitlements = request.entitlements ?? null;
+  try {
+    assertModeAllowed(entitlements, chatMode ?? "agent");
+  } catch (err) {
+    if (err instanceof EntitlementError) {
+      await reply.status(err.statusCode).send({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+
   const tierRes = await resolveEffectiveModelTier({
     parsedBody: request.body,
     identity,
@@ -40,6 +60,27 @@ export async function postChat(
       tier_downgraded_to: tierRes.tier_downgraded_to,
       reason: tierRes.denyReason ?? "tier_downgrade",
     });
+  }
+
+  try {
+    assertModelTierAllowed(entitlements, tierRes.effective);
+  } catch (err) {
+    if (err instanceof EntitlementError) {
+      await reply.status(err.statusCode).send({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+
+  // F.33: monthly request quota check (no-op when VIPER_QUOTA_ENFORCE is off).
+  try {
+    await checkMonthlyQuota(resolvePathKey(workspacePath), entitlements, identity);
+  } catch (err) {
+    if (err instanceof QuotaError) {
+      await reply.status(err.statusCode).send({ error: err.message, quota: err.quota });
+      return;
+    }
+    throw err;
   }
 
   try {
@@ -72,6 +113,15 @@ export async function postChat(
         const line = { _type: "viper.route.telemetry", ts: new Date().toISOString(), ...routeTelemetry };
         process.stdout.write(JSON.stringify(line) + "\n");
       }
+      // F.31: persist billing-grade usage event (fire-and-forget; errors never crash the request).
+      // Token accounting deferred to F.32 — tokens are null until OpenAI usage is wired through.
+      void recordUsageEvent({
+        telemetry: routeTelemetry,
+        stream: false,
+        entitlements,
+        tokens: null,
+        identity,
+      });
     }
 
     const { routeMeta: _rm, ...resultWithoutMeta } = result;
@@ -122,6 +172,18 @@ export async function postChatStream(
 
   const identity = createRequestIdentity(workspacePath, conversationId);
 
+  // F.30: assert mode + tier allowed by workspace entitlements (no-op when enforcement is off).
+  const entitlements = request.entitlements ?? null;
+  try {
+    assertModeAllowed(entitlements, chatMode ?? "agent");
+  } catch (err) {
+    if (err instanceof EntitlementError) {
+      await reply.status(err.statusCode).send({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+
   const tierRes = await resolveEffectiveModelTier({
     parsedBody: request.body,
     identity,
@@ -133,6 +195,28 @@ export async function postChatStream(
       tier_downgraded_to: tierRes.tier_downgraded_to,
       reason: tierRes.denyReason ?? "tier_downgrade",
     });
+  }
+
+  try {
+    assertModelTierAllowed(entitlements, tierRes.effective);
+  } catch (err) {
+    if (err instanceof EntitlementError) {
+      await reply.status(err.statusCode).send({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+
+  // F.33: monthly request quota check — must run BEFORE reply.hijack() so we can
+  // still return a normal HTTP response (429) if quota is exhausted.
+  try {
+    await checkMonthlyQuota(resolvePathKey(workspacePath), entitlements, identity);
+  } catch (err) {
+    if (err instanceof QuotaError) {
+      await reply.status(err.statusCode).send({ error: err.message, quota: err.quota });
+      return;
+    }
+    throw err;
   }
 
   // Required for long-lived SSE: clears Fastify handler timeout / abort wiring that can drop the socket mid-stream.
@@ -151,7 +235,14 @@ export async function postChatStream(
     sock.setTimeout(0);
   }
 
+  // F.31: capture route telemetry from the model:route:summary SSE event so we can
+  // record a usage event on successful stream completion.
+  let streamRouteTelemetryData: Record<string, unknown> | null = null;
+
   const send = (event: { type: string; data: unknown }) => {
+    if (event.type === "model:route:summary" && event.data && typeof event.data === "object") {
+      streamRouteTelemetryData = event.data as Record<string, unknown>;
+    }
     try {
       if (reply.raw.writableEnded) return;
       const identityData = {
@@ -227,6 +318,34 @@ export async function postChatStream(
       { tierDowngraded: tierRes.downgraded, requestedTier: tierRes.requested },
       attachments,
     );
+
+    // F.31: record usage event on successful stream completion only.
+    // Token accounting deferred to F.32 — tokens are null until usage is wired.
+    if (streamRouteTelemetryData) {
+      const d = streamRouteTelemetryData;
+      const streamTelemetry: import("../types/route-telemetry.js").RouteTelemetry = {
+        request_id: identity.request_id,
+        workspace_id: identity.workspace_id,
+        conversation_id: identity.conversation_id,
+        mode: String(d["mode"] ?? chatMode ?? "agent"),
+        effective_model_tier: String(d["effective_model_tier"] ?? tierRes.effective),
+        primary_model_id: String(d["primary_model_id"] ?? ""),
+        final_model_id: String(d["final_model_id"] ?? ""),
+        fallback_chain: Array.isArray(d["fallback_chain"]) ? (d["fallback_chain"] as string[]) : [],
+        fallback_count: typeof d["fallback_count"] === "number" ? d["fallback_count"] : 0,
+        intent: String(d["intent"] ?? "unknown"),
+        route_mode: String(d["route_mode"] ?? ""),
+        tier_downgraded: Boolean(d["tier_downgraded"] ?? tierRes.downgraded),
+        latency_ms: typeof d["latency_ms"] === "number" ? d["latency_ms"] : 0,
+      };
+      void recordUsageEvent({
+        telemetry: streamTelemetry,
+        stream: true,
+        entitlements,
+        tokens: null,
+        identity,
+      });
+    }
   } catch (err) {
     if (err instanceof ClientDisconnectedError) {
       request.log.info({

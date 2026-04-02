@@ -4,6 +4,7 @@ import {
   GitBranch,
   Puzzle,
   PlayCircle,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -12,7 +13,8 @@ export type SidebarView =
   | "search"
   | "git"
   | "extensions"
-  | "run";
+  | "run"
+  | "usage";
 
 interface ActivityBarProps {
   activeView: SidebarView;
@@ -25,6 +27,7 @@ const VIEWS: { id: SidebarView; icon: LucideIcon; title: string }[] = [
   { id: "git", icon: GitBranch, title: "Source Control" },
   { id: "extensions", icon: Puzzle, title: "Extensions" },
   { id: "run", icon: PlayCircle, title: "Run & Debug" },
+  { id: "usage", icon: BarChart3, title: "Usage & Plan" },
 ];
 
 export function ActivityBar({ activeView, onViewChange }: ActivityBarProps) {

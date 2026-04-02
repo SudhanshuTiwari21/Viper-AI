@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { postChat, postChatStream } from "../controllers/chat.controller.js";
 import { ChatRequestSchema } from "../validators/request.schemas.js";
+import { entitlementsPreHandler } from "../middleware/entitlements.middleware.js";
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>("/chat", {
+    preHandler: entitlementsPreHandler,
     schema: {
       body: {
         type: "object",
@@ -58,6 +60,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post<{ Body: unknown }>("/chat/stream", {
+    preHandler: entitlementsPreHandler,
     schema: {
       body: {
         type: "object",

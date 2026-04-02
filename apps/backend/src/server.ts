@@ -10,6 +10,8 @@ import { patchRoutes } from "./routes/patch.routes.js";
 import { debugRoutes } from "./routes/debug.routes.js";
 import { feedbackRoutes } from "./routes/feedback.routes.js";
 import { mediaRoutes } from "./routes/media.routes.js";
+import { billingRoutes } from "./routes/billing.routes.js";
+import { usageRoutes } from "./routes/usage.routes.js";
 
 const app = Fastify({
   logger: true,
@@ -41,6 +43,8 @@ await app.register(contextRoutes);
 await app.register(patchRoutes);
 await app.register(feedbackRoutes);
 await app.register(mediaRoutes);
+await app.register(billingRoutes);
+await app.register(usageRoutes);
 
 const port = Number(process.env.PORT) || 4000;
 const host = process.env.HOST || "0.0.0.0";

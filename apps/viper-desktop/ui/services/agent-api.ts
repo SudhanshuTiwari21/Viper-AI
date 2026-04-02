@@ -637,6 +637,65 @@ export async function sendFeedback(params: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// F.35 — Usage & plan summary
+// ---------------------------------------------------------------------------
+
+export interface UsageSummaryEntitlements {
+  allowed_modes: string[] | null;
+  allowed_model_tiers: string[] | null;
+  flags: Record<string, unknown>;
+}
+
+export interface UsageSummaryStripe {
+  customerId: string;
+  subscriptionId: string | null;
+}
+
+export interface UsageSummaryResponse {
+  pathKey: string;
+  month: { firstDay: string; lastDay: string };
+  /** Decimal string (BigInt serialised) */
+  usedRequests: string;
+  /** Decimal string or null when unlimited */
+  limit: string | null;
+  /** Decimal string or null when unlimited */
+  remaining: string | null;
+  entitlements: UsageSummaryEntitlements;
+  stripe: UsageSummaryStripe | null;
+}
+
+/**
+ * Fetch usage & plan summary for the current workspace.
+ * Returns null when the endpoint is disabled (404) or when the request fails
+ * so the UI can degrade gracefully without blocking chat.
+ */
+export async function fetchUsageSummary(
+  workspacePath: string,
+): Promise<UsageSummaryResponse | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/usage/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspacePath }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 404) {
+      // VIPER_USAGE_UI_ENABLED not set — graceful null
+      return null;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw humanizeNetworkError(
+        new Error((err as { error?: string }).error ?? `Usage summary failed: ${res.status}`),
+      );
+    }
+    return (await res.json()) as UsageSummaryResponse;
+  } catch (err) {
+    throw humanizeNetworkError(err);
+  }
+}
+
 export const EDIT_URL = "http://localhost:3000/editor/apply-change";
 
 export async function applyEditorChange(payload: { file: string; change: string }) {

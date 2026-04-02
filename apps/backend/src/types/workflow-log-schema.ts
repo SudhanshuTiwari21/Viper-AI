@@ -54,6 +54,26 @@ export const VALID_WORKFLOW_STAGES = [
   "browser:assert:pass",
   "browser:assert:fail",
 
+  // F.30 entitlement resolution (WS1)
+  "entitlement:checked",
+  "entitlement:denied",
+
+  // F.31 usage event emission (WS2)
+  "usage:event:emitted",
+  "usage:event:skipped",
+
+  // F.32 usage aggregation job (WS2)
+  "usage:aggregate:complete",
+
+  // F.33 quota checks (WS2)
+  "quota:check",
+
+  // F.34 Stripe billing webhook ingestion (WS2)
+  "billing:webhook:received",
+  "billing:webhook:applied",
+  "billing:webhook:ignored",
+  "billing:webhook:duplicate",
+
   // Existing edit gate / analysis background stages (emitted by workflowLog in this repo)
   "edit-gate:blocked",
   "edit-gate:passed",
