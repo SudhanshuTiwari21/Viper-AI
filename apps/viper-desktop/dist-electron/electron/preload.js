@@ -45,6 +45,8 @@ electron_1.contextBridge.exposeInMainWorld("viper", {
         unstage: (root, filePath) => electron_1.ipcRenderer.invoke("git:unstage", root, filePath),
         commit: (root, message) => electron_1.ipcRenderer.invoke("git:commit", root, message),
         discard: (root, filePath) => electron_1.ipcRenderer.invoke("git:discard", root, filePath),
+        diffStaged: (root) => electron_1.ipcRenderer.invoke("git:diffStaged", root),
+        diffNameOnly: (root) => electron_1.ipcRenderer.invoke("git:diffNameOnly", root),
     },
     shell: {
         revealInFolder: (workspaceRoot, relPath) => electron_1.ipcRenderer.invoke("shell:revealInFolder", workspaceRoot, relPath),

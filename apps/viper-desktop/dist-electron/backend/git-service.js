@@ -99,4 +99,29 @@ function setupGitService() {
             return false;
         }
     });
+    // G.39: changed file names for the test assistant
+    electron_1.ipcMain.handle("git:diffNameOnly", async (_e, root) => {
+        try {
+            // Returns unstaged + staged changed files relative to HEAD
+            const out = await runGit(root, ["diff", "--name-only", "HEAD"]);
+            if (!out)
+                return [];
+            return out.split("\n").filter(Boolean);
+        }
+        catch {
+            return [];
+        }
+    });
+    // G.38: staged diff for the commit/PR assistant
+    const MAX_DIFF_BYTES = 256 * 1024; // 256 KiB cap enforced in main process
+    electron_1.ipcMain.handle("git:diffStaged", async (_e, root) => {
+        try {
+            const out = await runGit(root, ["diff", "--cached"]);
+            // Cap output to MAX_DIFF_BYTES before returning to renderer
+            return out.length > MAX_DIFF_BYTES ? out.slice(0, MAX_DIFF_BYTES) : out;
+        }
+        catch {
+            return "";
+        }
+    });
 }

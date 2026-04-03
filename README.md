@@ -140,6 +140,13 @@ Viper AI is evolving from assistant-style responses to a full AI IDE runtime:
 - safe patching + file updates
 - future: rollback, patch preview, streaming execution, and deeper project management automation
 
+## Documentation
+
+- **[Cursor-class experience gaps and plan](docs/VIPER_CURSOR_EXPERIENCE_GAP_AND_PLAN.md)** — IDE/chat/settings parity vs benchmark IDEs, phased UX and agent-behavior plan.
+- **[Product management vision](docs/VIPER_PRODUCT_MANAGEMENT_VISION.md)** — coding + planning + team coordination; future PM integration pillars and roadmap.
+- **[Competitive roadmap](docs/CURSOR_COMPETITIVE_ROADMAP.md)** — implementation-grounded step groups and §10 readiness.
+- **[Release / pre-release](docs/RELEASE.md)** — `quality-gate`, env kill-switches, migrations.
+
 ## Notes
 
 - This is an active monorepo under rapid iteration.
