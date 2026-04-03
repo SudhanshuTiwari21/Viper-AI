@@ -34,6 +34,10 @@ interface ViperGitApi {
   unstage: (root: string, filePath: string) => Promise<boolean>;
   commit: (root: string, message: string) => Promise<boolean>;
   discard: (root: string, filePath: string) => Promise<boolean>;
+  /** G.38: returns `git diff --cached` output, capped at 256 KiB. */
+  diffStaged: (root: string) => Promise<string>;
+  /** G.39: returns `git diff --name-only HEAD` — list of changed file paths. */
+  diffNameOnly: (root: string) => Promise<string[]>;
 }
 
 interface ViperFsApi {

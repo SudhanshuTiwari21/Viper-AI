@@ -1,6 +1,7 @@
 import { readFile, writeFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { EditFileResult } from "../workspace-tools.types.js";
+import { isPrivacyAllowed } from "../privacy.js";
 
 /**
  * Performs a targeted string replacement in a workspace file.
@@ -17,6 +18,12 @@ export async function editWorkspaceFile(
   const absPath = resolve(workspacePath, relativePath);
   if (!absPath.startsWith(resolve(workspacePath))) {
     return { success: false, error: "Path traversal denied" };
+  }
+
+  // G.40: privacy gate — block edits to sensitive paths
+  const privacy = await isPrivacyAllowed(workspacePath, relativePath);
+  if (!privacy.allowed) {
+    return { success: false, error: "Privacy policy denied access to this file" };
   }
 
   try {

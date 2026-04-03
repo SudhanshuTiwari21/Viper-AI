@@ -11,8 +11,15 @@ import {
   FileX,
   Loader2,
   ChevronRight,
+  Sparkles,
+  Copy,
+  X,
 } from "lucide-react";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+import {
+  fetchSuggestCommitMessage,
+  fetchSuggestPrBody,
+} from "../services/agent-api";
 
 interface GitFileStatus {
   status: string;
@@ -53,6 +60,16 @@ export function GitSidebar() {
   const [committing, setCommitting] = useState(false);
   const [stagedExpanded, setStagedExpanded] = useState(true);
   const [changesExpanded, setChangesExpanded] = useState(true);
+
+  // G.38: AI commit assistant state
+  const [aiCommitLoading, setAiCommitLoading] = useState(false);
+  const [aiCommitError, setAiCommitError] = useState<string | null>(null);
+
+  // G.38: AI PR description state
+  const [aiPrLoading, setAiPrLoading] = useState(false);
+  const [aiPrError, setAiPrError] = useState<string | null>(null);
+  const [prDescription, setPrDescription] = useState<{ title: string; body: string } | null>(null);
+  const [prModalOpen, setPrModalOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!workspace?.root) return;
@@ -132,6 +149,60 @@ export function GitSidebar() {
     refresh();
   }, [workspace?.root, unstagedFiles, refresh]);
 
+  // G.38: Generate AI commit message
+  const handleAiCommit = useCallback(async () => {
+    if (!workspace?.root) return;
+    setAiCommitLoading(true);
+    setAiCommitError(null);
+    try {
+      const stagedDiff = await window.viper.git.diffStaged(workspace.root);
+      if (!stagedDiff) {
+        setAiCommitError("No staged changes to generate a commit message for.");
+        return;
+      }
+      const result = await fetchSuggestCommitMessage({
+        workspacePath: workspace.root,
+        branch: branch || undefined,
+        stagedDiff,
+        style: "conventional",
+      });
+      // Fill commit message textarea: subject + optional body
+      const full = result.body
+        ? `${result.subject}\n\n${result.body}`
+        : result.subject;
+      setCommitMsg(full);
+    } catch (err) {
+      setAiCommitError(err instanceof Error ? err.message : "AI commit failed.");
+    } finally {
+      setAiCommitLoading(false);
+    }
+  }, [workspace?.root, branch]);
+
+  // G.38: Generate AI PR description
+  const handleAiPr = useCallback(async () => {
+    if (!workspace?.root) return;
+    setAiPrLoading(true);
+    setAiPrError(null);
+    try {
+      const stagedDiff = await window.viper.git.diffStaged(workspace.root);
+      if (!stagedDiff) {
+        setAiPrError("No staged changes to generate a PR description for.");
+        return;
+      }
+      const result = await fetchSuggestPrBody({
+        workspacePath: workspace.root,
+        branch: branch || undefined,
+        stagedDiff,
+      });
+      setPrDescription(result);
+      setPrModalOpen(true);
+    } catch (err) {
+      setAiPrError(err instanceof Error ? err.message : "AI PR description failed.");
+    } finally {
+      setAiPrLoading(false);
+    }
+  }, [workspace?.root, branch]);
+
   const fileName = (path: string) => path.split("/").pop() ?? path;
   const dirName = (path: string) => {
     const idx = path.lastIndexOf("/");
@@ -190,6 +261,53 @@ export function GitSidebar() {
             }
           }}
         />
+
+        {/* G.38: AI generate commit message */}
+        <button
+          type="button"
+          className="flex items-center justify-center gap-1.5 w-full py-1 rounded text-[11px] font-medium transition-colors disabled:opacity-40 border"
+          style={{
+            borderColor: "var(--viper-accent)",
+            color: "var(--viper-accent)",
+            background: "transparent",
+          }}
+          onClick={handleAiCommit}
+          disabled={aiCommitLoading || stagedFiles.length === 0}
+          title="Generate commit message from staged diff"
+        >
+          {aiCommitLoading
+            ? <Loader2 size={11} className="animate-spin" />
+            : <Sparkles size={11} />}
+          Generate commit message (AI)
+        </button>
+
+        {aiCommitError && (
+          <p className="text-[10px] text-[#ef4444] px-0.5">{aiCommitError}</p>
+        )}
+
+        {/* G.38: AI generate PR description */}
+        <button
+          type="button"
+          className="flex items-center justify-center gap-1.5 w-full py-1 rounded text-[11px] font-medium transition-colors disabled:opacity-40 border"
+          style={{
+            borderColor: "var(--viper-border)",
+            color: "#9ca3af",
+            background: "transparent",
+          }}
+          onClick={handleAiPr}
+          disabled={aiPrLoading || stagedFiles.length === 0}
+          title="Generate PR description from staged diff"
+        >
+          {aiPrLoading
+            ? <Loader2 size={11} className="animate-spin" />
+            : <Sparkles size={11} />}
+          Generate PR description (AI)
+        </button>
+
+        {aiPrError && (
+          <p className="text-[10px] text-[#ef4444] px-0.5">{aiPrError}</p>
+        )}
+
         <button
           type="button"
           className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-40"
@@ -204,6 +322,107 @@ export function GitSidebar() {
           Commit
         </button>
       </div>
+
+      {/* G.38: PR description modal */}
+      {prModalOpen && prDescription && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setPrModalOpen(false)}
+            aria-hidden
+          />
+          <div
+            className="relative w-full max-w-[600px] mx-4 rounded-lg shadow-2xl border flex flex-col max-h-[80vh]"
+            style={{ background: "var(--viper-sidebar)", borderColor: "var(--viper-border)" }}
+          >
+            {/* Modal header */}
+            <div
+              className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+              style={{ borderColor: "var(--viper-border)" }}
+            >
+              <h2 className="text-sm font-medium text-[#e5e7eb]">
+                AI-Generated PR Description
+              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[#9ca3af] hover:text-[#e5e7eb] hover:bg-white/10 transition-colors"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        `${prDescription.title}\n\n${prDescription.body}`,
+                      );
+                    } catch { /* ignore */ }
+                  }}
+                  title="Copy to clipboard"
+                >
+                  <Copy size={12} />
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  className="p-1 rounded text-[#6b7280] hover:text-[#e5e7eb] hover:bg-white/10"
+                  onClick={() => setPrModalOpen(false)}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Title */}
+            <div
+              className="px-4 pt-3 pb-2 flex-shrink-0 border-b"
+              style={{ borderColor: "var(--viper-border)" }}
+            >
+              <p className="text-[10px] text-[#6b7280] mb-1 uppercase tracking-wider">
+                Title
+              </p>
+              <p className="text-sm text-[#e5e7eb] font-medium">{prDescription.title}</p>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
+              <p className="text-[10px] text-[#6b7280] mb-1 uppercase tracking-wider">
+                Body
+              </p>
+              <pre
+                className="text-xs text-[#d1d5db] whitespace-pre-wrap font-sans leading-relaxed"
+              >
+                {prDescription.body}
+              </pre>
+            </div>
+
+            <div
+              className="flex justify-end gap-2 px-4 py-3 border-t flex-shrink-0"
+              style={{ borderColor: "var(--viper-border)" }}
+            >
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-xs text-[#9ca3af] hover:text-[#e5e7eb] hover:bg-white/5 transition-colors"
+                onClick={() => setPrModalOpen(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                style={{ background: "var(--viper-accent)", color: "#0b0f17" }}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      `${prDescription.title}\n\n${prDescription.body}`,
+                    );
+                    setPrModalOpen(false);
+                  } catch { /* ignore */ }
+                }}
+              >
+                <Copy size={11} />
+                Copy &amp; Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto min-h-0">
         {/* Staged Changes */}

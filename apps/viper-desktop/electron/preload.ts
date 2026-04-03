@@ -67,6 +67,10 @@ contextBridge.exposeInMainWorld("viper", {
       ipcRenderer.invoke("git:commit", root, message) as Promise<boolean>,
     discard: (root: string, filePath: string) =>
       ipcRenderer.invoke("git:discard", root, filePath) as Promise<boolean>,
+    diffStaged: (root: string) =>
+      ipcRenderer.invoke("git:diffStaged", root) as Promise<string>,
+    diffNameOnly: (root: string) =>
+      ipcRenderer.invoke("git:diffNameOnly", root) as Promise<string[]>,
   },
   shell: {
     revealInFolder: (workspaceRoot: string, relPath: string) =>

@@ -5,6 +5,7 @@ import {
   Puzzle,
   PlayCircle,
   BarChart3,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
 
@@ -14,7 +15,8 @@ export type SidebarView =
   | "git"
   | "extensions"
   | "run"
-  | "usage";
+  | "usage"
+  | "tests";
 
 interface ActivityBarProps {
   activeView: SidebarView;
@@ -28,6 +30,7 @@ const VIEWS: { id: SidebarView; icon: LucideIcon; title: string }[] = [
   { id: "extensions", icon: Puzzle, title: "Extensions" },
   { id: "run", icon: PlayCircle, title: "Run & Debug" },
   { id: "usage", icon: BarChart3, title: "Usage & Plan" },
+  { id: "tests", icon: FlaskConical, title: "Test Assistant" },
 ];
 
 export function ActivityBar({ activeView, onViewChange }: ActivityBarProps) {

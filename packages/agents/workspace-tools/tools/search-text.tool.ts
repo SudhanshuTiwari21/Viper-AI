@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { resolve, relative, join, extname } from "node:path";
 import type { TextMatch, SearchTextResult, SearchTextOptions } from "../workspace-tools.types.js";
+import { checkPrivacy } from "../privacy.js";
 
 const IGNORE_DIRS = new Set([
   ".git", "node_modules", "dist", ".next", "build", "coverage",
@@ -37,6 +38,10 @@ export async function searchWorkspaceText(
   const glob = opts?.glob;
 
   const root = resolve(workspacePath);
+  // G.40: privacy config loaded once for the entire search walk (sync check per file)
+  // We use checkPrivacy with null config here (built-in deny only) for performance;
+  // config-level deny applies to individual read calls anyway.
+
   const matches: TextMatch[] = [];
   let filesSearched = 0;
   let truncated = false;
@@ -66,6 +71,9 @@ export async function searchWorkspaceText(
         if (glob && !matchesGlob(name, glob)) continue;
 
         const fullPath = join(dir, name);
+        const relPath = relative(root, fullPath).replace(/\\/g, "/");
+        // G.40: skip files blocked by the privacy policy
+        if (!checkPrivacy(relPath, null).allowed) continue;
         try {
           const info = await stat(fullPath);
           if (info.size > MAX_FILE_SIZE) continue;
@@ -78,7 +86,7 @@ export async function searchWorkspaceText(
             const compare = caseSensitive ? line : line.toLowerCase();
             if (compare.includes(searchPattern)) {
               matches.push({
-                file: relative(root, fullPath).replace(/\\/g, "/"),
+                file: relPath,
                 line: i + 1,
                 content: line.trimEnd().slice(0, 200),
               });

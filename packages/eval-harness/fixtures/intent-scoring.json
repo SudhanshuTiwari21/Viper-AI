@@ -1,0 +1,75 @@
+{
+  "type": "intent-scoring",
+  "cases": [
+    {
+      "id": "intent-001",
+      "description": "tokens containing 'fix' and 'bug' score CODE_FIX",
+      "tier": "offline",
+      "input": { "tokens": ["fix", "the", "bug", "in", "login"] },
+      "expect": { "intentType": "CODE_FIX" }
+    },
+    {
+      "id": "intent-002",
+      "description": "tokens with 'implement' score FEATURE_IMPLEMENTATION",
+      "tier": "offline",
+      "input": { "tokens": ["implement", "user", "authentication"] },
+      "expect": { "intentType": "FEATURE_IMPLEMENTATION" }
+    },
+    {
+      "id": "intent-003",
+      "description": "tokens with 'refactor' score REFACTOR",
+      "tier": "offline",
+      "input": { "tokens": ["refactor", "this", "module"] },
+      "expect": { "intentType": "REFACTOR" }
+    },
+    {
+      "id": "intent-004",
+      "description": "tokens with 'explain' score CODE_EXPLANATION",
+      "tier": "offline",
+      "input": { "tokens": ["explain", "this", "function"] },
+      "expect": { "intentType": "CODE_EXPLANATION" }
+    },
+    {
+      "id": "intent-005",
+      "description": "tokens with 'find' score CODE_SEARCH",
+      "tier": "offline",
+      "input": { "tokens": ["find", "all", "usages"] },
+      "expect": { "intentType": "CODE_SEARCH" }
+    },
+    {
+      "id": "intent-006",
+      "description": "tokens with 'test' score TEST_GENERATION",
+      "tier": "offline",
+      "input": { "tokens": ["write", "unit", "test"] },
+      "expect": { "intentType": "TEST_GENERATION" }
+    },
+    {
+      "id": "intent-007",
+      "description": "tokens with 'security' score SECURITY_ANALYSIS",
+      "tier": "offline",
+      "input": { "tokens": ["check", "security", "vulnerability"] },
+      "expect": { "intentType": "SECURITY_ANALYSIS" }
+    },
+    {
+      "id": "intent-008",
+      "description": "empty tokens fall back to GENERIC",
+      "tier": "offline",
+      "input": { "tokens": [] },
+      "expect": { "intentType": "GENERIC" }
+    },
+    {
+      "id": "intent-009",
+      "description": "token 'roadmap' scores CODE_GUIDANCE (single-token keyword match)",
+      "tier": "offline",
+      "input": { "tokens": ["roadmap", "for", "this", "project"] },
+      "expect": { "intentType": "CODE_GUIDANCE" }
+    },
+    {
+      "id": "intent-010",
+      "description": "tokens with 'edit' score FILE_EDIT",
+      "tier": "offline",
+      "input": { "tokens": ["edit", "the", "config", "file"] },
+      "expect": { "intentType": "FILE_EDIT" }
+    }
+  ]
+}

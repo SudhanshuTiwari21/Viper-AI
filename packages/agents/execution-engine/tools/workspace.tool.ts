@@ -2,6 +2,7 @@ import {
   readWorkspaceFile,
   listWorkspaceDirectory,
   searchWorkspaceText,
+  isPrivacyAllowed,
 } from "@repo/workspace-tools";
 import type { ToolInput, ToolOutput } from "./tool.types";
 import type { ExecutionContext } from "../engine/execution.types";
@@ -22,6 +23,14 @@ export async function runWorkspaceTool(
     case "READ_FILE": {
       const results: string[] = [];
       for (const filePath of entities) {
+        // G.40: emit privacy:path:blocked log before readWorkspaceFile silently returns null
+        const privacyCheck = await isPrivacyAllowed(workspace, filePath);
+        if (!privacyCheck.allowed) {
+          ctx.logs.push(
+            `[Viper] READ_FILE: privacy:path:blocked hash=${privacyCheck.pathHash} rule=${privacyCheck.blockedBy ?? "unknown"}`,
+          );
+          continue;
+        }
         const file = await readWorkspaceFile(workspace, filePath);
         if (file) {
           results.push(

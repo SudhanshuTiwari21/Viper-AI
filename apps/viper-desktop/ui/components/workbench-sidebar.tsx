@@ -5,6 +5,7 @@ import { GitSidebar } from "./git-sidebar";
 import { RunDebugSidebar } from "./run-debug-sidebar";
 import { ExtensionsSidebar } from "./extensions-sidebar";
 import { UsagePanel } from "./usage-panel";
+import { TestPanel } from "./test-panel";
 import type { DocumentSymbol } from "./outline-section";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 
@@ -28,6 +29,9 @@ export function WorkbenchSidebar({ activeView }: WorkbenchSidebarProps) {
       {activeView === "run" && <RunDebugSidebar />}
       {activeView === "usage" && (
         <UsagePanel workspacePath={workspace?.root ?? null} />
+      )}
+      {activeView === "tests" && (
+        <TestPanel workspacePath={workspace?.root ?? null} />
       )}
     </div>
   );

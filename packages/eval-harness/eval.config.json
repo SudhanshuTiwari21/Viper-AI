@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/any",
+  "description": "G.41 — Eval harness thresholds. quality-gate fails when any tier falls below its required_pass_rate.",
+  "tiers": {
+    "offline": {
+      "description": "Deterministic cases with no LLM calls. Must be 100% green before every release.",
+      "required_pass_rate": 1.0
+    },
+    "live": {
+      "description": "Optional LLM-judged cases (requires OPENAI_API_KEY + VIPER_EVAL_USE_LLM=1). Not enforced by default quality-gate.",
+      "required_pass_rate": 0.8
+    }
+  },
+  "timeout_ms": 30000
+}

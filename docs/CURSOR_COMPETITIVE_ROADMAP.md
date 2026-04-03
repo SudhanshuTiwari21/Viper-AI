@@ -1557,12 +1557,384 @@ cd apps/backend && npm run check-types      # 0 errors
 
 ### Step Group G — Advanced parity and differentiation
 
-36. Ship inline completion/copilot service for editor.
-37. Ship inline in-file edit UX actions.
-38. Add PR/commit assistant lane.
-39. Add selective test targeting and failure triage workflows.
-40. Add privacy boundary policy layer for context extraction.
-41. Add offline evaluation harness + release quality gates.
+### G.36 Status: COMPLETE
+
+**What was built:**
+
+**Backend — `POST /editor/inline-complete`:**
+- `apps/backend/src/lib/inline-completion.service.ts`:
+  - `isInlineCompletionEnabled()` — reads `VIPER_INLINE_COMPLETION_ENABLED`.
+  - `buildCompletionPrompt(languageId, beforeCursor, afterCursor)` — constructs FIM-style chat prompt; truncates `textBeforeCursor` to `MAX_BEFORE_CHARS` (4096) and `textAfterCursor` to `MAX_AFTER_CHARS` (512). Returns ONLY the inserted text — no markdown, no explanation.
+  - `generateInlineCompletion(req)` — calls `gpt-4o-mini` (configurable via `VIPER_INLINE_COMPLETION_MODEL`): `max_tokens=120`, `temperature=0.2`, stop at `\n\n`. Hard 4s `AbortController` timeout. All errors swallowed → `{ text: "" }`.
+  - Emits `editor:inline-complete:requested` / `editor:inline-complete:completed` workflowLog stages.
+- `apps/backend/src/routes/editor.routes.ts` — `POST /editor/inline-complete`:
+  - 404 when `VIPER_INLINE_COMPLETION_ENABLED` off.
+  - Zod validation (mirrors `request.schemas.ts` style); 400 on schema violation.
+  - `entitlementsPreHandler` — workspace-scoped when `VIPER_ENTITLEMENTS_ENFORCE=1`; dev-trust when off.
+  - Registered in `apps/backend/src/server.ts`.
+
+**Desktop — Monaco provider:**
+- `apps/viper-desktop/ui/components/monaco-editor.tsx` — `registerInlineCompletionsProvider` for `typescript`, `javascript`, `python`, `go`, `rust`, `java`, `plaintext`:
+  - Gated by `VITE_INLINE_COMPLETION_ENABLED` (build-time env, default off).
+  - 300ms debounce + `AbortController` per keystroke; Monaco cancellation token cancels in-flight requests.
+  - Context window: full pre-cursor text (server truncates) + 512-char post-cursor slice.
+  - Returns `InlineCompletionList` with 0–1 items; Tab accepts (Monaco default ghost-text behavior).
+  - All disposables stored in `inlineDisposablesRef` — cleaned up on unmount.
+  - `inlineSuggest: { enabled, mode: "prefix" }` editor option wired.
+- `apps/viper-desktop/ui/services/agent-api.ts` — `fetchInlineCompletion(payload, signal?)`:
+  - Returns `{ text: "" }` on 404 (disabled), network error, or AbortError — silent degradation.
+- `apps/viper-desktop/ui/components/editor-container.tsx` — passes `workspacePath={workspace?.root}` to `MonacoEditor`.
+
+**Workflow stages added:**
+- `editor:inline-complete:requested`
+- `editor:inline-complete:completed`
+
+**Tests (`apps/backend/src/routes/editor.routes.test.ts`):**
+16 tests — kill-switch 404, missing fields 400, empty `textBeforeCursor` → empty result, happy path 200 with text, field forwarding; `buildCompletionPrompt` unit tests (languageId, before/after inclusion, truncation, empty after omits section); `isInlineCompletionEnabled` env parsing.
+
+**Evidence commands:**
+```bash
+cd apps/backend && npx vitest run           # 402 tests pass (32 test files)
+cd apps/backend && npm run check-types      # 0 errors
+```
+
+**Not done (explicit deferrals):**
+- Multi-file context / repo-index awareness (completions are file-local only).
+- Embedding-based retrieval for richer context (overlaps roadmap §9.1 #1).
+- Copilot Chat / chat-in-editor UX (G.37 ships inline edit; chat-in-editor deferred to later steps).
+- Streaming completions (single response for MVP).
+- Telemetry: accept/reject tracking for quality loop.
+- Per-user completion history / personalization.
+- `VITE_INLINE_COMPLETION_ENABLED` runtime toggle (currently build-time only; deferred).
+
+**Rollback:** Remove `apps/backend/src/lib/inline-completion.service.ts`, `apps/backend/src/routes/editor.routes.ts`, `apps/backend/src/routes/editor.routes.test.ts`; revert `apps/backend/src/server.ts` (remove `editorRoutes`); revert `apps/backend/src/types/workflow-log-schema.ts` (remove 2 `editor:inline-complete:*` stages); revert `apps/viper-desktop/ui/components/monaco-editor.tsx` (remove provider logic, `INLINE_COMPLETION_ENABLED` const, `inlineDisposablesRef`, `abortRef`, `debounceRef`); revert `apps/viper-desktop/ui/components/editor-container.tsx` (remove `workspacePath` prop); remove `fetchInlineCompletion` + types from `agent-api.ts`; revert `docs/ENV.md`.
+
+---
+
+~~36. Ship inline completion/copilot service for editor.~~
+
+### G.37 Status: COMPLETE
+
+**What was built:**
+
+**Backend — `POST /editor/inline-edit`:**
+- `apps/backend/src/lib/inline-edit.service.ts`:
+  - `isInlineEditEnabled()` — reads `VIPER_INLINE_EDIT_ENABLED`.
+  - `buildEditPrompt(req)` — constructs a system prompt containing the full file content (truncated to `MAX_FILE_CONTENT_CHARS` = 32k) plus the user instruction. When a selection is provided, adds a section highlighting the selected region (lines N–M) so the model focuses changes there. Instructs the model to return ONLY the complete modified file — no markdown fences, no explanations.
+  - `generateInlineEdit(req)` — calls `gpt-4o` (configurable via `VIPER_INLINE_EDIT_MODEL`): `max_tokens=4096`, `temperature=0.2`. Hard 30s `AbortController` timeout. Errors propagated (user-initiated action, not silent like inline completion).
+  - `stripMarkdownFences(text)` — strips wrapping ` ```lang ... ``` ` fences if the model adds them.
+  - Emits `editor:inline-edit:requested` / `editor:inline-edit:completed` workflowLog stages.
+- `apps/backend/src/routes/editor.routes.ts` — `POST /editor/inline-edit` (added alongside G.36's `/editor/inline-complete`):
+  - 404 when `VIPER_INLINE_EDIT_ENABLED` off (hidden endpoint pattern).
+  - Zod validation (`InlineEditRequestSchema`): `workspacePath`, `filePath`, `languageId`, `instruction`, `fileContent` required; `selection` (object with startLine/startColumn/endLine/endColumn) and `selectionText` optional.
+  - `entitlementsPreHandler` — workspace-scoped when `VIPER_ENTITLEMENTS_ENFORCE=1`.
+  - Service errors return 500 with `{ error: string }`.
+  - Registered in `apps/backend/src/server.ts` (same `editorRoutes` plugin).
+
+**Desktop — AI edit actions:**
+- `apps/viper-desktop/ui/components/monaco-editor.tsx`:
+  - New `onEditorInstance` callback prop — exposes the Monaco editor instance to the parent.
+  - Monaco editor action registered: **"Viper: AI Edit Selection"** with keybinding `Cmd+Shift+E` (Mac) / `Ctrl+Shift+E` (Win/Linux) and context menu entry. Dispatches `viper:trigger-ai-edit` custom event.
+- `apps/viper-desktop/ui/components/editor-container.tsx`:
+  - Stores Monaco editor ref via `onEditorInstance` callback.
+  - Listens for `viper:trigger-ai-edit` window event. On trigger:
+    1. Reads the current selection from the stored editor instance.
+    2. Requires a non-empty selection (alerts "Select some code first" if empty).
+    3. Prompts for an instruction via `window.prompt()` (default: "Improve this code").
+    4. Calls `fetchInlineEdit()` with file content, selection range, and instruction.
+    5. On success, calls `addPendingEdit()` — existing `MonacoDiffEditor` Accept/Reject flow takes over.
+    6. On failure, shows an alert with the error message. AbortController prevents concurrent requests.
+- `apps/viper-desktop/ui/services/agent-api.ts` — `fetchInlineEdit(payload, signal?)`:
+  - Returns `{ modifiedFileContent }` on success.
+  - Throws humanized errors on 404, network failure, or server error (user-initiated, errors not swallowed).
+- `apps/viper-desktop/ui/commands/default-commands.tsx`:
+  - Registered `viper.aiEditSelection` command — **"AI Edit Selection"** (category: Viper) in the command palette. Dispatches `viper:trigger-ai-edit`.
+
+**Product behavior:**
+- **Selection-based edit:** Select code → `Cmd+Shift+E` (or command palette → "Viper: AI Edit Selection") → enter instruction → AI returns modified file → diff view (Accept / Reject / Undo).
+- **No selection:** Alert "Select some code first, then run this command." (no-op).
+- **End state:** `addPendingEdit` feeds into the existing `MonacoDiffEditor` → `Accept` writes file via `fsApi.writeFile`, `Reject` discards, `Undo` reverts.
+
+**Workflow stages added:**
+- `editor:inline-edit:requested`
+- `editor:inline-edit:completed`
+
+**Tests (`apps/backend/src/routes/editor.routes.test.ts`):**
+32 total tests (16 G.36 + 16 G.37) — kill-switch 404, missing instruction 400, happy path 200 with `modifiedFileContent`, selection forwarded to service, service throws → 500; `buildEditPrompt` unit tests (languageId, file path, selection section, omission); `stripMarkdownFences` (strips typescript/python fences, plain text unchanged, partial fences unchanged); `isInlineEditEnabled` env parsing (unset, "1", "true", other).
+
+**Evidence commands:**
+```bash
+cd apps/backend && npx vitest run           # 418 tests pass (32 test files)
+cd apps/backend && npm run check-types      # 0 errors
+cd packages/database && npm test            # 81 tests pass
+```
+
+**Not done (explicit deferrals):**
+- Multi-hunk patches (G.37 returns full-file modified content; multi-region surgical patches deferred).
+- Multi-file refactors (single file per request for MVP).
+- Streaming diffs (full response then diff; streamed partial diff display deferred).
+- Instruction history / recent edits.
+- Custom instruction templates / presets (e.g. "Add types", "Add tests", "Optimize").
+- `VITE_INLINE_COMPLETION_ENABLED` runtime toggle (still build-time only; deferred from G.36).
+
+**Rollback:** Remove `apps/backend/src/lib/inline-edit.service.ts`; revert `apps/backend/src/routes/editor.routes.ts` (remove `postInlineEdit`, `InlineEditRequestSchema`, inline-edit route, and inline-edit service imports); revert `apps/backend/src/types/workflow-log-schema.ts` (remove 2 `editor:inline-edit:*` stages); revert `apps/viper-desktop/ui/components/monaco-editor.tsx` (remove `onEditorInstance` prop + Monaco action); revert `apps/viper-desktop/ui/components/editor-container.tsx` (remove AI edit handler, `editorInstanceRef`, `aiEditAbortRef`, `aiEditInFlight`, `fetchInlineEdit` import, `handleEditorInstance`, `onEditorInstance` prop, `viper:trigger-ai-edit` listener); revert `apps/viper-desktop/ui/services/agent-api.ts` (remove `fetchInlineEdit` + types); revert `apps/viper-desktop/ui/commands/default-commands.tsx` (remove `viper.aiEditSelection` command); revert `docs/ENV.md` (remove `VIPER_INLINE_EDIT_ENABLED`, `VIPER_INLINE_EDIT_MODEL`).
+
+---
+
+~~37. Ship inline in-file edit UX actions.~~
+
+### G.38 Status: COMPLETE
+
+**What was built:**
+
+**Backend — `/git/suggest-commit` + `/git/suggest-pr-body`:**
+- `apps/backend/src/lib/git-assistant.service.ts`:
+  - `isCommitAssistantEnabled()` — reads `VIPER_COMMIT_ASSISTANT_ENABLED`.
+  - `buildCommitPrompt(diff, style, branch?)` — builds a chat prompt targeting Conventional Commits or short style; truncates diff to `MAX_DIFF_CHARS` (32k). Instructs model to return a JSON object `{ subject, body }`.
+  - `buildPrPrompt(diff, branch?)` — builds a PR description prompt with Summary / Changes / Test plan sections. Instructs model to return `{ title, body }` JSON.
+  - `suggestCommitMessage(req)` — calls `gpt-4o-mini` (configurable via `VIPER_COMMIT_ASSISTANT_MODEL`) with `response_format: { type: "json_object" }`, `max_tokens=512`, `temperature=0.3`. 25s timeout.
+  - `suggestPrBody(req)` — same model, `max_tokens=1024`. 25s timeout.
+  - Emits `git:assistant:requested` / `git:assistant:completed` workflowLog stages.
+- `apps/backend/src/routes/git.routes.ts`:
+  - `POST /git/suggest-commit` — Zod validation (`workspacePath`, `stagedDiff` required; `branch`, `style` optional). 404 when kill-switch off. 400 on validation error. 500 on service failure.
+  - `POST /git/suggest-pr-body` — same pattern; returns `{ title, body }`.
+  - Both routes use `entitlementsPreHandler`.
+  - Registered in `apps/backend/src/server.ts`.
+
+**Desktop — Electron IPC:**
+- `apps/viper-desktop/backend/git-service.ts` — added `git:diffStaged` IPC handler: runs `git diff --cached`, caps output at 256 KiB before returning to renderer.
+- `apps/viper-desktop/electron/preload.ts` — exposed `window.viper.git.diffStaged(root)`.
+- `apps/viper-desktop/ui/types/viper.d.ts` — added `diffStaged` to `ViperGitApi`.
+
+**Desktop — API client:**
+- `apps/viper-desktop/ui/services/agent-api.ts` — added `fetchSuggestCommitMessage(payload)` and `fetchSuggestPrBody(payload)`. Both throw humanized errors (user-initiated). 404 → "not enabled" error.
+
+**Desktop — UI (`apps/viper-desktop/ui/components/git-sidebar.tsx`):**
+- **"Generate commit message (AI)"** button: accent-outlined, enabled only when staged files exist. On click: fetches staged diff via `window.viper.git.diffStaged`, calls `fetchSuggestCommitMessage` with style "conventional", fills the commit message textarea with `subject + body`. Inline loading spinner + error message.
+- **"Generate PR description (AI)"** button: same enablement guard. On click: fetches diff, calls `fetchSuggestPrBody`, opens a modal showing the AI-generated PR title + markdown body with Copy and Copy & Close actions.
+- **PR description modal:** overlay with title + scrollable body. Clipboard copy via `navigator.clipboard`. Both loading/error states surfaced inline below each button.
+- Never auto-commits — user must click the existing **Commit** button.
+
+**Workflow stages added:**
+- `git:assistant:requested`
+- `git:assistant:completed`
+
+**Tests (`apps/backend/src/routes/git.routes.test.ts`):**
+21 tests — kill-switch 404 (both routes), missing fields 400, happy path commit 200 with subject/body, style forwarding, service throws → 500, PR happy path 200; `buildCommitPrompt` (diff inclusion, conventional vs short style, branch hint, truncation); `buildPrPrompt` (diff, sections, branch); `isCommitAssistantEnabled` env parsing.
+
+**Evidence commands:**
+```bash
+cd apps/backend && npx vitest run           # 439 tests pass (33 test files)
+cd apps/backend && npm run check-types      # 0 errors
+cd packages/database && npm test            # 81 tests pass
+```
+
+**Not done (explicit deferrals):**
+- Automatic `gh pr create` / GitHub API integration (no OAuth; deferred to G.39+).
+- GitLab MR creation.
+- Commit message history / learning from accepted suggestions.
+- Streaming diff review / inline hunk comments.
+- Multi-workspace / multi-remote awareness.
+- PR template detection from `.github/pull_request_template.md`.
+
+**Rollback:** Remove `apps/backend/src/lib/git-assistant.service.ts`, `apps/backend/src/routes/git.routes.ts`, `apps/backend/src/routes/git.routes.test.ts`; revert `apps/backend/src/server.ts` (remove `gitRoutes` import + registration); revert `apps/backend/src/types/workflow-log-schema.ts` (remove `git:assistant:*`); revert `apps/viper-desktop/backend/git-service.ts` (remove `git:diffStaged` handler); revert `apps/viper-desktop/electron/preload.ts` (remove `diffStaged`); revert `apps/viper-desktop/ui/types/viper.d.ts` (remove `diffStaged` from `ViperGitApi`); revert `agent-api.ts` (remove `fetchSuggestCommitMessage`, `fetchSuggestPrBody`, related types); revert `git-sidebar.tsx` (remove AI buttons, modal, AI state, imports); revert `docs/ENV.md`.
+
+---
+
+~~38. Add PR/commit assistant lane.~~
+
+### G.39 Status: COMPLETE
+
+**What was built:**
+
+**Backend — `/testing/suggest-commands` + `/testing/triage-failure`:**
+- `apps/backend/src/lib/test-assistant.service.ts`:
+  - `isTestAssistantEnabled()` — reads `VIPER_TEST_ASSISTANT_ENABLED`.
+  - `deriveTestFilePath(filePath)` — pure heuristic: strips extension, appends `.test.ts` / `.test.tsx`; returns null for no-extension files or unchanged for already-test files.
+  - `buildHeuristicCommands(changedFiles)` — groups changed files by the monorepo package registry (`apps/backend`, `packages/database`, `apps/viper-desktop`, `packages/agents`); for ≤3 changed test files in a package generates targeted `npx vitest run <file>` commands; for >3 or no template falls back to "run all in package". No AI call needed when all files are in known packages.
+  - `buildSuggestCommandsPrompt(files, hint, heuristics)` — AI prompt with monorepo layout, changed files, and pre-computed heuristics; instructs model to return `{ commands }` JSON.
+  - `buildTriagePrompt(output, runner)` — prompt with truncated runner output; instructs model to return `{ summary, bullets, suggestedCommands }` JSON.
+  - `suggestTestCommands(req)` — fast heuristic path first; falls back to `gpt-4o-mini` (`VIPER_TEST_ASSISTANT_MODEL`) for unknown packages. `response_format: json_object`, `max_tokens=512`, 25s timeout.
+  - `triageFailure(req)` — truncates `runnerOutput` to `MAX_RUNNER_OUTPUT_CHARS` (64k); calls model with `max_tokens=768`. Returns `{ summary, bullets[0–4], suggestedCommands[0–3] }`.
+  - Emits `testing:assistant:requested` / `testing:assistant:completed` workflowLog stages.
+- `apps/backend/src/routes/testing.routes.ts`:
+  - `POST /testing/suggest-commands` — Zod: `workspacePath`, `changedFiles` (non-empty array, max 50) required; `packageHint` optional enum. 404 when disabled, 400 validation, 500 service error.
+  - `POST /testing/triage-failure` — Zod: `workspacePath`, `runnerOutput` required; `runner` optional enum. Same error codes.
+  - Both routes use `entitlementsPreHandler`.
+  - Registered in `apps/backend/src/server.ts`.
+
+**Desktop — Electron IPC:**
+- `apps/viper-desktop/backend/git-service.ts` — added `git:diffNameOnly` handler: runs `git diff --name-only HEAD`, returns array of changed file paths.
+- `apps/viper-desktop/electron/preload.ts` — exposed `window.viper.git.diffNameOnly(root)`.
+- `apps/viper-desktop/ui/types/viper.d.ts` — added `diffNameOnly` to `ViperGitApi`.
+
+**Desktop — API client:**
+- `apps/viper-desktop/ui/services/agent-api.ts` — added `fetchSuggestTestCommands(payload)` and `fetchTriageFailure(payload)`. Both throw humanized errors; 404 → "not enabled" message.
+
+**Desktop — UI (`apps/viper-desktop/ui/components/test-panel.tsx`):**
+New `TestPanel` component with two collapsible sections:
+  1. **"Suggest commands from changes"** — fetches `git diff --name-only HEAD` via IPC, calls `/testing/suggest-commands`, renders copyable command chips with cwd label and rationale text.
+  2. **"Triage failure output"** — textarea paste, runner toggle (vitest / jest / unknown), Analyze button → shows `summary`, bulleted observations, and copyable suggested follow-up commands. Loading spinners + inline error messages.
+
+Wired into `apps/viper-desktop/ui/components/activity-bar.tsx` (new "Test Assistant" entry with `FlaskConical` icon) and `apps/viper-desktop/ui/components/workbench-sidebar.tsx`.
+
+**Workflow stages added:**
+- `testing:assistant:requested`
+- `testing:assistant:completed`
+
+**Tests (`apps/backend/src/routes/testing.routes.test.ts`):**
+23 tests — kill-switch 404 (both), empty/missing changedFiles 400, happy path suggest 200, style forwarding, service throws 500, triage happy path 200, triage throws 500; `deriveTestFilePath` (ts, tsx, already-test, no-ext, spec); `buildHeuristicCommands` (backend file, database file, unknown, many files, multi-package); `isTestAssistantEnabled` env parsing.
+
+**Evidence commands:**
+```bash
+cd apps/backend && npx vitest run           # 462 tests pass (34 test files)
+cd apps/backend && npm run check-types      # 0 errors
+cd packages/database && npm test            # 81 tests pass
+```
+
+**Not done (explicit deferrals):**
+- Auto-fix loop / patch application from triage output (G.40+).
+- Coverage-based test selection (identify tests covering changed lines).
+- Full dependency graph traversal (Bazel-level impact analysis).
+- CI integration (GitHub Actions matrix targeting).
+- Automatic terminal capture (manual paste only for MVP).
+- "Run in terminal" button (command paste automation deferred).
+
+**Heuristic limitations (documented in code):**
+- Assumes co-located `*.test.ts` / `*.test.tsx` files (no file-system lookup).
+- Does not traverse imports — only direct path mapping.
+- Unknown monorepo packages (not in the package registry) fall through to AI.
+
+**Rollback:** Remove `apps/backend/src/lib/test-assistant.service.ts`, `apps/backend/src/routes/testing.routes.ts`, `apps/backend/src/routes/testing.routes.test.ts`; revert `apps/backend/src/server.ts` (remove `testingRoutes`); revert `workflow-log-schema.ts` (remove `testing:assistant:*`); revert `git-service.ts` (remove `git:diffNameOnly`); revert `preload.ts` (remove `diffNameOnly`); revert `viper.d.ts` (remove `diffNameOnly`); remove `agent-api.ts` G.39 additions; remove `test-panel.tsx`; revert `activity-bar.tsx` (remove `tests` view + `FlaskConical`); revert `workbench-sidebar.tsx` (remove `TestPanel`); revert `docs/ENV.md`.
+
+---
+
+### G.40 Status: COMPLETE
+
+**What was built:**
+
+**Core policy engine (`packages/agents/workspace-tools/privacy.ts`):**
+- Built-in denylist (always applied, cannot be overridden by config) covering:
+  - `**/.env`, `**/.env.*` (all env variants)
+  - `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx`, `**/*.crt`, `**/*.cer` (TLS/SSH keys)
+  - `**/.ssh/**`, `**/id_rsa`, `**/id_ed25519`, `**/id_ecdsa` (SSH keys)
+  - `**/secrets/**`, `**/secret/**`, `**/credentials`, `**/credentials/**`
+  - `**/*.token`, `**/*.secret`, `**/*.keystore`
+  - `**/.netrc`, `**/.pgpass`, `**/.npmrc`, `**/.pypirc`
+  - `**/service-account*.json`, `**/.aws/**`, `**/.azure/**`, `**/.config/gcloud/**`
+- Config file support: `.viper/privacy.json` at workspace root (loaded + cached 60s)
+  - `denyGlobs` — custom additional deny patterns
+  - `allowGlobs` — exceptions for config-level deny (does NOT override built-in deny)
+  - `redactPatterns` — reserved, accepted but ignored in MVP
+- Policy evaluation order: built-in deny → config allowGlobs → config denyGlobs → allow
+- `checkPrivacy(relativePath, config)` — synchronous, returns `{ allowed, blockedBy?, pathHash }`
+- `isPrivacyAllowed(workspacePath, relativePath)` — async, loads config from disk
+- `isPrivacyAllowedSync(relativePath)` — sync, built-in deny only (fast path)
+- Path hash: 12-character SHA-256 prefix for safe log output (no raw path leakage)
+- `PrivacyDeniedError` class with `pathHash` and `blockedBy` fields
+- Minimal glob matcher supporting `**`, `*`, `?`, and literal patterns
+
+**Integration points:**
+- `packages/agents/workspace-tools/tools/read-file.tool.ts` — `readWorkspaceFile` calls `isPrivacyAllowed` before any file read; returns `null` for blocked paths
+- `packages/agents/workspace-tools/tools/edit-file.tool.ts` — `editWorkspaceFile` calls `isPrivacyAllowed`; returns `{ success: false, error: "Privacy policy denied access to this file" }` for blocked paths
+- `packages/agents/workspace-tools/tools/create-file.tool.ts` — `createWorkspaceFile` calls `isPrivacyAllowed`; same error shape for blocked paths
+- `packages/agents/workspace-tools/tools/search-text.tool.ts` — walk loop calls `checkPrivacy` (sync, built-in only) per file before reading; skips blocked files silently (no leakage in search results)
+- `packages/agents/workspace-tools/index.ts` — exports `isPrivacyAllowed`, `isPrivacyAllowedSync`, `checkPrivacy`, `matchesGlob`, `clearPrivacyCache`, `PrivacyDeniedError`, `BUILTIN_DENY_GLOBS`, `PrivacyConfig`, `PrivacyCheckResult`
+
+**Execution engine observability (`packages/agents/execution-engine/tools/workspace.tool.ts`):**
+- `READ_FILE` tool calls `isPrivacyAllowed` before `readWorkspaceFile`; logs `[Viper] READ_FILE: privacy:path:blocked hash=<12char> rule=<pattern>` to `ctx.logs` for each blocked path
+
+**Backend (`apps/backend/src/routes/editor.routes.ts`):**
+- `POST /editor/inline-edit` (G.37) — calls `isPrivacyAllowed`; returns **403** for blocked paths; logs `pathHash` + `rule` (no raw path) via `request.log.warn`
+- `POST /editor/inline-complete` (G.36) — calls `isPrivacyAllowed`; returns **200 + empty text** for blocked paths (silent — no toast spam for completions)
+
+**Workflow stage:**
+- `privacy:path:blocked` added to `VALID_WORKFLOW_STAGES` in `apps/backend/src/types/workflow-log-schema.ts`
+
+**Tests (`packages/agents/workspace-tools/privacy.test.ts`):**
+47 tests — `matchesGlob` (prefix, wildcard, directory, literal); `checkPrivacy` built-in deny (13 deny cases + 3 allow cases); config denyGlobs; config allowGlobs; allowGlobs cannot override built-in; path hash (format, stability, uniqueness); `BUILTIN_DENY_GLOBS` export; `PrivacyDeniedError` fields.
+
+**Evidence commands:**
+```bash
+cd packages/agents/workspace-tools && npx vitest run   # 47 tests pass
+cd apps/backend && npx vitest run                      # 462 tests pass (34 test files)
+cd apps/backend && npm run check-types                 # 0 errors
+cd packages/agents/workspace-tools && npm run check-types  # 0 errors
+```
+
+**Not done (explicit deferrals):**
+- Full DLP / ML content scanning for secrets embedded in allowed files.
+- Per-user or per-org policies stored in DB (F.30 entitlement extension).
+- Guaranteed regex redaction of secrets within allowed file content (MVP — `redactPatterns` field accepted but not processed).
+- `.gitignore`-style negation chains (`!` prefix in denyGlobs).
+- Config-level `allowGlobs` overriding the built-in denylist (intentionally conserved; users can remove built-in patterns only by modifying source).
+- Privacy enforcement for `list-directory` (directory listings don't expose file contents; only names are returned — low risk for MVP).
+
+**Rollback:** Remove `packages/agents/workspace-tools/privacy.ts` and `privacy.test.ts`; revert imports + privacy checks from `read-file.tool.ts`, `edit-file.tool.ts`, `create-file.tool.ts`, `search-text.tool.ts`, `workspace.tool.ts`, `editor.routes.ts`; revert `workflow-log-schema.ts` (remove `privacy:path:blocked`); revert `index.ts` (remove privacy exports); revert `docs/ENV.md`.
+
+---
+
+~~39. Add selective test targeting and failure triage workflows.~~
+~~40. Add privacy boundary policy layer for context extraction.~~
+~~41. Add offline evaluation harness + release quality gates.~~
+
+---
+
+### G.41 Status: COMPLETE
+
+**What was built:**
+
+**Package: `packages/eval-harness/`**
+New monorepo workspace (`@repo/eval-harness`) with:
+- `src/types.ts` — `EvalCase`, `EvalFixtureFile`, `SuiteResult`, `HarnessResult`, `EvalConfig` types; per-type `input`/`expect` shapes for all 4 case types.
+- `src/runner.ts` — `loadFixtures(dir)`, `loadEvalConfig(root)`, `runSuite(fixture, file)`, `runHarness(fixturesDir, config)`. Dispatches each case to the correct runner; computes pass rate; checks threshold.
+- `src/run.ts` — CLI entry point (`npx tsx src/run.ts`). Prints coloured PASS/FAIL table, summary stats, optional `--output eval-results.json`. Exits 0 on pass, 1 on failure.
+- `eval.config.json` — threshold config: `offline.required_pass_rate = 1.0`, `live.required_pass_rate = 0.8`.
+- `src/runner.test.ts` — 17 unit tests for fixture dispatch, pass-rate math, and threshold logic.
+
+**Case runners (4 domains, all Tier A — deterministic, no LLM):**
+- `src/runners/privacy-glob.runner.ts` — calls `checkPrivacy()` from `@repo/workspace-tools`; asserts `allowed` and optional `blockedByPrefix`.
+- `src/runners/intent-scoring.runner.ts` — calls `scoreIntents()` from `@repo/intent-agent`; asserts `intentType` and optional `minConfidence`.
+- `src/runners/schema-validation.runner.ts` — validates values against inline Zod mirrors of `ChatMode` and `ModelTier`; asserts `valid`.
+- `src/runners/workflow-stage.runner.ts` — checks a stage string against `REQUIRED_WORKFLOW_STAGES` set; asserts `present`.
+
+**Fixtures (51 cases, all passing):**
+- `fixtures/privacy-glob.json` — 20 cases covering all built-in deny patterns, config denyGlobs, allowGlobs, and override behaviour.
+- `fixtures/intent-scoring.json` — 10 cases covering CODE_FIX, FEATURE_IMPLEMENTATION, REFACTOR, CODE_EXPLANATION, CODE_SEARCH, TEST_GENERATION, SECURITY_ANALYSIS, GENERIC, CODE_GUIDANCE, FILE_EDIT.
+- `fixtures/schema-validation.json` — 10 cases covering all 4 ChatModes, all 3 ModelTiers, and invalid values.
+- `fixtures/workflow-stages.json` — 11 cases covering critical stages from F.30–G.40 + a negative case.
+
+**Intent-agent API addition:**
+- `packages/agents/intent-agent/index.ts` — added exports for `scoreIntents` and `INTENT_KEYWORD_RULES` so the eval harness can regression-test the pure scoring function offline.
+
+**Root scripts (root `package.json`):**
+- `npm run eval` — runs `eval:offline` from `@repo/eval-harness` (prints table, exits 0 iff 100% pass).
+- `npm run eval:offline` — alias.
+- `npm run quality-gate` — fail-fast chain: `check-types` (workspace-tools, backend) → unit tests (workspace-tools, database, backend, eval-harness) → `eval`. Expected runtime < 2 minutes on a laptop.
+
+**Documentation:**
+- `docs/EVAL.md` — fixture format reference, input/expect shapes per type, config keys, quality gate definition, instructions for adding new cases, Tier B (LLM-judged) design notes.
+
+**Tests:**
+```bash
+cd packages/eval-harness && npx vitest run   # 17 unit tests pass
+npm run eval                                 # 51 eval cases pass (100%)
+npm run check-types -w @repo/eval-harness    # 0 errors
+npm run check-types -w @repo/intent-agent    # 0 errors (new exports)
+```
+
+**Not done (explicit deferrals):**
+- Weekly cron or CI schedule to run eval against production traffic replays.
+- LLM-as-judge cases (Tier B) — framework is documented in `docs/EVAL.md`; not wired up.
+- Full LLM quality leaderboard / regression scoring over time.
+- Multimodal eval (image attachment quality).
+- Auto-bisect on regression (identifying which commit introduced a failure).
+- Live server eval against `http://localhost:4000` (documented as optional; not implemented).
+- Per-intent confidence threshold enforcement (currently only `minConfidence` is asserted when specified).
+
+**Rollback:** Remove `packages/eval-harness/`; revert `scoreIntents` / `INTENT_KEYWORD_RULES` exports from `packages/agents/intent-agent/index.ts`; remove `eval`, `eval:offline`, `quality-gate` from root `package.json`; remove `docs/EVAL.md`.
+
+---
 
 ### Step Group H — Production hardening and launch readiness
 

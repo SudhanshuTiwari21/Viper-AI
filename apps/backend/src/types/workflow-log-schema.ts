@@ -68,6 +68,25 @@ export const VALID_WORKFLOW_STAGES = [
   // F.33 quota checks (WS2)
   "quota:check",
 
+  // G.36 editor inline completion
+  "editor:inline-complete:requested",
+  "editor:inline-complete:completed",
+
+  // G.37 editor inline edit
+  "editor:inline-edit:requested",
+  "editor:inline-edit:completed",
+
+  // G.38 git commit/PR assistant
+  "git:assistant:requested",
+  "git:assistant:completed",
+
+  // G.39 testing assistant
+  "testing:assistant:requested",
+  "testing:assistant:completed",
+
+  // G.40 privacy boundary policy layer
+  "privacy:path:blocked",
+
   // F.34 Stripe billing webhook ingestion (WS2)
   "billing:webhook:received",
   "billing:webhook:applied",

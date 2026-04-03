@@ -1,6 +1,7 @@
 import { writeFile, stat, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import type { CreateFileResult } from "../workspace-tools.types.js";
+import { isPrivacyAllowed } from "../privacy.js";
 
 /**
  * Creates a new file in the workspace (or overwrites if it exists).
@@ -16,6 +17,12 @@ export async function createWorkspaceFile(
   const absPath = resolve(workspacePath, relativePath);
   if (!absPath.startsWith(resolve(workspacePath))) {
     return { success: false, error: "Path traversal denied" };
+  }
+
+  // G.40: privacy gate — block creation of files at sensitive paths
+  const privacy = await isPrivacyAllowed(workspacePath, relativePath);
+  if (!privacy.allowed) {
+    return { success: false, error: "Privacy policy denied access to this file" };
   }
 
   let existed = false;

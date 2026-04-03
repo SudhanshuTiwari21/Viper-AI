@@ -1,0 +1,82 @@
+{
+  "type": "workflow-stage",
+  "cases": [
+    {
+      "id": "wf-001",
+      "description": "request:start stage is registered",
+      "tier": "offline",
+      "input": { "stage": "request:start" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-002",
+      "description": "request:complete stage is registered",
+      "tier": "offline",
+      "input": { "stage": "request:complete" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-003",
+      "description": "intent:start stage is registered",
+      "tier": "offline",
+      "input": { "stage": "intent:start" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-004",
+      "description": "quota:check stage is registered (F.33)",
+      "tier": "offline",
+      "input": { "stage": "quota:check" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-005",
+      "description": "entitlement:checked stage is registered (F.30)",
+      "tier": "offline",
+      "input": { "stage": "entitlement:checked" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-006",
+      "description": "editor:inline-edit:requested stage is registered (G.37)",
+      "tier": "offline",
+      "input": { "stage": "editor:inline-edit:requested" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-007",
+      "description": "git:assistant:requested stage is registered (G.38)",
+      "tier": "offline",
+      "input": { "stage": "git:assistant:requested" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-008",
+      "description": "testing:assistant:requested stage is registered (G.39)",
+      "tier": "offline",
+      "input": { "stage": "testing:assistant:requested" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-009",
+      "description": "privacy:path:blocked stage is registered (G.40)",
+      "tier": "offline",
+      "input": { "stage": "privacy:path:blocked" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-010",
+      "description": "billing:webhook:applied stage is registered (F.34)",
+      "tier": "offline",
+      "input": { "stage": "billing:webhook:applied" },
+      "expect": { "present": true }
+    },
+    {
+      "id": "wf-011",
+      "description": "a made-up stage is not present",
+      "tier": "offline",
+      "input": { "stage": "not:a:real:stage:xyz" },
+      "expect": { "present": false }
+    }
+  ]
+}

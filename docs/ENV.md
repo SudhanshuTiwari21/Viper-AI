@@ -39,7 +39,40 @@
 | `VIPER_STRIPE_WEBHOOK_SECRET` | F.34: Fallback alias for `STRIPE_WEBHOOK_SECRET`. `STRIPE_WEBHOOK_SECRET` is preferred. | Yes (when enabled) | unset |
 | `VIPER_STRIPE_PRICE_ENTITLEMENTS` | F.34: JSON object mapping **Stripe Price ID → entitlement config** `{ allowed_modes?, allowed_model_tiers?, flags? }`. Example: `{"price_pro":{"allowed_model_tiers":["standard","premium"],"flags":{"monthly_request_quota":1000}}}`. If unset or empty, all price IDs are treated as `ignored` (events are accepted but no entitlements change). | No | unset |
 | `VIPER_USAGE_UI_ENABLED` | F.35: `1` or `true` enables `POST /usage/summary` endpoint. When off (default), the endpoint returns **404** — hidden from scanners, same pattern as F.34. When on, the endpoint returns month-to-date usage, quota limit, and entitlement snapshot for the supplied `workspacePath`. | No | off |
+| `VIPER_INLINE_COMPLETION_ENABLED` | G.36: `1` or `true` enables `POST /editor/inline-complete` endpoint. When off (default), returns **404**. Controls server-side execution; the desktop also gates on `VITE_INLINE_COMPLETION_ENABLED` at build time. | No | off |
+| `VIPER_INLINE_COMPLETION_MODEL` | G.36: OpenAI model used for inline completions. Defaults to `gpt-4o-mini` (fast, low latency). Override with any chat-completion capable model. | No | `gpt-4o-mini` |
+| `VITE_INLINE_COMPLETION_ENABLED` | G.36 (desktop, **build-time**): `true` or `1` enables the Monaco inline completions provider (ghost-text UI). When off, the provider is never registered and no requests are made. Must be set at Vite build time (compiled in). | No | off |
+| `VIPER_INLINE_EDIT_ENABLED` | G.37: `1` or `true` enables `POST /editor/inline-edit` endpoint. When off (default), returns **404** (hidden endpoint). | No | off |
+| `VIPER_INLINE_EDIT_MODEL` | G.37: OpenAI model used for AI inline edits. Defaults to `gpt-4o`. | No | `gpt-4o` |
+| `VIPER_COMMIT_ASSISTANT_ENABLED` | G.38: `1` or `true` enables `POST /git/suggest-commit` and `POST /git/suggest-pr-body` endpoints. When off (default), returns **404** (hidden endpoint). | No | off |
+| `VIPER_COMMIT_ASSISTANT_MODEL` | G.38: OpenAI model for commit/PR message generation. Defaults to `gpt-4o-mini` (fast). | No | `gpt-4o-mini` |
+| `VIPER_TEST_ASSISTANT_ENABLED` | G.39: `1` or `true` enables `POST /testing/suggest-commands` and `POST /testing/triage-failure` endpoints. When off (default), returns **404** (hidden endpoint). | No | off |
+| `VIPER_TEST_ASSISTANT_MODEL` | G.39: OpenAI model for test command suggestion and failure triage. Defaults to `gpt-4o-mini`. | No | `gpt-4o-mini` |
 | Redis URL      | Not read from env. Pass `options.redisUrl` into `runRepoScanner()` or into `RedisQueueService` in your orchestrator. | No | — |
+
+### G.40 Privacy boundary configuration
+
+No environment variables are required. Privacy policy is **on by default** — the built-in denylist (`.env`, `*.pem`, `.ssh/**`, `secrets/**`, etc.) is always applied to every workspace file read or write made via `@repo/workspace-tools`.
+
+To customise the policy for a workspace, create `.viper/privacy.json` at the **workspace root** (the directory opened by the user):
+
+```json
+{
+  "denyGlobs": ["**/internal-data/**"],
+  "allowGlobs": [".env.example"],
+  "redactPatterns": []
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `denyGlobs` | `string[]` | Additional glob patterns to block (on top of built-in list). Standard `**` / `*` glob syntax. |
+| `allowGlobs` | `string[]` | Glob exceptions that un-block paths matched by config `denyGlobs`. Does **not** override the built-in denylist. |
+| `redactPatterns` | `string[]` | Reserved for future DLP content redaction — not implemented in MVP; accepted but ignored. |
+
+The config file is loaded from disk and cached for 60 seconds per workspace root. Missing or malformed files fall back to built-in defaults only.
+
+**Observability:** When a path is blocked, the backend logs `privacy:path:blocked` with a 12-character SHA-256 hash of the path (no raw path in logs) and the matching rule name. The workflow stage `privacy:path:blocked` is registered in `VALID_WORKFLOW_STAGES`.
 
 ### F.33 `workspace_entitlements.flags` keys
 

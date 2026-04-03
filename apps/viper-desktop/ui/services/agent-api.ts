@@ -696,6 +696,295 @@ export async function fetchUsageSummary(
   }
 }
 
+// ---------------------------------------------------------------------------
+// G.36 — Inline completion
+// ---------------------------------------------------------------------------
+
+export interface InlineCompletionPayload {
+  workspacePath: string;
+  filePath: string;
+  languageId: string;
+  textBeforeCursor: string;
+  textAfterCursor?: string;
+  cursorLine: number;
+  cursorColumn: number;
+}
+
+export interface InlineCompletionResult {
+  /** Suggested text to insert at the cursor. Empty string = no suggestion. */
+  text: string;
+}
+
+/**
+ * Fetch a single inline ghost-text completion from the backend.
+ * Returns `{ text: "" }` on any error (404 disabled, network failure, etc.)
+ * so the Monaco provider can degrade silently.
+ */
+export async function fetchInlineCompletion(
+  payload: InlineCompletionPayload,
+  signal?: AbortSignal,
+): Promise<InlineCompletionResult> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/editor/inline-complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: signal ?? AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) {
+      // 404 = endpoint disabled; other errors are transient — both return empty
+      return { text: "" };
+    }
+    return (await res.json()) as InlineCompletionResult;
+  } catch {
+    // AbortError (user typed again), network errors → silent empty
+    return { text: "" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// G.37 — Inline edit (AI-powered in-file edits)
+// ---------------------------------------------------------------------------
+
+export interface InlineEditSelection {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}
+
+export interface InlineEditPayload {
+  workspacePath: string;
+  filePath: string;
+  languageId: string;
+  instruction: string;
+  fileContent: string;
+  selection?: InlineEditSelection;
+  selectionText?: string;
+}
+
+export interface InlineEditResult {
+  modifiedFileContent: string;
+}
+
+/**
+ * Request an AI-powered in-file edit from the backend.
+ * Returns the full modified file content, which feeds into the PendingEdit →
+ * MonacoDiffEditor Accept/Reject flow.
+ *
+ * Unlike inline completion, errors are propagated (user-initiated action).
+ */
+export async function fetchInlineEdit(
+  payload: InlineEditPayload,
+  signal?: AbortSignal,
+): Promise<InlineEditResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/editor/inline-edit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: signal ?? AbortSignal.timeout(35_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
+
+  if (res.status === 404) {
+    throw new Error("AI edit is not enabled on the backend (VIPER_INLINE_EDIT_ENABLED).");
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as { error?: string }).error ?? `Inline edit failed: ${res.status}`);
+  }
+  return (await res.json()) as InlineEditResult;
+}
+
+// ---------------------------------------------------------------------------
+// G.38 — Git commit / PR assistant
+// ---------------------------------------------------------------------------
+
+export type CommitStyle = "conventional" | "short";
+
+export interface SuggestCommitPayload {
+  workspacePath: string;
+  branch?: string;
+  stagedDiff: string;
+  style?: CommitStyle;
+}
+
+export interface CommitSuggestionResult {
+  subject: string;
+  body?: string;
+}
+
+export interface SuggestPrPayload {
+  workspacePath: string;
+  branch?: string;
+  stagedDiff: string;
+}
+
+export interface PrSuggestionResult {
+  title: string;
+  body: string;
+}
+
+/**
+ * Request an AI-generated commit message for the current staged diff.
+ * Throws on network failure or backend error (user-initiated).
+ */
+export async function fetchSuggestCommitMessage(
+  payload: SuggestCommitPayload,
+): Promise<CommitSuggestionResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/git/suggest-commit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
+
+  if (res.status === 404) {
+    throw new Error(
+      "AI commit assistant is not enabled on the backend (VIPER_COMMIT_ASSISTANT_ENABLED).",
+    );
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(
+      (err as { error?: string }).error ?? `Suggest commit failed: ${res.status}`,
+    );
+  }
+  return (await res.json()) as CommitSuggestionResult;
+}
+
+/**
+ * Request an AI-generated PR title + markdown body for the current staged diff.
+ * Throws on network failure or backend error.
+ */
+export async function fetchSuggestPrBody(
+  payload: SuggestPrPayload,
+): Promise<PrSuggestionResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/git/suggest-pr-body`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
+
+  if (res.status === 404) {
+    throw new Error(
+      "AI PR assistant is not enabled on the backend (VIPER_COMMIT_ASSISTANT_ENABLED).",
+    );
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(
+      (err as { error?: string }).error ?? `Suggest PR failed: ${res.status}`,
+    );
+  }
+  return (await res.json()) as PrSuggestionResult;
+}
+
+// ---------------------------------------------------------------------------
+// G.39 — Test assistant
+// ---------------------------------------------------------------------------
+
+export interface TestCommand {
+  cwd?: string;
+  shell: string;
+  rationale: string;
+}
+
+export interface SuggestTestCommandsPayload {
+  workspacePath: string;
+  changedFiles: string[];
+  packageHint?: "backend" | "database" | "desktop" | "auto";
+}
+
+export interface SuggestTestCommandsResult {
+  commands: TestCommand[];
+}
+
+export interface TriageFailurePayload {
+  workspacePath: string;
+  runnerOutput: string;
+  runner?: "vitest" | "jest" | "unknown";
+}
+
+export interface TriageFailureResult {
+  summary: string;
+  bullets: string[];
+  suggestedCommands: string[];
+}
+
+export async function fetchSuggestTestCommands(
+  payload: SuggestTestCommandsPayload,
+): Promise<SuggestTestCommandsResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/testing/suggest-commands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
+
+  if (res.status === 404) {
+    throw new Error(
+      "Test assistant is not enabled on the backend (VIPER_TEST_ASSISTANT_ENABLED).",
+    );
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(
+      (err as { error?: string }).error ?? `Suggest test commands failed: ${res.status}`,
+    );
+  }
+  return (await res.json()) as SuggestTestCommandsResult;
+}
+
+export async function fetchTriageFailure(
+  payload: TriageFailurePayload,
+): Promise<TriageFailureResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${BACKEND_URL}/testing/triage-failure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    throw humanizeNetworkError(e);
+  }
+
+  if (res.status === 404) {
+    throw new Error(
+      "Test assistant is not enabled on the backend (VIPER_TEST_ASSISTANT_ENABLED).",
+    );
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(
+      (err as { error?: string }).error ?? `Triage failed: ${res.status}`,
+    );
+  }
+  return (await res.json()) as TriageFailureResult;
+}
+
 export const EDIT_URL = "http://localhost:3000/editor/apply-change";
 
 export async function applyEditorChange(payload: { file: string; change: string }) {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { MonacoEditor } from "./monaco-editor";
 import { MonacoDiffEditor, UndoAIBar } from "./monaco-diff-editor";
 import { EditorWelcome } from "./editor-welcome";
@@ -9,6 +9,7 @@ import { useDiagnostics } from "../contexts/diagnostics-context";
 import { usePendingEdits } from "../contexts/pending-edits-context";
 import { fsApi } from "../services/filesystem";
 import { useEditorTabs } from "../hooks/useEditor";
+import { fetchInlineEdit } from "../services/agent-api";
 import type { CodePatch } from "../lib/patch-types";
 import {
   applyPatchToContent,
@@ -23,6 +24,7 @@ export function EditorContainer() {
   const { tabs, activeId, openTab, closeTab, setActiveId, updateContent, markSaved } =
     useEditorTabs();
   const {
+    addPendingEdit,
     getPendingEditForFile,
     removePendingEdit,
     pushAccepted,
@@ -30,6 +32,17 @@ export function EditorContainer() {
     popAccepted,
   } = usePendingEdits();
   const [saving, setSaving] = useState(false);
+  const [aiEditInFlight, setAiEditInFlight] = useState(false);
+
+  // G.37: Hold a reference to the active Monaco editor instance (for reading selection).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editorInstanceRef = useRef<any>(null);
+  const aiEditAbortRef = useRef<AbortController | null>(null);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEditorInstance = useCallback((editor: any) => {
+    editorInstanceRef.current = editor;
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -186,6 +199,100 @@ export function EditorContainer() {
     };
   }, [saveAllDirty]);
 
+  // ---------------------------------------------------------------------------
+  // G.37: AI Edit — triggered by keyboard shortcut (Cmd+Shift+E) or command palette
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const handler = async () => {
+      if (aiEditInFlight) return;
+      if (!activeTab) {
+        window.alert("No file is open.");
+        return;
+      }
+      if (!workspace) {
+        window.alert("Open a workspace folder first.");
+        return;
+      }
+
+      // Read selection from the Monaco editor instance
+      const editor = editorInstanceRef.current;
+      let selectionText = "";
+      let selection: { startLine: number; startColumn: number; endLine: number; endColumn: number } | undefined;
+
+      if (editor) {
+        const sel = editor.getSelection?.();
+        if (sel && !sel.isEmpty()) {
+          const model = editor.getModel?.();
+          if (model) {
+            selectionText = model.getValueInRange(sel);
+            selection = {
+              startLine: sel.startLineNumber,
+              startColumn: sel.startColumn,
+              endLine: sel.endLineNumber,
+              endColumn: sel.endColumn,
+            };
+          }
+        }
+      }
+
+      if (!selectionText) {
+        window.alert("Select some code first, then run this command.");
+        return;
+      }
+
+      const instruction = window.prompt(
+        "How should Viper edit the selected code?",
+        "Improve this code",
+      );
+      if (!instruction) return;
+
+      setAiEditInFlight(true);
+      aiEditAbortRef.current?.abort();
+      const abort = new AbortController();
+      aiEditAbortRef.current = abort;
+
+      try {
+        const result = await fetchInlineEdit(
+          {
+            workspacePath: workspace.root,
+            filePath: activeTab.path,
+            languageId: activeTab.language,
+            instruction,
+            fileContent: activeTab.content,
+            selection,
+            selectionText,
+          },
+          abort.signal,
+        );
+
+        if (result.modifiedFileContent && result.modifiedFileContent !== activeTab.content) {
+          addPendingEdit({
+            id: `ai-edit-${Date.now()}`,
+            filePath: activeTab.path,
+            originalContent: activeTab.content,
+            modifiedContent: result.modifiedFileContent,
+            description: `AI edit: ${instruction}`,
+            timestamp: Date.now(),
+          });
+        } else {
+          window.alert("The AI returned no changes for the given instruction.");
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          window.alert(`AI edit failed: ${(err as Error).message}`);
+        }
+      } finally {
+        setAiEditInFlight(false);
+      }
+    };
+
+    window.addEventListener("viper:trigger-ai-edit", handler);
+    return () => {
+      window.removeEventListener("viper:trigger-ai-edit", handler);
+      aiEditAbortRef.current?.abort();
+    };
+  }, [activeTab, workspace, aiEditInFlight, addPendingEdit]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Editor tabs: horizontal scroll, close, active highlight */}
@@ -291,6 +398,8 @@ export function EditorContainer() {
               onCursorChange={handleCursorChange}
               currentFilePath={activeTab.path}
               onDiagnosticsChange={setFileErrors}
+              workspacePath={workspace?.root ?? null}
+              onEditorInstance={handleEditorInstance}
             />
           );
         })()}

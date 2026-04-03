@@ -1,4 +1,15 @@
 export { readWorkspaceFile } from "./tools/read-file.tool.js";
+// G.40: privacy boundary — exported so backend and other packages can reuse
+export {
+  isPrivacyAllowed,
+  isPrivacyAllowedSync,
+  checkPrivacy,
+  matchesGlob,
+  clearPrivacyCache,
+  PrivacyDeniedError,
+  BUILTIN_DENY_GLOBS,
+} from "./privacy.js";
+export type { PrivacyConfig, PrivacyCheckResult } from "./privacy.js";
 export { listWorkspaceDirectory } from "./tools/list-directory.tool.js";
 export { searchWorkspaceText } from "./tools/search-text.tool.js";
 export { searchWorkspaceFiles } from "./tools/search-files.tool.js";

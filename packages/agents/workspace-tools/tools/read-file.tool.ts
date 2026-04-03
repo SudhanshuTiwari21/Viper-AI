@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ReadFileResult } from "../workspace-tools.types.js";
+import { isPrivacyAllowed } from "../privacy.js";
 
 const MAX_FILE_BYTES = 50 * 1024; // 50 KB
 
@@ -29,6 +30,12 @@ export async function readWorkspaceFile(
   const absPath = resolve(workspacePath, relativePath);
 
   if (!absPath.startsWith(resolve(workspacePath))) {
+    return null;
+  }
+
+  // G.40: privacy gate — block sensitive paths before reading content
+  const privacy = await isPrivacyAllowed(workspacePath, relativePath);
+  if (!privacy.allowed) {
     return null;
   }
 

@@ -12,6 +12,9 @@ import { feedbackRoutes } from "./routes/feedback.routes.js";
 import { mediaRoutes } from "./routes/media.routes.js";
 import { billingRoutes } from "./routes/billing.routes.js";
 import { usageRoutes } from "./routes/usage.routes.js";
+import { editorRoutes } from "./routes/editor.routes.js";
+import { gitRoutes } from "./routes/git.routes.js";
+import { testingRoutes } from "./routes/testing.routes.js";
 
 const app = Fastify({
   logger: true,
@@ -45,6 +48,9 @@ await app.register(feedbackRoutes);
 await app.register(mediaRoutes);
 await app.register(billingRoutes);
 await app.register(usageRoutes);
+await app.register(editorRoutes);
+await app.register(gitRoutes);
+await app.register(testingRoutes);
 
 const port = Number(process.env.PORT) || 4000;
 const host = process.env.HOST || "0.0.0.0";

@@ -14,6 +14,7 @@ const COMMAND_IDS = [
   "workbench.focusChat",
   "viper.analysis.run",
   "viper.analysis.scan",
+  "viper.aiEditSelection",
   "diagnostics.run",
   "diagnostics.restartWorker",
   "workbench.openCommandPalette",
@@ -123,6 +124,14 @@ export function useRegisterDefaultCommands() {
           });
           window.dispatchEvent(new CustomEvent("viper:focus-chat"));
         }
+      },
+    });
+    registerCommand({
+      id: "viper.aiEditSelection",
+      title: "AI Edit Selection",
+      category: "Viper",
+      run: () => {
+        window.dispatchEvent(new CustomEvent("viper:trigger-ai-edit"));
       },
     });
     registerCommand({
