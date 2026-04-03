@@ -3,6 +3,7 @@ import {
   parseWorkflowRuntimeConfig,
   parseMinRetrievalConfidenceForEdits,
   parsePostEditAutoRepairMaxExtraValidationRuns,
+  parseRouterPolicyCandidatePct,
   modelFailoverEnabledForRoute,
 } from "./workflow-flags.js";
 
@@ -247,5 +248,74 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(
       parseMinRetrievalConfidenceForEdits(env({ VIPER_MIN_RETRIEVAL_CONFIDENCE_FOR_EDITS: "bogus" })),
     ).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H.44 — router shadow + staged rollout flags
+// ---------------------------------------------------------------------------
+
+describe("parseRouterPolicyCandidatePct (H.44)", () => {
+  it("unset → 0 (off by default)", () => {
+    expect(parseRouterPolicyCandidatePct(env({}))).toBe(0);
+  });
+
+  it("empty string → 0", () => {
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "" }))).toBe(0);
+  });
+
+  it("valid integer → returned as-is (within 0–100)", () => {
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "25" }))).toBe(25);
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "0" }))).toBe(0);
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "100" }))).toBe(100);
+  });
+
+  it("value > 100 → clamped to 100", () => {
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "150" }))).toBe(100);
+  });
+
+  it("negative value → clamped to 0", () => {
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "-5" }))).toBe(0);
+  });
+
+  it("non-numeric string → 0", () => {
+    expect(parseRouterPolicyCandidatePct(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "bogus" }))).toBe(0);
+  });
+});
+
+describe("parseWorkflowRuntimeConfig — H.44 shadow + rollout defaults", () => {
+  it("routerShadowEnabled defaults to false", () => {
+    const c = parseWorkflowRuntimeConfig(env({}));
+    expect(c.routerShadowEnabled).toBe(false);
+  });
+
+  it("routerPolicyCandidatePct defaults to 0", () => {
+    const c = parseWorkflowRuntimeConfig(env({}));
+    expect(c.routerPolicyCandidatePct).toBe(0);
+  });
+
+  it("VIPER_ROUTER_SHADOW_ENABLED=1 → true", () => {
+    const c = parseWorkflowRuntimeConfig(env({ VIPER_ROUTER_SHADOW_ENABLED: "1" }));
+    expect(c.routerShadowEnabled).toBe(true);
+  });
+
+  it("VIPER_ROUTER_SHADOW_ENABLED=true → true", () => {
+    const c = parseWorkflowRuntimeConfig(env({ VIPER_ROUTER_SHADOW_ENABLED: "true" }));
+    expect(c.routerShadowEnabled).toBe(true);
+  });
+
+  it("VIPER_ROUTER_SHADOW_ENABLED=0 → false", () => {
+    const c = parseWorkflowRuntimeConfig(env({ VIPER_ROUTER_SHADOW_ENABLED: "0" }));
+    expect(c.routerShadowEnabled).toBe(false);
+  });
+
+  it("VIPER_ROUTER_POLICY_CANDIDATE_PCT=10 → 10", () => {
+    const c = parseWorkflowRuntimeConfig(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "10" }));
+    expect(c.routerPolicyCandidatePct).toBe(10);
+  });
+
+  it("VIPER_ROUTER_POLICY_CANDIDATE_PCT=200 → clamped to 100", () => {
+    const c = parseWorkflowRuntimeConfig(env({ VIPER_ROUTER_POLICY_CANDIDATE_PCT: "200" }));
+    expect(c.routerPolicyCandidatePct).toBe(100);
   });
 });

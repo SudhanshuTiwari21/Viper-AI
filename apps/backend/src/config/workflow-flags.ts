@@ -109,6 +109,19 @@ export interface WorkflowRuntimeConfig {
    * D.21: emit structured JSON route telemetry to stdout per request for ops scraping.
    */
   readonly modelTelemetry: boolean;
+  /**
+   * H.44: when true, the auto routing path also runs the candidate policy and emits
+   * router:shadow:compare via workflowLog. Live model is unchanged.
+   * Requires VIPER_DEBUG_ASSISTANT=1 or VIPER_DEBUG_WORKFLOW=1 to surface in logs.
+   */
+  readonly routerShadowEnabled: boolean;
+  /**
+   * H.44: fraction of auto-routed requests (0–100) that use the candidate policy as the
+   * *live* routing decision (real staged rollout, not shadow-only).
+   * Bucketing is deterministic on workspaceKey+conversationId — same workspace sees stable behavior.
+   * 0 = off (default). 100 = full rollout.
+   */
+  readonly routerPolicyCandidatePct: number;
 }
 
 /**
@@ -134,6 +147,15 @@ export function parseModelFailoverMaxAttempts(env: NodeJS.ProcessEnv): number {
   const n = parseInt(env.VIPER_MODEL_FAILOVER_MAX_ATTEMPTS ?? "3", 10);
   if (!Number.isFinite(n)) return 3;
   return Math.max(1, Math.min(5, n));
+}
+
+/** H.44: clamp 0–100; NaN/invalid → 0 (off by default). */
+export function parseRouterPolicyCandidatePct(env: NodeJS.ProcessEnv): number {
+  const raw = env.VIPER_ROUTER_POLICY_CANDIDATE_PCT;
+  if (raw === undefined || raw === "") return 0;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
 }
 
 /** D.18: explicit enable/disable; invalid values treated as unset. */
@@ -220,6 +242,12 @@ export function parseWorkflowRuntimeConfig(
 
   const modelTelemetry = env.VIPER_MODEL_TELEMETRY === "1";
 
+  // H.44 router shadow + staged rollout
+  const routerShadowEnabledRaw = env.VIPER_ROUTER_SHADOW_ENABLED ?? "";
+  const routerShadowEnabled =
+    routerShadowEnabledRaw === "1" || routerShadowEnabledRaw.toLowerCase() === "true";
+  const routerPolicyCandidatePct = parseRouterPolicyCandidatePct(env);
+
   const allowedModelTiers = parseAllowedModelTiersFromEnv(env);
   const premiumRequiresEntitlement = parsePremiumRequiresEntitlement(env);
   const premiumEntitled = parsePremiumEntitled(env);
@@ -260,6 +288,8 @@ export function parseWorkflowRuntimeConfig(
     postEditAutoRepairTimeoutMs,
     entitledModelTiers,
     modelTelemetry,
+    routerShadowEnabled,
+    routerPolicyCandidatePct,
   };
 }
 

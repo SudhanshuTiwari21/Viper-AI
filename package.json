@@ -13,7 +13,8 @@
     "check-types": "turbo run check-types",
     "eval": "npm run eval -w @repo/eval-harness",
     "eval:offline": "npm run eval:offline -w @repo/eval-harness",
-    "quality-gate": "npm run check-types -w @repo/workspace-tools && npm run check-types -w @repo/backend && npm test -w @repo/workspace-tools && npm test -w @repo/database && npm test -w @repo/backend && npm test -w @repo/eval-harness && npm run eval -w @repo/eval-harness"
+    "quality-gate": "npm run check-types -w @repo/workspace-tools && npm run check-types -w @repo/backend && npm test -w @repo/workspace-tools && npm test -w @repo/database && npm test -w @repo/backend && npm test -w @repo/eval-harness && npm run eval -w @repo/eval-harness",
+    "release:check": "npm run quality-gate"
   },
   "devDependencies": {
     "enhanced-resolve": "^5.19.0",

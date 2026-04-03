@@ -100,6 +100,8 @@ See **[docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)** for separate build comman
 
 From repo root:
 
+**Pre-release / CI bar:** `npm run quality-gate` (alias: `npm run release:check`) — see [`docs/RELEASE.md`](docs/RELEASE.md).
+
 ```sh
 # Build all packages/apps
 npm run build

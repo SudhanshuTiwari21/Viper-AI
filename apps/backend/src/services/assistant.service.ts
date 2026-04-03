@@ -65,6 +65,9 @@ import {
 import {
   buildFallbackChainForAuto,
   selectModel,
+  selectModelCandidate,
+  computeRouterBucket,
+  CANDIDATE_POLICY_LABEL,
   VisionNotSupportedError,
   type ModelRouteMode,
 } from "../lib/model-router.js";
@@ -136,6 +139,8 @@ const {
   postEditAutoRepairMaxExtraValidationRuns: POST_EDIT_AUTO_REPAIR_MAX_EXTRA_VALIDATION_RUNS,
   postEditAutoRepairTimeoutMs: POST_EDIT_AUTO_REPAIR_TIMEOUT_MS,
   modelTelemetry: MODEL_TELEMETRY,
+  routerShadowEnabled: ROUTER_SHADOW_ENABLED,
+  routerPolicyCandidatePct: ROUTER_POLICY_CANDIDATE_PCT,
 } = workflowRuntimeConfig;
 
 const DIRECT_LLM_SYSTEM_PROMPT =
@@ -378,6 +383,8 @@ function routeModelForRequest(params: {
   retrievalConfidence?: number;
   /** E.24: when true, validate that the selected model supports vision. */
   hasAttachments?: boolean;
+  /** H.44: when true, the auto path uses selectModelCandidate instead of selectModel. */
+  _useCandidate?: boolean;
 }): {
   modelId: string;
   provider: string;
@@ -435,8 +442,9 @@ function routeModelForRequest(params: {
       fallbackModelIds: fallbackChain.map((s) => s.id),
     };
   } else {
-    // E.24: pass hasAttachments so selectModel can apply the vision-upgrade rule.
-    const decision = selectModel({
+    // E.24 + H.44: use live or candidate policy based on _useCandidate flag.
+    const policyFn = params._useCandidate ? selectModelCandidate : selectModel;
+    const decision = policyFn({
       chatMode: params.chatMode,
       intentType: params.intentType,
       hasAttachments: params.hasAttachments ?? false,
@@ -1081,6 +1089,79 @@ async function runDirectLLM(
   }
 }
 
+// ---------------------------------------------------------------------------
+// H.44 — Shadow compare + staged rollout wrapper
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps `routeModelForRequest` with H.44 shadow-traffic and staged-rollout logic.
+ *
+ * Shadow mode  (VIPER_ROUTER_SHADOW_ENABLED=1, no rollout):
+ *   - Routes using the live policy.
+ *   - Also computes the candidate decision and emits router:shadow:compare via workflowLog.
+ *   - The model actually used is unchanged — observe-only.
+ *   - Shadow compare logs only emit when VIPER_DEBUG_ASSISTANT=1 or VIPER_DEBUG_WORKFLOW=1.
+ *
+ * Staged rollout (VIPER_ROUTER_POLICY_CANDIDATE_PCT > 0):
+ *   - Deterministically buckets workspaceKey+conversationId.
+ *   - Workspaces in the bucket use the candidate policy as their *live* routing decision.
+ *   - Out-of-bucket workspaces are unchanged (live policy).
+ *   - Only applies when routeMode=auto and clientModelTier=auto.
+ *
+ * When both are set, rollout takes precedence; shadow compare is skipped for in-bucket traffic
+ * (since the candidate IS the live decision — no comparison needed).
+ */
+function performRoutingWithCandidateAndShadow(
+  params: Omit<Parameters<typeof routeModelForRequest>[0], "_useCandidate">,
+  identity: RequestIdentity | null,
+  workspaceKey: string,
+  conversationId: string | undefined,
+): ReturnType<typeof routeModelForRequest> {
+  // Shadow/rollout only applies to the auto path (routeMode=auto + clientModelTier=auto).
+  const isAutoPath =
+    params.routeMode === "auto" && params.clientModelTier === "auto";
+
+  // 1. Determine staged rollout bucket.
+  let useCandidate = false;
+  if (isAutoPath && ROUTER_POLICY_CANDIDATE_PCT > 0) {
+    const bucketKey = `${workspaceKey}:${conversationId ?? ""}`;
+    useCandidate = computeRouterBucket(bucketKey, ROUTER_POLICY_CANDIDATE_PCT);
+    if (useCandidate) {
+      workflowLog("router:policy:rollout", identity, {
+        candidate_label: CANDIDATE_POLICY_LABEL,
+        bucket_key_prefix: bucketKey.slice(0, 8),
+        candidate_pct: ROUTER_POLICY_CANDIDATE_PCT,
+      });
+    }
+  }
+
+  // 2. Primary routing decision (uses candidate if in rollout bucket).
+  const routed = routeModelForRequest({ ...params, _useCandidate: useCandidate });
+
+  // 3. Shadow compare: only when shadow is on, auto path, and NOT already using candidate.
+  if (isAutoPath && ROUTER_SHADOW_ENABLED && !useCandidate) {
+    const routeInputs = {
+      chatMode: params.chatMode,
+      intentType: params.intentType,
+      hasAttachments: params.hasAttachments ?? false,
+      isStreaming: params.isStreaming,
+      retrievalConfidence: params.retrievalConfidence,
+    };
+    const shadowDecision = selectModelCandidate(routeInputs);
+    const agreement = shadowDecision.selected.id === routed.modelId;
+    workflowLog("router:shadow:compare", identity, {
+      candidate_label: CANDIDATE_POLICY_LABEL,
+      live_model_id: routed.modelId,
+      shadow_model_id: shadowDecision.selected.id,
+      agreement,
+      live_reason: routed.reason,
+      shadow_reason: shadowDecision.reason,
+    });
+  }
+
+  return routed;
+}
+
 function resolveAdapter(repo_id: string): ContextBuilderAdapter | null {
   const databaseUrl = process.env.DATABASE_URL;
   const qdrantUrl = process.env.QDRANT_URL ?? "http://localhost:6333";
@@ -1162,14 +1243,19 @@ export async function runAssistantPipeline(
   if (DEBUG_ASSISTANT) log("Routing decision", decision);
 
   const routeMode = MODEL_ROUTE_DEFAULT;
-  const routed = routeModelForRequest({
-    routeMode,
-    clientModelTier: modelTier,
-    chatMode,
-    intentType: intentResult.intent.intentType,
-    isStreaming: false,
-    hasAttachments: Boolean(attachments?.length),
-  });
+  const routed = performRoutingWithCandidateAndShadow(
+    {
+      routeMode,
+      clientModelTier: modelTier,
+      chatMode,
+      intentType: intentResult.intent.intentType,
+      isStreaming: false,
+      hasAttachments: Boolean(attachments?.length),
+    },
+    identity,
+    workspaceKey,
+    conversationId,
+  );
   workflowLog("model:route:selected", identity, {
     model_id: routed.modelId,
     provider: routed.provider,
@@ -2348,14 +2434,19 @@ export async function runAssistantStreamPipeline(
   const isGeneric = intentResult.intent.intentType === "GENERIC";
   if (isGeneric) {
     const routeMode = MODEL_ROUTE_DEFAULT;
-    const routed = routeModelForRequest({
-      routeMode,
-      clientModelTier: modelTier,
-      chatMode,
-      intentType: intentResult.intent.intentType,
-      isStreaming: true,
-      hasAttachments: Boolean(attachments?.length),
-    });
+    const routed = performRoutingWithCandidateAndShadow(
+      {
+        routeMode,
+        clientModelTier: modelTier,
+        chatMode,
+        intentType: intentResult.intent.intentType,
+        isStreaming: true,
+        hasAttachments: Boolean(attachments?.length),
+      },
+      identity,
+      workspaceKey,
+      conversationId,
+    );
     workflowLog("model:route:selected", identity, {
       model_id: routed.modelId,
       provider: routed.provider,
@@ -2395,14 +2486,19 @@ export async function runAssistantStreamPipeline(
   if (DEBUG_ASSISTANT) log("Agentic loop path for intent:", intentSummary.intent);
 
   const routeMode = MODEL_ROUTE_DEFAULT;
-  const routed = routeModelForRequest({
-    routeMode,
-    clientModelTier: modelTier,
-    chatMode,
-    intentType: intentResult.intent.intentType,
-    isStreaming: true,
-    hasAttachments: Boolean(attachments?.length),
-  });
+  const routed = performRoutingWithCandidateAndShadow(
+    {
+      routeMode,
+      clientModelTier: modelTier,
+      chatMode,
+      intentType: intentResult.intent.intentType,
+      isStreaming: true,
+      hasAttachments: Boolean(attachments?.length),
+    },
+    identity,
+    workspaceKey,
+    conversationId,
+  );
   workflowLog("model:route:selected", identity, {
     model_id: routed.modelId,
     provider: routed.provider,

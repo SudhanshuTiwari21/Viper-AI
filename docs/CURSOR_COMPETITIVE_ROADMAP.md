@@ -1938,10 +1938,174 @@ npm run check-types -w @repo/intent-agent    # 0 errors (new exports)
 
 ### Step Group H — Production hardening and launch readiness
 
-42. Define SLOs for latency/quality/safety/cost.
-43. Add dashboards and alerting for SLO burn rates.
-44. Run shadow traffic or staged rollout for new router policies.
-45. Execute final parity checklist and release review.
+~~42. Define SLOs for latency/quality/safety/cost.~~
+~~43. Add dashboards and alerting for SLO burn rates.~~
+~~44. Run shadow traffic or staged rollout for new router policies.~~
+~~45. Execute final parity checklist and release review.~~
+
+---
+
+### H.42 Status: COMPLETE
+
+**What was built:** `docs/SLO.md` — a production-grade SLO catalog grounded entirely in signals the codebase emits today.
+
+**Four pillars (10 SLIs):**
+
+| Pillar | SLIs | Key signals |
+|---|---|---|
+| Latency | SLI-L1 (chat p50/p95/p99 per mode), SLI-L2 (editor inline) | `usage_events.latency_ms`, `workflowLog("request:complete", { latency_ms })` |
+| Quality | SLI-Q1 (success rate, failover rate, downgrade rate), SLI-Q2 (tool-error — pending), SLI-Q3 (webhook health) | `usage_rollups_daily`, `billing:webhook:*` stages |
+| Safety / policy | SLI-S1 (quota coverage), SLI-S2 (entitlement coverage), SLI-S3 (privacy block rate), SLI-S4 (tier policy) | `quota:check`, `entitlement:denied`, `privacy:path:blocked`, `model:tier:denied` |
+| Cost | SLI-C1 (token rate), SLI-C2 (volume per workspace), SLI-C3 (failover rate) | `usage_events.total_tokens`, `usage_rollups_daily` aggregates |
+
+**Copy-paste runbook SQL** for all SLOs included in `docs/SLO.md` section 6.
+
+**Error-budget formula** and burn-rate alert thresholds documented in section 4.
+
+**Explicit deferrals** captured in section 7: TTFT instrumentation, client-perceived latency, dollar spend, LLM quality scoring, automated alerting — all deferred to H.43.
+
+**Evidence:**
+```bash
+# Docs-only change — no code modified.
+# Validate quality-gate still passes:
+npm run quality-gate
+```
+
+**See:** [`docs/SLO.md`](./SLO.md) for the full catalog.
+
+**H.43 note:** ~~Dashboards and alerting (H.43) should treat `docs/SLO.md` as the source-of-truth specification.~~ **H.43 is now complete — see block below.**
+
+---
+
+### H.43 Status: COMPLETE
+
+**What was built:** Two operator-facing API endpoints backed by a new service module (`apps/backend/src/lib/slo-snapshot.service.ts`), plus `docs/SLO.md` §9 documenting all operational interfaces.
+
+**New files / changes:**
+
+| File | Purpose |
+|---|---|
+| `apps/backend/src/lib/slo-snapshot.service.ts` | SQL queries (parameterised, no string-concat), per-mode latency percentiles, quality/volume aggregates, `detectViolations` burn-rate math, optional webhook delivery |
+| `apps/backend/src/routes/ops.routes.ts` | `GET /ops/slo-snapshot` + `POST /ops/slo-check`; Bearer-token auth; kill-switch; `slo:alert:fired` / `slo:check:ok` workflowLog |
+| `apps/backend/src/routes/ops.routes.test.ts` | 19 tests: kill-switch off → 404, missing/wrong token → 401, unset token → 401, happy paths, violations shape, webhook mock, burn-rate unit tests |
+| `apps/backend/src/server.ts` | `await app.register(opsRoutes)` |
+| `apps/backend/src/types/workflow-log-schema.ts` | Added `slo:check:ok`, `slo:alert:fired` |
+| `docs/SLO.md` | Added §9 "Operational interfaces" |
+| `docs/ENV.md` | Documented `VIPER_SLO_OPS_ENABLED`, `VIPER_SLO_OPS_TOKEN`, `VIPER_SLO_ALERT_WEBHOOK_URL` |
+
+**What the snapshot covers (see `docs/SLO.md` §9.1):**
+
+- **Latency:** per-mode p50/p95/p99 over 30 days with burn rate vs SLO target.
+- **Quality:** failover rate, tier-downgrade rate, token coverage — with burn rates vs §4 targets.
+- **Volume:** top-20 workspaces by request count (7-day rollup).
+- **Breach list:** structured alert violations with severity (`critical` / `warning`).
+
+**Alert thresholds (mirroring `docs/SLO.md` §4):**
+
+| Condition | Warn | Critical |
+|---|---|---|
+| Latency `actual_p95 / target_p95` | ≥ 0.8 | ≥ 1.0 |
+| Quality failover burn rate | ≥ 0.8 | ≥ 1.0 |
+| Quality downgrade burn rate | ≥ 0.8 | ≥ 1.0 |
+| Min sample for SLO evaluation | — | 100 requests |
+
+**Security:** Both endpoints are **off by default** (`VIPER_SLO_OPS_ENABLED` not set → 404). `VIPER_SLO_OPS_TOKEN` unset → always 401. No workspace-level secrets in the response (path keys only).
+
+**Evidence:**
+```bash
+cd apps/backend
+npx vitest run src/routes/ops.routes.test.ts
+# → 19 tests passed
+
+npx vitest run && npm run check-types
+# → 481 tests passed, 0 type errors
+```
+
+**Deferrals (H.44+):**
+
+- Grafana / Datadog / full APM dashboard deployment (wiring the JSON API to a panel is out-of-repo scope).
+- PagerDuty / Opsgenie OAuth — use `VIPER_SLO_ALERT_WEBHOOK_URL` with PagerDuty Events v2 for now.
+- TTFT (time-to-first-token) SLI — requires capturing first-token timestamp in streaming path.
+- Client-side (Electron) perceived latency telemetry — still deferred per `docs/SLO.md` §7.
+- `npm run slo:report` CLI (Option 3) — not implemented; `/ops/slo-snapshot` + `curl | jq` covers the same use case.
+
+**Rollback:** Remove `apps/backend/src/lib/slo-snapshot.service.ts`, `apps/backend/src/routes/ops.routes.ts`, `apps/backend/src/routes/ops.routes.test.ts`. Revert `server.ts` (remove `opsRoutes` import + register). Revert `workflow-log-schema.ts` (remove `slo:check:ok`, `slo:alert:fired`). Remove `docs/SLO.md` §9. Revert `docs/ENV.md` H.43 section. Unset env vars: `VIPER_SLO_OPS_ENABLED`, `VIPER_SLO_OPS_TOKEN`, `VIPER_SLO_ALERT_WEBHOOK_URL`.
+
+---
+
+### H.44 Status: COMPLETE
+
+**What was built:** Shadow-traffic evaluation and deterministic staged rollout for model routing policies, exercised via two new env vars with zero impact when unset.
+
+**New files / changes:**
+
+| File | Purpose |
+|---|---|
+| `apps/backend/src/lib/model-router.ts` | Added `selectModelCandidate` (candidate policy `v2-plan-complex-premium`), `computeRouterBucket` (djb2 hash bucketing), `CANDIDATE_POLICY_LABEL` |
+| `apps/backend/src/config/workflow-flags.ts` | Added `routerShadowEnabled`, `routerPolicyCandidatePct`, `parseRouterPolicyCandidatePct` |
+| `apps/backend/src/services/assistant.service.ts` | Added `performRoutingWithCandidateAndShadow` wrapper; replaced 3 `routeModelForRequest` call sites; added `_useCandidate` param to `routeModelForRequest` |
+| `apps/backend/src/types/workflow-log-schema.ts` | Added `router:shadow:compare`, `router:policy:rollout` |
+| `apps/backend/src/lib/model-router.test.ts` | 19 new tests: candidate policy rules (10), bucketing math (9) |
+| `apps/backend/src/config/workflow-flags.test.ts` | 14 new tests: `parseRouterPolicyCandidatePct` clamping + `parseWorkflowRuntimeConfig` defaults |
+| `apps/backend/src/integration/model-router.integration.test.ts` | 4 new integration tests: shadow observe-only, PCT=100 rollout, PCT=0 unchanged, default env unchanged |
+| `docs/ENV.md` | Documented `VIPER_ROUTER_SHADOW_ENABLED`, `VIPER_ROUTER_POLICY_CANDIDATE_PCT`, ramp guide, rollback |
+
+**Mechanism chosen:** Option A — percentage rollout via `VIPER_ROUTER_POLICY_CANDIDATE_PCT` (0–100). Option B (workspace flags via `workspace_entitlements.flags`) is documented as deferral below.
+
+**Candidate policy (`v2-plan-complex-premium`) — documented delta:**
+
+| Mode | Intent | Live tier | Candidate tier |
+|---|---|---|---|
+| `plan` | `CODE_FIX`, `IMPLEMENT_FEATURE`, `REFACTOR`, `PROJECT_SETUP` | `fast` | **`premium`** |
+| All other modes/intents | — | unchanged | unchanged |
+
+**Router policy rollout subsection in `docs/ENV.md`:** see `H.44 Router policy shadow traffic + staged rollout`.
+
+**Evidence:**
+```bash
+cd apps/backend
+npx vitest run src/lib/model-router.test.ts src/config/workflow-flags.test.ts src/integration/model-router.integration.test.ts
+# → 67 tests passed
+
+npx vitest run && npm run check-types
+# → 516 tests passed, 0 type errors
+
+npm run quality-gate  # at repo root
+```
+
+**Deferrals (H.45+):**
+
+- **Option B** (workspace-flag rollout via `workspace_entitlements.flags.router_candidate_policy`): not implemented; percentage rollout is sufficient for MVP.
+- Resume path (`runAssistantStreamPipeline` resume branch, line ~2256): calls `selectModel` directly; shadow/rollout not applied — deferral noted in code.
+- Multi-region / external Experimentation platform (Amplitude, LaunchDarkly): requires infra investment beyond this repo.
+- Tool routing shadow (`routeTools` in `route-tools.ts`): not wired; deferred until tool router is less coupled to sync execution.
+- Persistent shadow agreement metrics in DB: comparison currently only in logs; query pattern needs adding to `usage_events` or a separate `router_shadow_events` table.
+
+**Rollback:** Revert `model-router.ts` (remove candidate/bucket exports), `workflow-flags.ts` (remove H.44 fields + `parseRouterPolicyCandidatePct`), `assistant.service.ts` (revert 3 call sites back to direct `routeModelForRequest`, remove `performRoutingWithCandidateAndShadow`, remove `ROUTER_SHADOW_ENABLED` / `ROUTER_POLICY_CANDIDATE_PCT` destructuring). Revert `workflow-log-schema.ts` (remove `router:shadow:compare`, `router:policy:rollout`). Unset env vars: `VIPER_ROUTER_SHADOW_ENABLED`, `VIPER_ROUTER_POLICY_CANDIDATE_PCT`.
+
+---
+
+### H.45 Status: COMPLETE
+
+**What was delivered:** [`docs/RELEASE.md`](./RELEASE.md) — pre-release command bar (`npm run quality-gate` / `npm run release:check`), summarized pointers to ENV kill-switches, database migrations location, observability (`docs/SLO.md` §9 ops APIs), and rollback-by-env mindset. **No new product features** in this task.
+
+**§10 readiness mapping:** See the companion table below [§10 Acceptance Checklist](#10-acceptance-checklist-for-cursor-class-readiness); H.45 is transparency on what is shippable vs partial vs not started.
+
+**Explicit deferrals (still not “Cursor-class complete” per §10):**
+
+- End-user auth / SSO in production, multi-tenant SaaS polish, and full “accounts” story — **not** claimed complete; DB/auth tables exist (`packages/database/migrations/009_*`) but product surface varies by deployment.
+- Full Grafana/Datadog dashboards — **deferred** (H.43); JSON SLO snapshot + ops endpoints only.
+- `docs/RELEASE.md` does **not** include desktop E2E or full `turbo build` — add to your internal checklist if you ship Electron.
+- Items in §10 marked **partial** or **not started** remain honest gaps; H.45 does not reclassify them.
+
+**Evidence:** Docs-only + `package.json` script alias. Validation run after edits:
+
+```bash
+npm run quality-gate
+# Pass (required for H.45 sign-off)
+```
+
+**Rollback (H.45):** Remove `docs/RELEASE.md`; remove `release:check` script from root `package.json`; revert roadmap §10 table and H.45 block.
 
 ---
 
@@ -1988,6 +2152,22 @@ Viper should not claim parity until all are true:
 - Browser-based validation available for agentic frontend tasks.
 - Confidence-gated editing with validation-before-apply shipped.
 - Full observability and quality dashboards live.
+
+**Status (as of H.45)** — repo-grounded; do not treat “partial” as “done”:
+
+| Criterion | Status | Evidence / notes |
+|-----------|--------|-------------------|
+| User accounts + workspace auth in production | **Not started** (typical) / **partial** if you deploy auth migrations | `packages/database/migrations/009_create_auth_core.sql`; production auth UX not a single shipped “accounts” product in-repo. |
+| Plan/entitlement enforcement active | **Partial** | `VIPER_ENTITLEMENTS_ENFORCE`, `workspace_entitlements`, F.30–F.33; enforcement off by default in dev. |
+| Accurate usage metering and billing lifecycle | **Partial** | `usage_events` / rollups (F.31–F.32): `packages/database/migrations/012_*`, `013_*`; Stripe webhooks F.34; Checkout/Portal still deferred per roadmap. |
+| User-visible model tiers (`Auto`, `Premium`, `Fast`) | **Partial** | Backend tier resolution + entitlements; desktop selector completeness varies; see mode/tier routes and `docs/ENV.md` D.20. |
+| User-visible modes (`Ask`, `Plan`, `Debug`, `Agent`) fully enforced | **Partial** | Chat modes validated server-side; full IDE enforcement depends on desktop wiring. |
+| Multimodal image chat shipped | **Partial** | Backend multimodal paths + media tables (`008_*`, E.22–E.23); verify end-to-end for your build. |
+| Browser-based validation for agentic frontend tasks | **Partial** | `@repo/browser-runner` + workflow stages; not a full “Cursor-class” browser grid. |
+| Confidence-gated editing with validation-before-apply | **Partial** | Analysis/edit gates, post-edit validation env flags (`workflow-flags.ts`); not universal confidence scoring in UI. |
+| Full observability and quality dashboards live | **Partial** | `docs/SLO.md`, `/ops/slo-snapshot` (H.43); no in-repo Grafana; **deferred per §9.1** backlog. |
+
+Release verification commands: [`docs/RELEASE.md`](./RELEASE.md).
 
 ---
 

@@ -87,6 +87,14 @@ export const VALID_WORKFLOW_STAGES = [
   // G.40 privacy boundary policy layer
   "privacy:path:blocked",
 
+  // H.43 SLO alerting
+  "slo:check:ok",
+  "slo:alert:fired",
+
+  // H.44 router shadow traffic + staged rollout
+  "router:shadow:compare",
+  "router:policy:rollout",
+
   // F.34 Stripe billing webhook ingestion (WS2)
   "billing:webhook:received",
   "billing:webhook:applied",

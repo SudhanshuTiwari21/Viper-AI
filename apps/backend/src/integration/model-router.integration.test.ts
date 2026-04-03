@@ -69,18 +69,24 @@ vi.mock("openai", () => ({
   },
 }));
 
-async function runGenericStream(
-  modeEnv: string | undefined,
-  chatMode: "ask" | "plan" | "debug" | "agent",
-  modelTier: "auto" | "premium" | "fast" = "auto",
-) {
-  // Force fresh module graph with new env snapshot.
+function resetBaseEnv() {
   vi.resetModules();
   process.env.OPENAI_API_KEY = "test";
   process.env.VIPER_ENABLE_STREAM_CONTEXT_PRIMER = "false";
   process.env.VIPER_STREAM_ANALYSIS_WARMUP_MS = "0";
   process.env.VIPER_DEBUG_ASSISTANT = "0";
   process.env.VIPER_DEBUG_WORKFLOW = "1";
+  delete process.env.VIPER_ROUTER_SHADOW_ENABLED;
+  delete process.env.VIPER_ROUTER_POLICY_CANDIDATE_PCT;
+}
+
+async function runGenericStream(
+  modeEnv: string | undefined,
+  chatMode: "ask" | "plan" | "debug" | "agent",
+  modelTier: "auto" | "premium" | "fast" = "auto",
+) {
+  // Force fresh module graph with new env snapshot.
+  resetBaseEnv();
   if (modeEnv === undefined) delete process.env.VIPER_MODEL_ROUTE_DEFAULT;
   else process.env.VIPER_MODEL_ROUTE_DEFAULT = modeEnv;
 
@@ -108,6 +114,120 @@ async function runGenericStream(
   );
   return { seenModels, events };
 }
+
+// ---------------------------------------------------------------------------
+// H.44 integration: shadow mode + staged rollout
+// ---------------------------------------------------------------------------
+
+describe("H.44 shadow mode + staged rollout integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    openAIHolder.current = null;
+  });
+
+  it("shadow enabled: live model unchanged (observe-only)", async () => {
+    // When shadow is on but rollout PCT=0, the live model (auto route: ask → fast = gpt-4o-mini)
+    // must not change even though the candidate is computed for comparison.
+    resetBaseEnv();
+    process.env.VIPER_MODEL_ROUTE_DEFAULT = "auto";
+    process.env.VIPER_ROUTER_SHADOW_ENABLED = "1";
+    process.env.VIPER_ROUTER_POLICY_CANDIDATE_PCT = "0";
+
+    intentMock.runIntentPipeline.mockResolvedValue({
+      intent: { intentType: "GENERIC" },
+      entities: { entities: [] },
+      response: { intent: "GENERIC", summary: "GENERIC" },
+    });
+
+    const { client, seenModels } = makeOpenAIRecorder();
+    openAIHolder.current = client;
+
+    const mod = await import("../services/assistant.service.js");
+    await mod.runAssistantStreamPipeline(
+      "hello",
+      "/tmp",
+      () => {},
+      { request_id: "req-shadow-1", workspace_id: "ws-1", conversation_id: "conv-1" },
+      "conv-1",
+      [],
+      undefined,
+      "ask",
+      "auto",
+    );
+    // ask → fast → gpt-4o-mini — live path unchanged
+    expect(seenModels[0]).toBe("gpt-4o-mini");
+  });
+
+  it("rollout PCT=100: auto route uses candidate policy (plan+CODE_FIX → premium)", async () => {
+    // With PCT=100 every workspace is in the bucket. plan+CODE_FIX via candidate → premium (gpt-4o).
+    resetBaseEnv();
+    process.env.VIPER_MODEL_ROUTE_DEFAULT = "auto";
+    process.env.VIPER_ROUTER_POLICY_CANDIDATE_PCT = "100";
+    process.env.VIPER_ROUTER_SHADOW_ENABLED = "0";
+
+    intentMock.runIntentPipeline.mockResolvedValue({
+      intent: { intentType: "CODE_FIX" },
+      entities: { entities: [] },
+      response: { intent: "CODE_FIX", summary: "fix the bug" },
+    });
+
+    const { client, seenModels } = makeOpenAIRecorder();
+    openAIHolder.current = client;
+
+    const mod = await import("../services/assistant.service.js");
+    await mod.runAssistantStreamPipeline(
+      "fix the bug",
+      "/tmp",
+      () => {},
+      { request_id: "req-rollout-1", workspace_id: "ws-1", conversation_id: "conv-1" },
+      "conv-1",
+      [],
+      undefined,
+      "plan",
+      "auto",
+    );
+    // Candidate: plan + CODE_FIX → premium → gpt-4o
+    expect(seenModels[0]).toBe("gpt-4o");
+  });
+
+  it("rollout PCT=0: auto route uses live policy (plan+CODE_FIX → fast)", async () => {
+    // With PCT=0 rollout is off. Live: plan → fast → gpt-4o-mini.
+    resetBaseEnv();
+    process.env.VIPER_MODEL_ROUTE_DEFAULT = "auto";
+    process.env.VIPER_ROUTER_POLICY_CANDIDATE_PCT = "0";
+
+    intentMock.runIntentPipeline.mockResolvedValue({
+      intent: { intentType: "CODE_FIX" },
+      entities: { entities: [] },
+      response: { intent: "CODE_FIX", summary: "fix the bug" },
+    });
+
+    const { client, seenModels } = makeOpenAIRecorder();
+    openAIHolder.current = client;
+
+    const mod = await import("../services/assistant.service.js");
+    await mod.runAssistantStreamPipeline(
+      "fix the bug",
+      "/tmp",
+      () => {},
+      { request_id: "req-rollout-off-1", workspace_id: "ws-1", conversation_id: "conv-1" },
+      "conv-1",
+      [],
+      undefined,
+      "plan",
+      "auto",
+    );
+    // Live: plan → fast → gpt-4o-mini
+    expect(seenModels[0]).toBe("gpt-4o-mini");
+  });
+
+  it("default env: behavior identical to pre-H.44 (no shadow, no rollout)", async () => {
+    // No new env vars set — must behave identically to before H.44.
+    resetBaseEnv();
+    const { seenModels } = await runGenericStream("auto", "debug");
+    expect(seenModels[0]).toBe("gpt-4o");
+  });
+});
 
 describe("D.17 integration: auto model router uses registry defaults", () => {
   beforeEach(() => {

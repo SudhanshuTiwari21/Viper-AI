@@ -83,6 +83,75 @@ These JSONB keys are stored per-workspace in the `workspace_entitlements` table 
 | `monthly_request_quota` | `number` | Max completed chat requests per UTC calendar month. 0 or absent = unlimited (falls through to env default). |
 | `quota_soft_threshold_ratio` | `number` (0, 1] | Fraction of limit at which `workflowLog("quota:check", ..., { status: "soft_warning" })` fires. Default `0.8`. |
 
+### H.44 Router policy shadow traffic + staged rollout
+
+| Variable | Default | Description |
+|---|---|---|
+| `VIPER_ROUTER_SHADOW_ENABLED` | `""` (off) | Set to `1` or `true` to enable shadow evaluation. When on, every auto-routed request also runs the candidate policy (`v2-plan-complex-premium`) and emits `router:shadow:compare` via `workflowLog`. **The model actually used is unchanged — observe-only.** Requires `VIPER_DEBUG_ASSISTANT=1` or `VIPER_DEBUG_WORKFLOW=1` to surface the comparison in logs. |
+| `VIPER_ROUTER_POLICY_CANDIDATE_PCT` | `0` | Integer 0–100. Fraction of auto-routed requests (determined by deterministic workspace+conversation hash) that use the **candidate policy as the live routing decision** (real staged rollout, not shadow-only). `0` = off (default); `100` = full rollout. |
+
+**Candidate policy delta (`v2-plan-complex-premium`):**
+
+| Mode | Intent | Live → tier | Candidate → tier |
+|---|---|---|---|
+| `plan` | `CODE_FIX`, `IMPLEMENT_FEATURE`, `REFACTOR`, `PROJECT_SETUP` | `fast` | **`premium`** |
+| `plan` | other intents | `fast` | `fast` (unchanged) |
+| `ask`, `debug`, `agent` | any | (unchanged) | (unchanged) |
+
+All other routing rules are identical between live and candidate.
+
+**Ramp guide:**
+
+```bash
+# Start shadow: compare live vs candidate without changing anything
+VIPER_ROUTER_SHADOW_ENABLED=1
+VIPER_DEBUG_WORKFLOW=1
+
+# After confidence, ramp rollout gradually
+VIPER_ROUTER_POLICY_CANDIDATE_PCT=1   # ~1% of auto traffic
+VIPER_ROUTER_POLICY_CANDIDATE_PCT=5
+VIPER_ROUTER_POLICY_CANDIDATE_PCT=25
+VIPER_ROUTER_POLICY_CANDIDATE_PCT=100  # full rollout
+
+# Roll back instantly
+VIPER_ROUTER_POLICY_CANDIDATE_PCT=0   # or unset
+```
+
+**New workflow stages** (registered in `VALID_WORKFLOW_STAGES`):
+
+| Stage | When |
+|---|---|
+| `router:shadow:compare` | Shadow is on + auto path: candidate decision computed and compared. Payload includes `live_model_id`, `shadow_model_id`, `agreement`, `live_reason`, `shadow_reason`, `candidate_label`. |
+| `router:policy:rollout` | Workspace is in the staged-rollout bucket (candidate is the live decision). |
+
+### H.43 SLO Ops / Alerting
+
+| Variable | Required | Description |
+|---|---|---|
+| `VIPER_SLO_OPS_ENABLED` | No | Set to `1` or `true` to enable `/ops/slo-snapshot` and `/ops/slo-check`. When absent or falsy both endpoints return **404** (hidden endpoint pattern). |
+| `VIPER_SLO_OPS_TOKEN` | Yes (when enabled) | Bearer token for `Authorization: Bearer <token>` header on both ops endpoints. When unset all requests return **401** (safety default — never exposes data without a token). |
+| `VIPER_SLO_ALERT_WEBHOOK_URL` | No | HTTPS URL to POST alert violations to when `POST /ops/slo-check` detects SLO breaches. Payload: `{ service, computed_at, severity, violation_count, violations[] }`. When absent, violations are only logged via `workflowLog`. |
+
+**Workflow stages emitted** (both registered in `VALID_WORKFLOW_STAGES`):
+
+| Stage | When |
+|---|---|
+| `slo:check:ok` | `POST /ops/slo-check` completes with zero violations. |
+| `slo:alert:fired` | `POST /ops/slo-check` detects at least one SLO breach. |
+
+**cURL examples:**
+
+```bash
+# Snapshot
+curl -s -H "Authorization: Bearer $VIPER_SLO_OPS_TOKEN" \
+     http://localhost:4000/ops/slo-snapshot | jq .
+
+# Cron check (exit code 0 = ok, violation_count 0; output includes violations)
+curl -s -X POST -H "Authorization: Bearer $VIPER_SLO_OPS_TOKEN" \
+     -H "Content-Type: application/json" -d '{}' \
+     http://localhost:4000/ops/slo-check | jq .
+```
+
 ## Summary
 
 1. **Database** – Set `DATABASE_URL` (e.g. in `.env`) if you use the metadata persistence layer. Run `packages/database/schema.sql` (or migrations under `packages/database/migrations/`) against that database first. D.20 **conversation model preferences** (`conversation_model_preferences`), D.21 **chat feedback** (`chat_feedback`), and E.23 **media objects** (`chat_media`) are stored when `DATABASE_URL` is set; without it, the backend uses an in-memory store for those features.
