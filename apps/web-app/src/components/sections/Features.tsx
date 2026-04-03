@@ -58,7 +58,7 @@ function useFadeIn() {
 function UnifiedContext() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 flex flex-col justify-between hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-lg p-12 md:p-20 flex flex-col justify-between hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
@@ -98,7 +98,7 @@ function UnifiedContext() {
 function CodebaseIntelligence() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 flex flex-col justify-between hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-lg p-12 md:p-20 flex flex-col justify-between hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
@@ -121,12 +121,12 @@ function CodebaseIntelligence() {
         transition={{ duration: 0.55, delay: 0.2, ease: [0.25, 0.4, 0.25, 1] }}
         className="mt-12 grid grid-cols-2 gap-4"
       >
-        <div className="p-6 border border-white/10 rounded-xl hover:border-white/20 transition-colors">
+        <div className="p-6 border border-white/10 rounded-lg hover:border-white/20 transition-colors">
           <span className="text-white mb-4 block"><IconGraph /></span>
           <h4 className="text-xs font-bold uppercase tracking-widest mb-1">Deep Analysis</h4>
           <p className="text-[11px] text-neutral-500">Full codebase indexing</p>
         </div>
-        <div className="p-6 border border-white/10 rounded-xl hover:border-white/20 transition-colors">
+        <div className="p-6 border border-white/10 rounded-lg hover:border-white/20 transition-colors">
           <span className="text-white mb-4 block"><IconDeps /></span>
           <h4 className="text-xs font-bold uppercase tracking-widest mb-1">Multi-file Context</h4>
           <p className="text-[11px] text-neutral-500">Dependency-aware reasoning</p>
@@ -139,7 +139,7 @@ function CodebaseIntelligence() {
 function IntentToCode() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 md:col-span-2 hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-lg p-12 md:p-20 md:col-span-2 hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <div className="grid md:grid-cols-2 gap-12 items-end">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -196,7 +196,7 @@ const LOG_LINES = [
 function DevelopmentLoop() {
   const { ref, isInView } = useFadeIn()
   return (
-    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-12 md:p-20 md:col-span-2 hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
+    <div ref={ref} className="bg-[#0a0a0a] border border-white/10 rounded-lg p-12 md:p-20 md:col-span-2 hover:border-white/25 hover:bg-[#111111] transition-all duration-300">
       <div className="grid md:grid-cols-5 gap-12">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -221,7 +221,7 @@ function DevelopmentLoop() {
           initial={{ opacity: 0, y: 20 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.55, delay: 0.15, ease: [0.25, 0.4, 0.25, 1] }}
-          className="md:col-span-3 border border-white/10 bg-[#050505] rounded-xl p-6 font-mono text-[12px]"
+          className="md:col-span-3 border border-white/10 bg-[#050505] rounded-lg p-6 font-mono text-[12px]"
         >
           <div className="flex items-center gap-2 mb-6 text-neutral-600">
             <IconTerminal />

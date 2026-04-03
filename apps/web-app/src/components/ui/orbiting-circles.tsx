@@ -25,7 +25,7 @@ export function OrbitingCircles({
         <svg
           xmlns="http://www.w3.org/2000/svg"
           version="1.1"
-          className="pointer-events-none absolute inset-0 size-full"
+          className="pointer-events-none absolute inset-0 size-full z-0"
         >
           <circle
             className="stroke-white/10 stroke-1"
@@ -45,7 +45,7 @@ export function OrbitingCircles({
           } as React.CSSProperties
         }
         className={cn(
-          'absolute flex transform-gpu animate-orbit items-center justify-center rounded-full border-none bg-transparent [animation-delay:calc(var(--delay)*1000ms)]',
+          'absolute flex transform-gpu animate-orbit items-center justify-center rounded-full border-none bg-transparent [animation-delay:calc(var(--delay)*1000ms)] z-0',
           { '[animation-direction:reverse]': reverse },
           className,
         )}

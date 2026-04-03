@@ -35,7 +35,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: 'Product Management', href: '/product-management' },
     ],
   },
-  { label: 'Documentation', href: '#' },
+  { label: 'Documentation', href: '/docs' },
   { label: 'Pricing', href: '#' },
   {
     label: 'Resources',
@@ -50,7 +50,7 @@ const MOBILE_ITEMS: { label: string; href: string }[] = [
   { label: 'Code Review', href: '/code-review' },
   { label: 'Agents', href: '/agents' },
   { label: 'Product Management', href: '/product-management' },
-  { label: 'Documentation', href: '#' },
+  { label: 'Documentation', href: '/docs' },
   { label: 'Pricing', href: '#' },
   { label: 'Blog', href: '/blog' },
   { label: 'Support', href: '/support' },

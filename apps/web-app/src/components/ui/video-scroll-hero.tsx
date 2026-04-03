@@ -54,14 +54,14 @@ export function VideoScrollHero({
               loop
               muted
               playsInline
-              className="w-[80vw] max-w-4xl h-[60vh] object-cover shadow-2xl rounded-2xl"
+              className="w-[80vw] max-w-4xl h-[60vh] object-cover shadow-2xl  "
             >
               <source src={videoSrc} type="video/mp4" />
               Your browser does not support the video tag.
             </video>
 
             <motion.div
-              className="absolute inset-0 bg-black/20 backdrop-blur-[1px] flex items-center justify-center rounded-2xl"
+              className="absolute inset-0 bg-black/20 backdrop-blur-[1px] flex items-center justify-center rounded-lg"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5, duration: 0.8 }}
@@ -133,7 +133,7 @@ export function VideoScrollHero({
             ].map((item, index) => (
               <motion.div
                 key={item.id}
-                className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-8 shadow-lg flex flex-col gap-0 h-full hover:border-white/25 hover:bg-[#111111] transition-all duration-300"
+                className="bg-[#0a0a0a] border border-white/10 rounded-lg p-8 shadow-lg flex flex-col gap-0 h-full hover:border-white/25 hover:bg-[#111111] transition-all duration-300"
                 initial={{ opacity: 0, y: 30, scale: 0.95 }}
                 whileInView={{ opacity: 1, y: 0, scale: 1 }}
                 viewport={{ once: true }}
@@ -150,13 +150,13 @@ export function VideoScrollHero({
                   transition: { type: 'spring', stiffness: 400, damping: 25 },
                 }}
               >
-                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-8 block">
+                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-5 block">
                   {item.id}
                 </span>
                 <h3 className="text-xl font-bold text-white leading-snug mb-6 min-h-14">
                   {item.title}
                 </h3>
-                <p className="text-muted-foreground text-xs leading-relaxed flex-1">
+                <p className="text-muted-foreground text-sm leading-relaxed flex-1">
                   {item.body}
                 </p>
               </motion.div>

@@ -138,7 +138,7 @@ export default function Hero() {
         {/* ── Right: Orbiting circles ── */}
         <div className="hidden lg:flex items-center justify-center">
           <div className="relative flex h-[500px] w-full flex-col items-center justify-center overflow-hidden translate-x-12">
-            <span className="pointer-events-none whitespace-pre-wrap bg-gradient-to-b from-white to-neutral-400 bg-clip-text text-center text-7xl font-semibold leading-none text-transparent">
+            <span className="pointer-events-none whitespace-pre-wrap bg-gradient-to-b from-white to-neutral-400 bg-clip-text text-center text-7xl font-semibold leading-none text-transparent z-10 relative">
               Viper AI
             </span>
 

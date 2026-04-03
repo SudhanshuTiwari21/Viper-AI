@@ -4,9 +4,9 @@ export function Logo() {
       <img
         src="/VIPER.svg"
         alt="Viper"
-        className="size-15 -mr-2"
+        className="h-8 w-auto mr-1"
       />
-      <span className="text-sm font-bold uppercase kerning-wide">Viper</span>
+      <span className="text-sm font-bold uppercase tracking-widest" style={{ fontFamily: 'var(--font-orbitron)' }}>Viper AI</span>
     </div>
   )
 }

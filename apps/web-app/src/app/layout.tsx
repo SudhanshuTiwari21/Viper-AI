@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, Orbitron } from 'next/font/google'
 import './globals.css'
 
 const inter = Inter({
@@ -7,14 +7,19 @@ const inter = Inter({
   variable: '--font-inter',
 })
 
+const orbitron = Orbitron({
+  subsets: ['latin'],
+  variable: '--font-orbitron',
+})
+
 export const metadata: Metadata = {
   title: 'Viper AI — The AI Engineering Operating System',
   description:
     'Viper is an autonomous engineering operating system that transforms high-level intent into production-ready software.',
   icons: {
-    icon: '/logo.png',
-    shortcut: '/logo.png',
-    apple: '/logo.png',
+    icon: '/VIPER.svg',
+    shortcut: '/VIPER.svg',
+    apple: '/VIPER.svg',
   },
   openGraph: {
     title: 'Viper AI — The AI Engineering Operating System',
@@ -38,7 +43,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} font-sans bg-[#09090b] text-white antialiased`}>
+      <body className={`${inter.variable} ${orbitron.variable} font-sans bg-[#09090b] text-white antialiased`}>
         {children}
       </body>
     </html>
