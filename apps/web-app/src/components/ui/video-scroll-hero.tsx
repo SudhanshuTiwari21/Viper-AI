@@ -387,7 +387,7 @@ export function VideoScrollHero() {
   if (reduceMotion) {
     return (
       <div>
-        <section className="relative min-h-0 flex flex-col items-center justify-center bg-black px-6 py-12 md:py-16 font-sans border-t border-white/10 max-h-[calc(100svh-3.5rem)]">
+        <section className="relative min-h-0 flex flex-col items-center justify-center bg-black px-6 py-12 md:py-16 font-sans border-t border-white/10 max-h-[calc(100svh-3.5rem-env(safe-area-inset-top,0px))]">
           <div className="max-w-2xl text-center">
             <p className="text-[10px] font-bold tracking-[0.35em] uppercase text-white/45 mb-4">
               One workspace
@@ -409,7 +409,7 @@ export function VideoScrollHero() {
     <div>
       <section
         ref={containerRef}
-        className="relative flex flex-col justify-center bg-black py-6 sm:py-5 md:py-6 lg:py-8 font-sans border-t border-white/10 overflow-hidden min-h-0 max-sm:max-h-none max-h-[calc(100svh-3.5rem)]"
+        className="relative flex flex-col justify-center bg-black py-6 sm:py-5 md:py-6 lg:py-8 font-sans border-t border-white/10 overflow-hidden min-h-0 max-sm:max-h-none max-h-[calc(100svh-3.5rem-env(safe-area-inset-top,0px))]"
       >
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.35]"

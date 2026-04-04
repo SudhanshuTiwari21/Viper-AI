@@ -22,7 +22,7 @@ export default function DocsSidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="fixed top-14 left-0 h-[calc(100vh-3.5rem)] w-[240px] border-r border-white/8 overflow-y-auto py-8 px-4 bg-[#09090b] z-40">
+    <aside className="fixed left-0 top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-40 h-[calc(100vh-3.5rem-env(safe-area-inset-top,0px))] w-[240px] overflow-y-auto border-r border-white/8 bg-[#09090b] px-4 py-8">
       {NAV_CONFIG.map((group) => (
         <div key={group.group} className="mb-7">
           <div className="flex items-center gap-1.5 px-3 mb-2">

@@ -145,7 +145,7 @@ function MobileMenu({ open, children }: MobileMenuProps) {
   return createPortal(
     <div
       id="mobile-menu"
-      className="fixed top-14 right-0 bottom-0 left-0 z-40 flex flex-col overflow-hidden border-t border-white/10 bg-black/95 backdrop-blur-lg md:hidden"
+      className="fixed top-[calc(3.5rem+env(safe-area-inset-top,0px))] right-0 bottom-0 left-0 z-40 flex flex-col overflow-hidden border-t border-white/10 bg-black/95 backdrop-blur-lg md:hidden"
     >
       <div
         data-slot={open ? 'open' : 'closed'}
@@ -174,8 +174,8 @@ export default function Navbar() {
   }, [mobileOpen])
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-white/20 bg-black/80 shadow-[0_1px_0_0_rgba(255,255,255,0.08)] backdrop-blur-lg">
-      <nav className="mx-auto box-border flex h-14 min-h-14 max-h-14 w-full max-w-350 items-center justify-between px-8">
+    <header className="sticky top-0 z-50 w-full border-b border-white/20 bg-black/80 pt-[env(safe-area-inset-top,0px)] shadow-[0_1px_0_0_rgba(255,255,255,0.08)] backdrop-blur-lg">
+      <nav className="mx-auto box-border flex h-14 min-h-14 max-h-14 w-full max-w-350 items-center justify-between px-4 sm:px-8">
         {/* ── Left: Logo ── */}
         <Link href="/" aria-label="ViperAI home" className="hover:opacity-80 transition-opacity">
           <Logo />

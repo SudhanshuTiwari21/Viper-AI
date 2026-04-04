@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, Orbitron } from 'next/font/google'
 import { RootProvider } from 'fumadocs-ui/provider'
 import './globals.css'
@@ -12,6 +12,12 @@ const orbitron = Orbitron({
   subsets: ['latin'],
   variable: '--font-orbitron',
 })
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+}
 
 export const metadata: Metadata = {
   title: 'Viper AI — The AI Engineering Operating System',

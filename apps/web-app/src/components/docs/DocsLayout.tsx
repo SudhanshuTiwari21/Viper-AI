@@ -36,7 +36,7 @@ function LeftSidebar({ currentSlug }: { currentSlug: string[] }) {
   const currentPath = currentSlug.join('/')
 
   return (
-    <aside className="fixed top-14 left-0 h-[calc(100vh-3.5rem)] w-60 border-r border-white/8 overflow-y-auto py-8 px-4 hidden lg:block">
+    <aside className="fixed left-0 top-[calc(3.5rem+env(safe-area-inset-top,0px))] hidden h-[calc(100vh-3.5rem-env(safe-area-inset-top,0px))] w-60 overflow-y-auto border-r border-white/8 px-4 py-8 lg:block">
       {NAV_CONFIG.map((group) => (
         <div key={group.group} className="mb-7">
           <div className="flex items-center gap-1.5 px-3 mb-2">
@@ -134,7 +134,7 @@ function RightSidebar() {
   if (headings.length === 0) return null
 
   return (
-    <aside className="fixed top-14 right-0 h-[calc(100vh-3.5rem)] w-64 py-9 px-6 hidden xl:block overflow-y-auto">
+    <aside className="fixed right-0 top-[calc(3.5rem+env(safe-area-inset-top,0px))] hidden h-[calc(100vh-3.5rem-env(safe-area-inset-top,0px))] w-64 overflow-y-auto px-6 py-9 xl:block">
       <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-[0.18em] mb-4 flex items-center gap-2">
         <svg className="size-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
