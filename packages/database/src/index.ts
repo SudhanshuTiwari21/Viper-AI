@@ -49,11 +49,30 @@ export {
   getUserByExternalSubject,
   updateUser,
   deleteUser,
+  toPublicUser,
   type UserRow,
   type CreateUserParams,
   type UpdateUserParams,
   type AuthProvider,
 } from "./auth-users.repository";
+export {
+  insertRefreshToken,
+  getRefreshTokenByHash,
+  revokeRefreshToken,
+  revokeAllRefreshTokensForUser,
+  type AuthRefreshTokenRow,
+} from "./auth-refresh-tokens.repository";
+export {
+  insertOAuthState,
+  consumeOAuthState,
+  insertOAuthExchangeCode,
+  consumeOAuthExchangeCode,
+} from "./auth-oauth-tables.repository";
+export {
+  insertEmailVerificationToken,
+  consumeEmailVerificationToken,
+  markUserEmailVerified,
+} from "./auth-email-verification.repository";
 export {
   createWorkspace,
   getWorkspaceById,
@@ -77,8 +96,10 @@ export {
   insertUsageEvent,
   getUsageEventByRequestId,
   countUsageEventsForDay,
+  sumCostUnitsForWorkspaceMonth,
   type UsageEventRow,
   type InsertUsageEventParams,
+  type UsageBillingBucket,
 } from "./usage-events.repository";
 export {
   insertWebhookEventIfNew,

@@ -81,6 +81,14 @@
       "target": [
         "AppImage"
       ]
-    }
+    },
+    "protocols": [
+      {
+        "name": "Viper AI Auth",
+        "schemes": [
+          "viper"
+        ]
+      }
+    ]
   }
 }

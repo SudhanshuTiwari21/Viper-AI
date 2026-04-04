@@ -72,9 +72,11 @@ export async function postChat(
     throw err;
   }
 
-  // F.33: monthly request quota check (no-op when VIPER_QUOTA_ENFORCE is off).
+  // F.33: monthly quota (requests or usage credits — see quota.service.ts).
   try {
-    await checkMonthlyQuota(resolvePathKey(workspacePath), entitlements, identity);
+    await checkMonthlyQuota(resolvePathKey(workspacePath), entitlements, identity, {
+      billingBucket: tierRes.effective,
+    });
   } catch (err) {
     if (err instanceof QuotaError) {
       await reply.status(err.statusCode).send({ error: err.message, quota: err.quota });
@@ -122,6 +124,7 @@ export async function postChat(
         entitlements,
         tokens: null,
         identity,
+        billing_bucket: tierRes.effective,
       });
     }
 
@@ -211,7 +214,9 @@ export async function postChatStream(
   // F.33: monthly request quota check — must run BEFORE reply.hijack() so we can
   // still return a normal HTTP response (429) if quota is exhausted.
   try {
-    await checkMonthlyQuota(resolvePathKey(workspacePath), entitlements, identity);
+    await checkMonthlyQuota(resolvePathKey(workspacePath), entitlements, identity, {
+      billingBucket: tierRes.effective,
+    });
   } catch (err) {
     if (err instanceof QuotaError) {
       await reply.status(err.statusCode).send({ error: err.message, quota: err.quota });
@@ -346,6 +351,7 @@ export async function postChatStream(
         entitlements,
         tokens: null,
         identity,
+        billing_bucket: tierRes.effective,
       });
     }
   } catch (err) {

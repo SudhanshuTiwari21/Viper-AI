@@ -1,169 +1,511 @@
 'use client'
 
-import { useRef, useEffect, useState } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import type { ReactNode } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import {
+  motion,
+  AnimatePresence,
+  useReducedMotion,
+  useInView,
+} from 'framer-motion'
 
-interface VideoScrollHeroProps {
-  videoSrc?: string
-  startScale?: number
+/** Narrative replaces the old stock video: tool fragmentation → context loss → Viper. */
+
+const PHASE_MS = [2400, 2600, 2200, 5200] as const
+const PHASE_KEYS = ['fragment', 'switching', 'lost', 'viper'] as const
+type PhaseKey = (typeof PHASE_KEYS)[number]
+
+function PhaseLabel({ phase }: { phase: PhaseKey }) {
+  const copy: Record<PhaseKey, { kicker: string; title: string; sub: string }> = {
+    fragment: {
+      kicker: '01 — Fragmented',
+      title: 'PM tools, docs, and browser AI never share the same story.',
+      sub: 'Every surface holds a different slice of truth.',
+    },
+    switching: {
+      kicker: '02 — Switching',
+      title: 'You hop Jira → Notion → Slack → another browser tab for “the smart chat.”',
+      sub: 'Each jump resets what the model can see.',
+    },
+    lost: {
+      kicker: '03 — Context drain',
+      title: 'Intent and codebase context dissolve across apps.',
+      sub: 'You re-paste specs. You re-explain architecture. Again.',
+    },
+    viper: {
+      kicker: '04 — One workspace',
+      title: 'Viper keeps product intent, code, and AI in one engineering OS.',
+      sub: 'Ship from a single place—without losing the thread.',
+    },
+  }
+  const c = copy[phase]
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.45, ease: [0.25, 0.4, 0.25, 1] }}
+      className="pointer-events-none text-center px-4 max-w-3xl mx-auto mt-0"
+    >
+      <p className="text-[10px] font-bold tracking-[0.35em] uppercase text-white/45 mb-1.5 md:mb-2">
+        {c.kicker}
+      </p>
+      <h2 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-semibold tracking-tight text-white leading-snug mb-1.5 md:mb-2">
+        {c.title}
+      </h2>
+      <p className="text-xs sm:text-sm md:text-[0.9375rem] text-white/55 font-light leading-snug max-w-xl mx-auto">
+        {c.sub}
+      </p>
+    </motion.div>
+  )
 }
 
-export function VideoScrollHero({
-  videoSrc = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  startScale = 0.25,
-}: VideoScrollHeroProps) {
+function WindowChrome({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-white/[0.12] bg-[#0c0c0c] shadow-[0_24px_80px_-12px_rgba(0,0,0,0.85)] overflow-hidden backdrop-blur-sm">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.08] bg-black/40">
+        <span className="flex gap-1.5">
+          <span className="size-2.5 rounded-full bg-[#ff5f57]/90" />
+          <span className="size-2.5 rounded-full bg-[#febc2e]/90" />
+          <span className="size-2.5 rounded-full bg-[#28c840]/90" />
+        </span>
+        <div className="flex-1 mx-2 h-6 rounded-md bg-white/[0.06] border border-white/[0.06] flex items-center px-2">
+          <span className="text-[10px] text-white/35 font-mono truncate">—</span>
+        </div>
+      </div>
+      <div className="p-3 md:p-4">{children}</div>
+    </div>
+  )
+}
+
+function NarrativeStage({ phase }: { phase: PhaseKey }) {
+  return (
+    <div className="relative w-full max-w-4xl mx-auto h-[clamp(13.5rem,32svh,20rem)] sm:h-[clamp(14rem,34svh,21.25rem)] md:h-[clamp(15rem,36svh,22.5rem)] shrink-0">
+      {/* Ambient */}
+      <div
+        className="absolute inset-0 rounded-2xl opacity-40 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse 80% 60% at 50% 40%, rgba(255,255,255,0.06) 0%, transparent 55%)',
+        }}
+      />
+
+      <AnimatePresence mode="sync">
+        {phase !== 'viper' && (
+          <>
+            {/* PM / backlog */}
+            <motion.div
+              key="pm"
+              className="absolute left-[4%] top-[8%] w-[42%] md:w-[38%] z-10"
+              initial={false}
+              animate={
+                phase === 'fragment'
+                  ? { x: 0, y: 0, rotate: -2, scale: 1, opacity: 1, filter: 'blur(0px)' }
+                  : phase === 'switching'
+                    ? { x: 28, y: 12, rotate: 4, scale: 0.96, opacity: 0.92, filter: 'blur(0.5px)' }
+                    : {
+                        x: -14,
+                        y: 32,
+                        rotate: -5,
+                        scale: 0.9,
+                        opacity: 0.72,
+                        filter: 'blur(2px)',
+                      }
+              }
+              transition={{ type: 'spring', stiffness: 120, damping: 22 }}
+            >
+              <WindowChrome>
+                <div className="text-[10px] uppercase tracking-widest text-white/40 mb-2">Sprint board</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {['Todo', 'Doing', 'Done'].map((col) => (
+                    <div key={col} className="rounded border border-white/10 bg-white/[0.03] p-1.5">
+                      <div className="text-[9px] text-white/35 mb-1.5">{col}</div>
+                      <div className="space-y-1">
+                        <div className="h-1.5 rounded bg-white/15 w-4/5" />
+                        <div className="h-1.5 rounded bg-white/10 w-3/5" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </WindowChrome>
+            </motion.div>
+
+            {/* Docs */}
+            <motion.div
+              key="docs"
+              className="absolute right-[6%] top-[18%] w-[44%] md:w-[40%] z-20"
+              initial={false}
+              animate={
+                phase === 'fragment'
+                  ? { x: 0, y: 0, rotate: 1.5, scale: 1, opacity: 1, filter: 'blur(0px)' }
+                  : phase === 'switching'
+                    ? { x: -32, y: -8, rotate: -3, scale: 0.94, opacity: 0.88, filter: 'blur(1px)' }
+                    : {
+                        x: 18,
+                        y: -24,
+                        rotate: 4,
+                        scale: 0.88,
+                        opacity: 0.68,
+                        filter: 'blur(2px)',
+                      }
+              }
+              transition={{ type: 'spring', stiffness: 115, damping: 20 }}
+            >
+              <WindowChrome>
+                <div className="text-[10px] uppercase tracking-widest text-white/40 mb-2">Product spec</div>
+                <div className="space-y-1.5">
+                  <div className="h-2 rounded bg-white/12 w-full" />
+                      <div className="h-2 rounded bg-white/10 w-[92%]" />
+                  <div className="h-2 rounded bg-white/8 w-4/5" />
+                  <div className="h-2 rounded bg-white/10 w-full" />
+                  <div className="h-2 rounded bg-white/6 w-2/3" />
+                </div>
+              </WindowChrome>
+            </motion.div>
+
+            {/* Browser AI */}
+            <motion.div
+              key="browser"
+              className="absolute left-[18%] bottom-[6%] w-[64%] md:w-[52%] z-30"
+              initial={false}
+              animate={
+                phase === 'fragment'
+                  ? { x: 0, y: 0, rotate: 0, scale: 1, opacity: 1, filter: 'blur(0px)' }
+                  : phase === 'switching'
+                    ? { x: -8, y: -18, rotate: -2, scale: 1.02, opacity: 1, filter: 'blur(0px)' }
+                    : {
+                        x: 0,
+                        y: 16,
+                        rotate: 0,
+                        scale: 0.94,
+                        opacity: 0.64,
+                        filter: 'blur(2.5px)',
+                      }
+              }
+              transition={{ type: 'spring', stiffness: 100, damping: 18 }}
+            >
+              <div className="rounded-lg border border-white/[0.12] bg-[#080808] shadow-2xl overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.08] bg-black/50">
+                  <span className="flex gap-1.5">
+                    <span className="size-2.5 rounded-full bg-[#ff5f57]/90" />
+                    <span className="size-2.5 rounded-full bg-[#febc2e]/90" />
+                    <span className="size-2.5 rounded-full bg-[#28c840]/90" />
+                  </span>
+                  <div className="flex-1 h-6 rounded-md bg-white/[0.06] border border-white/[0.06] flex items-center px-2">
+                    <span className="text-[10px] text-emerald-400/70 font-mono truncate">
+                      assistant.browser / chat
+                    </span>
+                  </div>
+                </div>
+                <div className="p-3 md:p-4 grid md:grid-cols-5 gap-3">
+                  <div className="md:col-span-3 space-y-2">
+                    <div className="rounded-lg bg-white/[0.04] border border-white/10 p-2.5 text-[11px] text-white/50 leading-snug">
+                      “Summarize our API errors from last week—I don’t have the Jira link here.”
+                    </div>
+                    <div className="rounded-lg bg-white/[0.06] border border-white/10 p-2.5 text-[10px] text-white/35 italic">
+                      Model sees this tab—not your board, not your repo.
+                    </div>
+                  </div>
+                  <div className="md:col-span-2 rounded border border-dashed border-white/15 bg-black/30 p-2 flex flex-col justify-center">
+                    <div className="text-[9px] text-red-400/80 uppercase tracking-wider mb-1">Detached</div>
+                    <div className="text-[10px] text-white/30 leading-relaxed">
+                      No live link to tickets, specs, or branch context.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Context threads (visual metaphor) */}
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none z-[5]"
+              aria-hidden
+            >
+              <motion.path
+                d="M 22% 35% Q 50% 45% 78% 38%"
+                fill="none"
+                stroke="url(#ctx)"
+                strokeWidth="1.2"
+                strokeDasharray="4 6"
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={
+                  phase === 'fragment'
+                    ? { pathLength: 1, opacity: 0.35 }
+                    : phase === 'switching'
+                      ? { pathLength: 0.4, opacity: 0.2 }
+                      : { pathLength: 0, opacity: 0 }
+                }
+                transition={{ duration: 0.8 }}
+              />
+              <defs>
+                <linearGradient id="ctx" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.15)" />
+                  <stop offset="100%" stopColor="rgba(255,255,255,0.02)" />
+                </linearGradient>
+              </defs>
+            </svg>
+
+            {/* Step 3: keep a readable focal point — windows alone were too faint on black */}
+            {phase === 'lost' && (
+              <motion.div
+                className="absolute left-1/2 top-[42%] z-[40] w-[88%] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/[0.14] bg-black/75 px-4 py-3 backdrop-blur-md shadow-[0_0_40px_-8px_rgba(255,255,255,0.12)]"
+                initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: [0.25, 0.4, 0.25, 1] }}
+              >
+                <p className="text-center text-[11px] font-medium uppercase tracking-[0.2em] text-amber-200/90 mb-1">
+                  Signal lost
+                </p>
+                <p className="text-center text-xs text-white/55 leading-relaxed">
+                  Board, spec, and browser each hold a fragment—nothing connects the thread.
+                </p>
+              </motion.div>
+            )}
+          </>
+        )}
+
+        {phase === 'viper' && (
+          <motion.div
+            key="viper-panel"
+            className="absolute inset-x-[4%] inset-y-[6%] md:inset-x-[8%] md:inset-y-[8%]"
+            initial={{ opacity: 0, scale: 0.92, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 1.02 }}
+            transition={{ type: 'spring', stiffness: 90, damping: 20 }}
+          >
+            <div
+              className="h-full rounded-lg md:rounded-xl border border-white/20 bg-gradient-to-b from-[#111] to-[#050505] shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_24px_80px_-24px_rgba(0,0,0,0.9),0_0_60px_-20px_rgba(255,255,255,0.06)] overflow-hidden relative"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_-10%,rgba(255,255,255,0.1),transparent)] pointer-events-none" />
+              <div className="relative flex flex-col h-full min-h-0">
+                <div className="flex items-center gap-1.5 md:gap-2 px-2.5 md:px-3 py-1.5 md:py-2 border-b border-white/10 bg-black/60 shrink-0">
+                  <span className="text-[11px] md:text-xs font-semibold tracking-tight text-white">Viper</span>
+                  <span className="text-[9px] text-white/35 px-1.5 py-0.5 rounded-full border border-white/10 bg-white/[0.04]">
+                    Workspace
+                  </span>
+                  <div className="flex-1 min-w-0" />
+                  <span className="text-[9px] md:text-[10px] text-emerald-400/90 font-mono whitespace-nowrap">● In sync</span>
+                </div>
+                <div className="flex-1 grid md:grid-cols-12 gap-0 min-h-0 overflow-hidden">
+                  <div className="md:col-span-4 border-r border-white/10 p-2 md:p-2.5 bg-black/20 min-h-0 overflow-hidden">
+                    <div className="text-[8px] uppercase tracking-widest text-white/35 mb-1">Context</div>
+                    <div className="space-y-1">
+                      <div className="h-1.5 bg-emerald-500/20 rounded w-full border border-emerald-500/20" />
+                      <div className="h-1.5 bg-white/10 rounded w-5/6" />
+                      <div className="h-1.5 bg-white/8 rounded w-4/6" />
+                    </div>
+                    <div className="mt-1.5 text-[8px] md:text-[9px] text-white/30 leading-snug line-clamp-3">
+                      Backlog, specs, and repo state travel together—one thread for the model.
+                    </div>
+                  </div>
+                  <div className="md:col-span-5 p-2 md:p-2.5 border-r border-white/10 flex flex-col min-h-0">
+                    <div className="text-[8px] uppercase tracking-widest text-white/35 mb-1">Assistant</div>
+                    <div className="flex-1 min-h-0 rounded-md border border-white/10 bg-white/[0.03] p-2 md:p-2.5 text-[9px] md:text-[10px] text-white/60 leading-snug overflow-hidden">
+                      Planning a fix with full ticket + file context—no copy-paste across apps.
+                    </div>
+                  </div>
+                  <div className="md:col-span-3 p-2 md:p-2.5 bg-black/30 min-h-0">
+                    <div className="text-[8px] uppercase tracking-widest text-white/35 mb-1">Diff</div>
+                    <div className="font-mono text-[8px] md:text-[9px] space-y-0.5 text-emerald-400/70">
+                      <div>+ route.ts</div>
+                      <div className="text-white/25">− pasted snippet</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+export function VideoScrollHero() {
+  const reduceMotion = useReducedMotion()
   const containerRef = useRef<HTMLDivElement>(null)
-  const shouldReduceMotion = useReducedMotion()
-  const [scrollScale, setScrollScale] = useState(startScale)
+  const inView = useInView(containerRef, { once: true, amount: 0.25 })
+  const [phaseIndex, setPhaseIndex] = useState(0)
 
   useEffect(() => {
-    if (shouldReduceMotion) return
+    if (reduceMotion || !inView) return
 
-    const handleScroll = () => {
-      if (!containerRef.current) return
-      const rect = containerRef.current.getBoundingClientRect()
-      const containerHeight = containerRef.current.offsetHeight
-      const windowHeight = window.innerHeight
-      const scrolled = Math.max(0, -rect.top)
-      const maxScroll = containerHeight - windowHeight
-      const progress = Math.min(scrolled / maxScroll, 1)
-      setScrollScale(startScale + progress * (1 - startScale))
+    let cancelled = false
+    let cycleTimeouts: number[] = []
+
+    const clearCycleTimeouts = () => {
+      cycleTimeouts.forEach((id) => window.clearTimeout(id))
+      cycleTimeouts = []
     }
 
-    window.addEventListener('scroll', handleScroll)
-    handleScroll()
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [shouldReduceMotion, startScale])
+    const runCycle = () => {
+      if (cancelled) return
+      clearCycleTimeouts()
+      setPhaseIndex(0)
+      let accumulated = 0
+      PHASE_MS.forEach((ms, stepIndex) => {
+        accumulated += ms
+        const id = window.setTimeout(() => {
+          if (cancelled) return
+          if (stepIndex < PHASE_KEYS.length - 1) {
+            setPhaseIndex(stepIndex + 1)
+          } else {
+            setPhaseIndex(0)
+            runCycle()
+          }
+        }, accumulated)
+        cycleTimeouts.push(id)
+      })
+    }
 
-  const shouldAnimate = !shouldReduceMotion
+    runCycle()
+
+    return () => {
+      cancelled = true
+      clearCycleTimeouts()
+    }
+  }, [inView, reduceMotion])
+
+  const phase = PHASE_KEYS[Math.min(phaseIndex, PHASE_KEYS.length - 1)]!
+
+  if (reduceMotion) {
+    return (
+      <div>
+        <section className="relative min-h-0 flex flex-col items-center justify-center bg-black px-6 py-12 md:py-16 font-sans border-t border-white/10 max-h-[calc(100svh-3.5rem)]">
+          <div className="max-w-2xl text-center">
+            <p className="text-[10px] font-bold tracking-[0.35em] uppercase text-white/45 mb-4">
+              One workspace
+            </p>
+            <h2 className="text-2xl md:text-4xl font-semibold text-white leading-tight mb-4">
+              PM tools, docs, and browser AI split your context. Viper unifies them for engineering.
+            </h2>
+            <p className="text-white/50 text-sm leading-relaxed">
+              When you prefer reduced motion, we show a static summary instead of the animated story.
+            </p>
+          </div>
+        </section>
+        <ProblemCardsSection />
+      </div>
+    )
+  }
 
   return (
     <div>
-      {/* Video scroll section */}
-      <div ref={containerRef} className="relative h-[200vh] bg-background">
-        <div className="sticky top-0 w-full h-screen flex items-start justify-center pt-20 z-10">
-          <div
-            className="relative flex items-center justify-center will-change-transform"
-            style={{
-              transform: shouldAnimate ? `scale(${scrollScale})` : 'scale(1)',
-              transformOrigin: 'center center',
-            }}
-          >
-            <video
-              autoPlay
-              loop
-              muted
-              playsInline
-              className="w-[80vw] max-w-4xl h-[60vh] object-cover shadow-2xl  "
-            >
-              <source src={videoSrc} type="video/mp4" />
-              Your browser does not support the video tag.
-            </video>
-
-            <motion.div
-              className="absolute inset-0 bg-black/20 backdrop-blur-[1px] flex items-center justify-center rounded-lg"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5, duration: 0.8 }}
-            >
-              <div className="text-center text-white">
-                <motion.h2
-                  className="text-2xl md:text-4xl lg:text-6xl font-bold mb-4"
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.8, duration: 0.8, type: 'spring', stiffness: 200, damping: 25 }}
-                >
-                  The way software gets built<br className="hidden md:block" /> is still broken.
-                </motion.h2>
-                <motion.p
-                  className="text-sm md:text-lg lg:text-xl text-white/80 max-w-2xl px-4"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 1.0, duration: 0.8, type: 'spring', stiffness: 200, damping: 25 }}
-                >
-                  Watch the clip or Scroll down to see what's broken
-                </motion.p>
-              </div>
-            </motion.div>
-          </div>
-        </div>
-      </div>
-
-      {/* Next Section — Problem Cards */}
-      <motion.section
-        className="relative bg-muted -mt-8 rounded-t-3xl min-h-screen font-sans"
-        initial={{ opacity: 0, y: 50 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: '-100px' }}
-        transition={{ duration: 0.8, type: 'spring', stiffness: 200, damping: 25 }}
+      <section
+        ref={containerRef}
+        className="relative flex flex-col justify-center bg-black py-5 md:py-6 lg:py-8 font-sans border-t border-white/10 overflow-hidden min-h-0 max-h-[calc(100svh-3.5rem)]"
       >
-        <div className="max-w-6xl mx-auto px-8 py-24">
-          <motion.div
-            className="mb-16 text-center"
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ delay: 0.2, duration: 0.6 }}
-          >
-            <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-4 block">
-              The Problem
-            </span>
-            <h2 className="text-3xl md:text-5xl font-bold tracking-tight text-foreground leading-[1.05]">
-              Every team feels this.
-            </h2>
-          </motion.div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
-            {[
-              {
-                id: '01',
-                title: 'Scattered tools.',
-                body: 'Product lives in Notion. Tasks live in Jira. Code lives in an IDE. AI lives in a chat window. None of them share context.',
-              },
-              {
-                id: '02',
-                title: 'Context switching kills velocity.',
-                body: 'Every tool requires you to re-explain the system. You spend more time managing context across tools than actually shipping product.',
-              },
-              {
-                id: '03',
-                title: 'AI without system awareness.',
-                body: 'Current AI tools see a file - not a system. They have no understanding of your architecture, your intent, or your workflow.',
-              },
-            ].map((item, index) => (
-              <motion.div
-                key={item.id}
-                className="bg-[#0a0a0a] border border-white/10 rounded-lg p-8 shadow-lg flex flex-col gap-0 h-full hover:border-white/25 hover:bg-[#111111] transition-all duration-300"
-                initial={{ opacity: 0, y: 30, scale: 0.95 }}
-                whileInView={{ opacity: 1, y: 0, scale: 1 }}
-                viewport={{ once: true }}
-                transition={{
-                  delay: 0.4 + index * 0.1,
-                  duration: 0.8,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 25,
-                }}
-                whileHover={{
-                  scale: 1.02,
-                  y: -4,
-                  transition: { type: 'spring', stiffness: 400, damping: 25 },
-                }}
-              >
-                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-5 block">
-                  {item.id}
-                </span>
-                <h3 className="text-xl font-bold text-white leading-snug mb-6 min-h-14">
-                  {item.title}
-                </h3>
-                <p className="text-muted-foreground text-sm leading-relaxed flex-1">
-                  {item.body}
-                </p>
-              </motion.div>
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.35]"
+          style={{
+            backgroundImage: `
+              linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)
+            `,
+            backgroundSize: '48px 48px',
+            maskImage: 'radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 75%)',
+          }}
+        />
+        <div className="relative z-10 w-full max-w-6xl mx-auto px-4 md:px-8 flex flex-col items-stretch gap-2 md:gap-3 min-h-0">
+          <AnimatePresence mode="wait">
+            <PhaseLabel key={phase} phase={phase} />
+          </AnimatePresence>
+          <div className="mt-0 min-h-0 w-full flex justify-center">
+            <NarrativeStage phase={phase} />
+          </div>
+          {/* Progress dots */}
+          <div className="flex justify-center gap-2 mt-1 md:mt-2 shrink-0 pb-0.5">
+            {PHASE_KEYS.map((k, i) => (
+              <span
+                key={k}
+                className={`h-1 rounded-full transition-all duration-500 ${
+                  i === phaseIndex ? 'w-8 bg-white/80' : 'w-1.5 bg-white/20'
+                }`}
+              />
             ))}
           </div>
         </div>
-      </motion.section>
+      </section>
+      <ProblemCardsSection />
     </div>
+  )
+}
+
+function ProblemCardsSection() {
+  return (
+    <motion.section
+      className="relative bg-muted -mt-8 rounded-t-3xl min-h-screen font-sans"
+      initial={{ opacity: 0, y: 50 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-100px' }}
+      transition={{ duration: 0.8, type: 'spring', stiffness: 200, damping: 25 }}
+    >
+      <div className="max-w-6xl mx-auto px-8 py-24">
+        <motion.div
+          className="mb-16 text-center"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.2, duration: 0.6 }}
+        >
+          <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-4 block">
+            The Problem
+          </span>
+          <h2 className="text-3xl md:text-5xl font-bold tracking-tight text-foreground leading-[1.05]">
+            Every team feels this.
+          </h2>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
+          {[
+            {
+              id: '01',
+              title: 'Scattered tools.',
+              body: 'Product lives in Notion. Tasks live in Jira. Code lives in an IDE. AI lives in a chat window. None of them share context.',
+            },
+            {
+              id: '02',
+              title: 'Context switching kills velocity.',
+              body: 'Every tool requires you to re-explain the system. You spend more time managing context across tools than actually shipping product.',
+            },
+            {
+              id: '03',
+              title: 'AI without system awareness.',
+              body: 'Current AI tools see a file - not a system. They have no understanding of your architecture, your intent, or your workflow.',
+            },
+          ].map((item, index) => (
+            <motion.div
+              key={item.id}
+              className="bg-[#0a0a0a] border border-white/10 rounded-lg p-8 shadow-lg flex flex-col gap-0 h-full hover:border-white/25 hover:bg-[#111111] transition-all duration-300"
+              initial={{ opacity: 0, y: 30, scale: 0.95 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true }}
+              transition={{
+                delay: 0.4 + index * 0.1,
+                duration: 0.8,
+                type: 'spring',
+                stiffness: 300,
+                damping: 25,
+              }}
+              whileHover={{
+                scale: 1.02,
+                y: -4,
+                transition: { type: 'spring', stiffness: 400, damping: 25 },
+              }}
+            >
+              <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-muted-foreground mb-5 block">
+                {item.id}
+              </span>
+              <h3 className="text-xl font-bold text-white leading-snug mb-6 min-h-14">
+                {item.title}
+              </h3>
+              <p className="text-muted-foreground text-sm leading-relaxed flex-1">
+                {item.body}
+              </p>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </motion.section>
   )
 }

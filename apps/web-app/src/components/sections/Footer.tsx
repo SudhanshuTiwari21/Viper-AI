@@ -11,6 +11,7 @@ import { Logo } from '@/components/ui/Logo'
 interface FooterLink {
   title: string
   href: string
+  /** Opens in new tab (external https or explicit) */
   external?: boolean
 }
 
@@ -19,35 +20,74 @@ interface FooterSection {
   links: FooterLink[]
 }
 
+const GITHUB_REPO_URL = 'https://github.com/viperaiinc/viper'
+const DISCORD_INVITE_URL = 'https://discord.gg/hxAvwyAVkb'
+/** Replace with your X handle when ready, e.g. https://x.com/viper_ai */
+const X_COMMUNITY_URL = 'https://x.com'
+
 /* ─── Content ────────────────────────────────────────────────── */
 
 const footerLinks: FooterSection[] = [
   {
     label: 'Product',
     links: [
-      { title: 'Agents',    href: '#' },
-      { title: 'Changelog', href: '#' },
-      { title: 'Pricing',   href: '#' },
-      { title: 'Download',  href: '#' },
+      { title: 'Agents', href: '/agents' },
+      { title: 'Changelog', href: '/changelog' },
+      { title: 'Pricing', href: '/pricing' },
+      { title: 'Coming soon', href: '/changelog#whats-next' },
     ],
   },
   {
     label: 'Company',
     links: [
-      { title: 'About',   href: '#' },
-      { title: 'Careers', href: '#' },
-      { title: 'Contact', href: '#' },
+      { title: 'About', href: '/about' },
+      { title: 'Careers', href: '/careers' },
+      { title: 'Contact', href: '/contact' },
     ],
   },
   {
     label: 'Legal',
     links: [
-      { title: 'Terms & Conditions', href: '#', external: true },
-      { title: 'Privacy Policy',     href: '#', external: true },
-      { title: 'Contact Us',         href: '#' },
+      { title: 'Terms & Conditions', href: '/terms' },
+      { title: 'Privacy Policy', href: '/privacy' },
+      { title: 'Contact Us', href: '/contact' },
     ],
   },
 ]
+
+function FooterTextLink({ link, className }: { link: FooterLink; className: string }) {
+  const { title, href, external } = link
+  const showExternalGlyph = external && href.startsWith('http')
+
+  const inner = (
+    <>
+      {title}
+      {showExternalGlyph && <span className="ml-0.5 text-[11px] leading-none" aria-hidden="true">↗</span>}
+    </>
+  )
+
+  if (href.startsWith('mailto:')) {
+    return (
+      <a href={href} className={className}>
+        {inner}
+      </a>
+    )
+  }
+
+  if (href.startsWith('http')) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+        {inner}
+      </a>
+    )
+  }
+
+  return (
+    <Link href={href} className={className}>
+      {inner}
+    </Link>
+  )
+}
 
 /* ─── Discord icon (not in lucide-react) ────────────────────── */
 
@@ -92,73 +132,81 @@ function AnimatedContainer({ className, delay = 0.1, children }: AnimatedContain
   )
 }
 
+const linkClass =
+  'inline-flex items-center gap-0.5 text-[14px] text-neutral-500 hover:text-white transition-colors duration-200'
+
 /* ─── Footer ─────────────────────────────────────────────────── */
 
 export default function Footer() {
   return (
     <footer className="relative w-full border-t border-border-muted bg-black px-8 py-16 lg:py-20">
-      {/* Subtle glow on the top border */}
       <div className="absolute top-0 left-1/2 h-px w-1/3 -translate-x-1/2 rounded-full bg-white/10 blur-sm" />
 
       <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row md:justify-between md:items-start gap-12">
-
-        {/* ── Brand — far left ── */}
         <AnimatedContainer className="flex flex-col gap-3 translate-x-25" delay={0.1}>
-          <Logo />
+          <Link href="/" className="inline-flex w-fit rounded-md outline-offset-4 hover:opacity-90 transition-opacity" aria-label="Viper AI home">
+            <Logo />
+          </Link>
 
           <div className="mt-3 flex flex-col gap-1">
-            <p className="text-[14px] text-neutral-500">MIT Licensed</p>
+            <a
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[14px] text-neutral-500 hover:text-white transition-colors duration-200 w-fit"
+            >
+              MIT Licensed
+            </a>
             <p className="text-[14px] text-neutral-500">
               Copyright &copy; {new Date().getFullYear()} Viper AI Inc.
             </p>
           </div>
 
-          {/* Social icons */}
           <div className="flex items-center gap-4 mt-3">
-            <Link href="#" aria-label="GitHub"
-              className="text-neutral-400 hover:text-white transition-colors duration-200">
+            <a
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Viper AI on GitHub"
+              className="text-neutral-400 hover:text-white transition-colors duration-200"
+            >
               <GitHubIcon className="size-5.5" />
-            </Link>
-            <Link href="#" aria-label="Discord"
-              className="text-neutral-400 hover:text-white transition-colors duration-200">
+            </a>
+            <a
+              href={DISCORD_INVITE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Viper AI on Discord"
+              className="text-neutral-400 hover:text-white transition-colors duration-200"
+            >
               <DiscordIcon className="size-5.5" />
-            </Link>
-            <Link href="#" aria-label="Twitter / X"
-              className="text-neutral-400 hover:text-white transition-colors duration-200">
-              <XIcon className="size-5.5" />
-            </Link>
+            </a>
+            <a
+              href={X_COMMUNITY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Viper AI on X"
+              className="text-neutral-400 hover:text-white transition-colors duration-200"
+            >
+              <XIcon className="size-5.5" strokeWidth={1.75} />
+            </a>
           </div>
         </AnimatedContainer>
 
-        {/* ── Link columns — far right, tightly grouped ── */}
         <div className="flex gap-14 md:gap-20 -translate-x-20">
           {footerLinks.map((section, index) => (
             <AnimatedContainer key={section.label} delay={0.15 + index * 0.1}>
-              <h4 className="text-[14px] font-medium text-white mb-4">
-                {section.label}
-              </h4>
+              <h4 className="text-[14px] font-medium text-white mb-4">{section.label}</h4>
               <ul className="space-y-2.5">
                 {section.links.map((link) => (
                   <li key={link.title}>
-                    <Link
-                      href={link.href}
-                      className="inline-flex items-center gap-0.5 text-[14px] text-neutral-500 hover:text-white transition-colors duration-200"
-                      {...(link.external
-                        ? { target: '_blank', rel: 'noopener noreferrer' }
-                        : {})}
-                    >
-                      {link.title}
-                      {link.external && (
-                        <span className="text-[11px] leading-none ml-0.5" aria-hidden="true">↗</span>
-                      )}
-                    </Link>
+                    <FooterTextLink link={link} className={linkClass} />
                   </li>
                 ))}
               </ul>
             </AnimatedContainer>
           ))}
         </div>
-
       </div>
     </footer>
   )

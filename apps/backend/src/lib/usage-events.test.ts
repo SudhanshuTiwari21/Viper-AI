@@ -18,8 +18,9 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 // Hoisted mocks — must use vi.hoisted so they are defined before vi.mock factories run
 // ---------------------------------------------------------------------------
 
-const { mockInsertUsageEvent } = vi.hoisted(() => ({
+const { mockInsertUsageEvent, mockComputeUsageCostUnits } = vi.hoisted(() => ({
   mockInsertUsageEvent: vi.fn(),
+  mockComputeUsageCostUnits: vi.fn().mockReturnValue(42n),
 }));
 
 vi.mock("@repo/database", () => ({
@@ -33,6 +34,7 @@ vi.mock("../services/assistant.service.js", () => ({
 
 vi.mock("@repo/model-registry", () => ({
   resolveModelSpec: vi.fn().mockReturnValue({ provider: "openai" }),
+  computeUsageCostUnits: mockComputeUsageCostUnits,
 }));
 
 import {
@@ -66,6 +68,15 @@ const TELEMETRY: RouteTelemetry = {
   route_mode: "auto",
   tier_downgraded: false,
   latency_ms: 800,
+};
+
+const BASE_RECORD = {
+  telemetry: TELEMETRY,
+  stream: false,
+  entitlements: null,
+  tokens: null,
+  identity: IDENTITY,
+  billing_bucket: "auto" as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -130,6 +141,7 @@ describe("recordUsageEvent — kill-switch off (default)", () => {
     delete process.env["VIPER_USAGE_EVENTS"];
     delete process.env["VIPER_USAGE_EVENTS_STDOUT"];
     mockInsertUsageEvent.mockClear();
+    mockComputeUsageCostUnits.mockClear();
   });
   afterEach(() => {
     if (ORIG_EVENTS === undefined) delete process.env["VIPER_USAGE_EVENTS"];
@@ -139,20 +151,12 @@ describe("recordUsageEvent — kill-switch off (default)", () => {
   });
 
   it("does not call insertUsageEvent", async () => {
-    await recordUsageEvent({
-      telemetry: TELEMETRY,
-      stream: false,
-      entitlements: null,
-      tokens: null,
-      identity: IDENTITY,
-    });
+    await recordUsageEvent(BASE_RECORD);
     expect(mockInsertUsageEvent).not.toHaveBeenCalled();
   });
 
   it("does not throw", async () => {
-    await expect(
-      recordUsageEvent({ telemetry: TELEMETRY, stream: false, entitlements: null, tokens: null, identity: IDENTITY }),
-    ).resolves.toBeUndefined();
+    await expect(recordUsageEvent(BASE_RECORD)).resolves.toBeUndefined();
   });
 });
 
@@ -173,13 +177,7 @@ describe("recordUsageEvent — kill-switch on, no DATABASE_URL", () => {
   });
 
   it("skips DB insert when DATABASE_URL is absent", async () => {
-    await recordUsageEvent({
-      telemetry: TELEMETRY,
-      stream: false,
-      entitlements: null,
-      tokens: null,
-      identity: IDENTITY,
-    });
+    await recordUsageEvent(BASE_RECORD);
     expect(mockInsertUsageEvent).not.toHaveBeenCalled();
   });
 });
@@ -193,6 +191,8 @@ describe("recordUsageEvent — kill-switch on + DATABASE_URL set", () => {
     process.env["DATABASE_URL"] = "postgresql://localhost:5432/viper_test";
     mockInsertUsageEvent.mockReset();
     mockInsertUsageEvent.mockResolvedValue({ id: "row-uuid-1" });
+    mockComputeUsageCostUnits.mockReset();
+    mockComputeUsageCostUnits.mockReturnValue(42n);
   });
   afterEach(() => {
     if (ORIG_EVENTS === undefined) delete process.env["VIPER_USAGE_EVENTS"];
@@ -202,13 +202,7 @@ describe("recordUsageEvent — kill-switch on + DATABASE_URL set", () => {
   });
 
   it("calls insertUsageEvent with correct fields", async () => {
-    await recordUsageEvent({
-      telemetry: TELEMETRY,
-      stream: false,
-      entitlements: null,
-      tokens: null,
-      identity: IDENTITY,
-    });
+    await recordUsageEvent(BASE_RECORD);
     expect(mockInsertUsageEvent).toHaveBeenCalledOnce();
     const [, params] = mockInsertUsageEvent.mock.calls[0]!;
     expect(params.request_id).toBe("req-uuid-test");
@@ -220,12 +214,15 @@ describe("recordUsageEvent — kill-switch on + DATABASE_URL set", () => {
     expect(params.tier_downgraded).toBe(false);
     expect(params.latency_ms).toBe(800);
     expect(params.provider).toBe("openai");
+    expect(params.billing_bucket).toBe("auto");
+    expect(params.cost_units).toBe(42n);
   });
 
   it("passes workspace_uuid and user_uuid from entitlements", async () => {
     await recordUsageEvent({
-      telemetry: TELEMETRY,
+      ...BASE_RECORD,
       stream: true,
+      billing_bucket: "premium",
       entitlements: {
         workspaceId: "ws-uuid-1",
         userId: "user-uuid-1",
@@ -234,22 +231,18 @@ describe("recordUsageEvent — kill-switch on + DATABASE_URL set", () => {
         allowedModelTiers: new Set(["auto"]),
         flags: {},
       },
-      tokens: null,
-      identity: IDENTITY,
     });
     const [, params] = mockInsertUsageEvent.mock.calls[0]!;
     expect(params.workspace_uuid).toBe("ws-uuid-1");
     expect(params.user_uuid).toBe("user-uuid-1");
     expect(params.metadata.stream).toBe(true);
+    expect(params.billing_bucket).toBe("premium");
   });
 
   it("sets token fields when provided", async () => {
     await recordUsageEvent({
-      telemetry: TELEMETRY,
-      stream: false,
-      entitlements: null,
+      ...BASE_RECORD,
       tokens: { input_tokens: 100, output_tokens: 200, total_tokens: 300 },
-      identity: IDENTITY,
     });
     const [, params] = mockInsertUsageEvent.mock.calls[0]!;
     expect(params.input_tokens).toBe(100);
@@ -259,16 +252,24 @@ describe("recordUsageEvent — kill-switch on + DATABASE_URL set", () => {
 
   it("idempotency: insertUsageEvent returning null does not crash", async () => {
     mockInsertUsageEvent.mockResolvedValue(null);
-    await expect(
-      recordUsageEvent({ telemetry: TELEMETRY, stream: false, entitlements: null, tokens: null, identity: IDENTITY }),
-    ).resolves.toBeUndefined();
+    await expect(recordUsageEvent(BASE_RECORD)).resolves.toBeUndefined();
   });
 
   it("DB errors are swallowed — never propagate to caller", async () => {
     mockInsertUsageEvent.mockRejectedValue(new Error("connection reset"));
-    await expect(
-      recordUsageEvent({ telemetry: TELEMETRY, stream: false, entitlements: null, tokens: null, identity: IDENTITY }),
-    ).resolves.toBeUndefined();
+    await expect(recordUsageEvent(BASE_RECORD)).resolves.toBeUndefined();
+  });
+
+  it("uses streaming assumed tokens when stream and tokens are null", async () => {
+    process.env["VIPER_USAGE_STREAMING_ASSUMED_TOKENS"] = "2048";
+    await recordUsageEvent({ ...BASE_RECORD, stream: true, tokens: null });
+    expect(mockComputeUsageCostUnits).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: "gpt-4o-mini",
+        assumedTotalTokensWhenUnknown: 2048,
+      }),
+    );
+    delete process.env["VIPER_USAGE_STREAMING_ASSUMED_TOKENS"];
   });
 });
 
@@ -292,13 +293,7 @@ describe("recordUsageEvent — stdout emission", () => {
   });
 
   it("emits JSON line to stdout with _type=viper.usage.event", async () => {
-    await recordUsageEvent({
-      telemetry: TELEMETRY,
-      stream: false,
-      entitlements: null,
-      tokens: null,
-      identity: IDENTITY,
-    });
+    await recordUsageEvent(BASE_RECORD);
     const calls = writeSpy.mock.calls.filter((c) => String(c[0]).includes("viper.usage.event"));
     expect(calls.length).toBe(1);
     const parsed = JSON.parse(String(calls[0]![0])) as Record<string, unknown>;
@@ -309,13 +304,7 @@ describe("recordUsageEvent — stdout emission", () => {
 
   it("does NOT emit stdout when switch is off", async () => {
     process.env["VIPER_USAGE_EVENTS_STDOUT"] = "0";
-    await recordUsageEvent({
-      telemetry: TELEMETRY,
-      stream: false,
-      entitlements: null,
-      tokens: null,
-      identity: IDENTITY,
-    });
+    await recordUsageEvent(BASE_RECORD);
     const calls = writeSpy.mock.calls.filter((c) => String(c[0]).includes("viper.usage.event"));
     expect(calls.length).toBe(0);
   });

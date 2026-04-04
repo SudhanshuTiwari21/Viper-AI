@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function DocPage({ params }: Props) {
   const { slug } = await params
-  if (!slug) redirect('/docs/guide/introduction')
+  if (!slug) redirect('/docs/guide/welcome')
 
   const page = source.getPage(slug)
   if (!page) notFound()

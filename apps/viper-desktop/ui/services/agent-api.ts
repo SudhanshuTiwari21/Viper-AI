@@ -3,7 +3,8 @@
  * Backend runs at port 4000 and wires Intent Agent, Context Builder, and Context Ranking.
  */
 
-const BACKEND_URL =
+/** Orchestrator base URL (chat, auth exchange, etc.). */
+export const BACKEND_URL =
   (typeof import.meta !== "undefined" && (import.meta as { env?: { VITE_AGENT_API_URL?: string } }).env?.VITE_AGENT_API_URL) ||
   "http://localhost:4000";
 

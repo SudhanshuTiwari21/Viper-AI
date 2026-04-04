@@ -195,8 +195,14 @@ interface ViperDiagnosticsApi {
   onUpdate: (cb: (payload: Array<[string, unknown[]]>) => void) => () => void;
 }
 
+interface ViperAuthApi {
+  /** Subscribe to viper://auth/callback deep links (Electron main → renderer). */
+  onAuthCallback: (cb: (payload: { code: string }) => void) => () => void;
+}
+
 interface ViperApi {
   platform: string;
+  auth: ViperAuthApi;
   workspace: {
     list: (root: string | null) => Promise<WorkspaceResult>;
     select: () => Promise<{ root: string; tree: unknown[] } | null>;

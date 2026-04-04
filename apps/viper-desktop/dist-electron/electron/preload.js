@@ -3,6 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 electron_1.contextBridge.exposeInMainWorld("viper", {
     platform: process.platform,
+    auth: {
+        onAuthCallback: (cb) => {
+            const handler = (_e, payload) => cb(payload);
+            electron_1.ipcRenderer.on("viper:auth-callback", handler);
+            return () => electron_1.ipcRenderer.removeListener("viper:auth-callback", handler);
+        },
+    },
     workspace: {
         list: (root) => electron_1.ipcRenderer.invoke("workspace:list", root),
         select: () => electron_1.ipcRenderer.invoke("workspace:select"),

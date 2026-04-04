@@ -25,7 +25,8 @@
  */
 
 import { getPool, insertUsageEvent } from "@repo/database";
-import { resolveModelSpec } from "@repo/model-registry";
+import type { UsageBillingBucket } from "@repo/database";
+import { resolveModelSpec, computeUsageCostUnits } from "@repo/model-registry";
 import { workflowLog } from "../services/assistant.service.js";
 import type { RouteTelemetry } from "../types/route-telemetry.js";
 import type { ResolvedEntitlements } from "./entitlements.service.js";
@@ -67,6 +68,8 @@ export interface RecordUsageEventParams {
   tool_call_count?: number | null;
   /** Request identity for workflowLog (already in telemetry but explicit here). */
   identity: { request_id: string; workspace_id: string; conversation_id: string | null };
+  /** Product billing bucket for credit quotas (matches resolved chat `modelTier`). */
+  billing_bucket: UsageBillingBucket;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,11 +85,27 @@ export interface RecordUsageEventParams {
  * - On insert conflict (duplicate request_id): silently no-ops (idempotent).
  * - Errors from DB insert are caught and logged as warnings (never crash the request).
  */
+function streamingAssumedTotalTokens(): number {
+  const raw = process.env["VIPER_USAGE_STREAMING_ASSUMED_TOKENS"];
+  if (!raw || raw.trim() === "") return 4096;
+  const n = parseInt(raw.trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : 4096;
+}
+
 export async function recordUsageEvent(params: RecordUsageEventParams): Promise<void> {
-  const { telemetry, stream, entitlements, tokens, tool_call_count, identity } = params;
+  const { telemetry, stream, entitlements, tokens, tool_call_count, identity, billing_bucket } =
+    params;
 
   // Derive provider from model registry; fall back to "openai".
   const provider = resolveModelSpec(telemetry.final_model_id)?.provider ?? "openai";
+
+  const cost_units = computeUsageCostUnits({
+    modelId: telemetry.final_model_id,
+    inputTokens: tokens?.input_tokens,
+    outputTokens: tokens?.output_tokens,
+    totalTokens: tokens?.total_tokens,
+    assumedTotalTokensWhenUnknown: stream ? streamingAssumedTotalTokens() : 2048,
+  });
 
   const eventData = {
     request_id: telemetry.request_id,
@@ -108,6 +127,8 @@ export async function recordUsageEvent(params: RecordUsageEventParams): Promise<
     output_tokens: tokens?.output_tokens ?? null,
     total_tokens: tokens?.total_tokens ?? null,
     tool_call_count: tool_call_count ?? null,
+    billing_bucket,
+    cost_units,
     metadata: {
       stream,
       fallback_chain: telemetry.fallback_chain,
@@ -121,7 +142,9 @@ export async function recordUsageEvent(params: RecordUsageEventParams): Promise<
       ts: new Date().toISOString(),
       ...eventData,
     };
-    process.stdout.write(JSON.stringify(line) + "\n");
+    process.stdout.write(
+      JSON.stringify(line, (_key, value) => (typeof value === "bigint" ? value.toString() : value)) + "\n",
+    );
   }
 
   // DB path — only when kill-switch is on AND a DB connection is available.

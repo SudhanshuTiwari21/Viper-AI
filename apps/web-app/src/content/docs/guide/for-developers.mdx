@@ -1,0 +1,71 @@
+---
+title: Build from source
+description: Run the backend and Viper Desktop from the monorepo for local development.
+---
+
+This page is for **contributors and internal testers** cloning [the ViperAI repository](https://github.com/viperaiinc/viper). End users with a packaged build can ignore it.
+
+## Requirements
+
+- **Node.js** 18+ (20+ is common in this repo)
+- **npm** at the repository root
+- **PostgreSQL** when using features that persist to the database
+- **OpenAI API key** (or whichever provider your `apps/backend` config expects) for LLM routes
+- **Qdrant** (optional) if you enable embedding / vector search—otherwise many flows still work
+
+Full variable reference: **`docs/ENV.md`** and `apps/backend/.env.example` when present.
+
+## Clone and install
+
+```bash
+git clone https://github.com/viperaiinc/viper.git ViperAI
+cd ViperAI
+npm install
+```
+
+Run workspace commands from the **repo root** unless noted otherwise.
+
+## Environment
+
+Configure at least:
+
+- `OPENAI_API_KEY` — chat and agent paths
+- `DATABASE_URL` — when using Postgres-backed features
+- `QDRANT_URL` — optional, for embeddings
+
+The desktop renderer uses **`VITE_AGENT_API_URL`** (often `http://localhost:4000` in dev). Match this to wherever the API listens.
+
+## Run the API
+
+```bash
+npm run dev -w @repo/backend
+```
+
+Default: **http://localhost:4000** (override with `PORT` if configured).
+
+## Run Viper Desktop
+
+```bash
+npm run dev -w viper-desktop
+```
+
+Open a workspace folder and use Chat once the backend is healthy.
+
+## Optional: this docs site
+
+```bash
+npm run dev -w web-app
+```
+
+## Database migrations
+
+When using Postgres:
+
+```bash
+npm run migrate -w @repo/database
+```
+
+## Deeper reference
+
+- **`docs/BUILD_AND_RUN.md`** — cold builds, ordering, and CI-oriented notes  
+- **[Troubleshooting](/docs/guide/troubleshooting)** — user-surface issues; dev-only details point back to the repo docs  

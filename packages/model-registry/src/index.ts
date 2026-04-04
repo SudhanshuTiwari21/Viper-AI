@@ -15,4 +15,5 @@ export {
   listPremiumSelectableModels,
   isPremiumSelectableModelId,
 } from "./registry.js";
+export { resolveUsageCreditWeightPer1k, computeUsageCostUnits } from "./usage-credits.js";
 

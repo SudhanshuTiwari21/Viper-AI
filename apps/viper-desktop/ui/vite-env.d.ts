@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_AGENT_API_URL?: string;
+  /** Marketing / auth web app origin for “Sign in in browser” (e.g. http://localhost:3000). */
+  readonly VITE_WEB_APP_URL?: string;
   /**
    * When subscription URLs use `localhost` / `127.0.0.1`, rewrite to this origin for clients
    * that fetch subscriptions from another device (e.g. v2RayTun on Android). Example: `http://192.168.1.10:4000`

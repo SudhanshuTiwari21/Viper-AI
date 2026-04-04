@@ -8,7 +8,12 @@ export interface EditorTab {
   content: string;
   savedContent: string;
   dirty: boolean;
+  /** Virtual tab shown in the main editor area (not a workspace file). */
+  kind?: "file" | "settings";
 }
+
+/** Arguments to `openTab` — `savedContent` and `dirty` are filled in by the hook. */
+export type EditorTabInput = Omit<EditorTab, "savedContent" | "dirty">;
 
 interface EditorState {
   tabs: EditorTab[];
@@ -18,14 +23,20 @@ interface EditorState {
 export function useEditorTabs() {
   const [state, setState] = useState<EditorState>({ tabs: [], activeId: null });
 
-  const openTab = useCallback((tab: EditorTab) => {
+  const openTab = useCallback((tab: EditorTabInput) => {
     setState((prev) => {
       const existing = prev.tabs.find((t) => t.path === tab.path);
       if (existing) {
         return {
           tabs: prev.tabs.map((t) =>
             t.id === existing.id
-              ? { ...t, content: tab.content, savedContent: tab.content, dirty: false }
+              ? {
+                  ...t,
+                  content: tab.content,
+                  savedContent: tab.content,
+                  dirty: false,
+                  kind: tab.kind ?? t.kind,
+                }
               : t
           ),
           activeId: existing.id,

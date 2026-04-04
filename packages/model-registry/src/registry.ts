@@ -19,6 +19,7 @@ const REGISTRY: Record<ModelId, ModelSpec> = {
     limits: { maxOutputTokens: 2048, maxToolCalls: 15, timeoutMs: 300_000 },
     priceClass: "low",
     latencyClass: "fast",
+    usageCreditWeightPer1k: 1,
   },
   [asModelId("gpt-4o")]: {
     id: asModelId("gpt-4o"),
@@ -30,6 +31,7 @@ const REGISTRY: Record<ModelId, ModelSpec> = {
     priceClass: "high",
     latencyClass: "medium",
     selectableInPremiumUi: true,
+    usageCreditWeightPer1k: 14,
   },
   [asModelId("gpt-4-turbo")]: {
     id: asModelId("gpt-4-turbo"),
@@ -41,6 +43,7 @@ const REGISTRY: Record<ModelId, ModelSpec> = {
     priceClass: "high",
     latencyClass: "medium",
     selectableInPremiumUi: true,
+    usageCreditWeightPer1k: 10,
   },
 } as const;
 

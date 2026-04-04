@@ -1,61 +1,40 @@
 ---
 title: Troubleshooting
-description: Common issues and how to fix them.
-section: Guide
-prev: mcp
-next: changelog
+description: Fix common problems when using the hosted Viper app—chat not loading, replies cutting off, or things feeling stuck.
 ---
 
-A collection of common issues encountered when setting up or using Viper AI, with step-by-step fixes.
+These steps assume you’re using **Viper as a normal app** (download or web) that talks to **our hosted service**. You should not need to run servers or developer tools.
 
 ---
 
-## CLI not found after install
+## Chat won’t load or says it can’t connect
 
-If `viper` is not recognized after running `npm install @viper-ai/cli -g`, your global npm bin directory may not be in your PATH.
+1. **Check your internet** — Open another site or app to confirm you’re online.
+2. **Sign out and sign back in** — Session or cookie issues sometimes show up as a generic connection error.
+3. **VPN or work network** — Some offices block real-time features. Try another network (e.g. phone hotspot) or ask IT whether traffic to Viper’s domains needs to be allowed.
+4. **Update the app** — Install the latest version from the place you got Viper; older builds can misbehave after we ship fixes.
 
-```bash
-# Find your global npm bin
-npm bin -g
+---
 
-# Add it to your PATH (bash/zsh)
-export PATH="$(npm bin -g):$PATH"
-```
+## Replies stop halfway or never start
 
-## Workspace fails to connect
+- **Wait a few seconds** — Long answers can pause briefly; scrolling up sometimes shows text still arriving.
+- **Send a shorter follow-up** — Huge pasted logs or files can hit limits; try summarizing in your own words or attaching less at once.
+- **Start a new thread** — If one conversation is stuck, a fresh chat often recovers.
+- **Quit and reopen Viper** — That clears a bad local state without touching your account.
 
-If `viper connect` hangs or returns an auth error:
+---
 
-1. Check your internet connection
-2. Ensure your GitHub token has `repo` and `read:org` scopes
-3. Try re-authenticating: `viper auth logout && viper auth login`
+## Search or “smart” context feels empty or wrong
 
-## Context indexing is slow
+- **Make sure the right folder is open** — Viper uses the workspace you opened; switch workspace if you’re in the wrong project.
+- **Try again after a short wait** — Right after opening a large repo, indexing can still be catching up.
+- If it **never** improves, **contact support** with what you expected to find—we can check whether something’s wrong on our side for your account.
 
-For large repositories, initial indexing can take several minutes. You can check progress:
+---
 
-```bash
-viper context status
-```
+## Still stuck?
 
-To speed up indexing, exclude large or generated directories in `viper.config.ts`:
+Use **Support** on this site or the in-app help channel your team uses. Include what you were doing, any error text you see, and whether it happens on one network or everywhere—that helps us reproduce it quickly.
 
-```ts
-export default {
-  context: {
-    exclude: ['node_modules', '.next', 'dist', '*.lock'],
-  },
-}
-```
-
-## Agents not responding
-
-If agents appear online but don't respond to prompts:
-
-1. Restart the agent fleet: `viper agents restart`
-2. Check logs: `viper logs --tail 50`
-3. Verify your workspace config: `viper config validate`
-
-## Getting more help
-
-If your issue isn't listed here, open a GitHub issue or join the Discord community.
+If you **build or host Viper yourself** (engineers only), use [Build from source](/docs/guide/for-developers) in the docs sidebar instead of this page.

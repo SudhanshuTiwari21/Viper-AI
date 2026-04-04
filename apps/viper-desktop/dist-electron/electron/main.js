@@ -14,10 +14,61 @@ const diagnostics_service_1 = require("../diagnostics/diagnostics-service");
 const extension_service_1 = require("../backend/extension-service");
 const debug_service_1 = require("../backend/debug-service");
 let mainWindow = null;
+/** One-time OAuth-style code from viper://auth/callback?code=… before any window is ready. */
+let pendingAuthCode = null;
 const isDev = process.env.NODE_ENV === "development" || !electron_1.app.isPackaged;
 // Ensure the macOS app name (menu bar, Cmd+Tab, etc.) says "Viper AI" instead of "Electron".
 if (process.platform === "darwin") {
     electron_1.app.setName("Viper AI");
+}
+function parseViperAuthCallbackUrl(raw) {
+    try {
+        const u = new URL(raw);
+        if (u.protocol !== "viper:")
+            return null;
+        if (u.hostname !== "auth")
+            return null;
+        if (u.pathname !== "/callback")
+            return null;
+        const code = u.searchParams.get("code");
+        return code && code.length > 0 ? code.trim() : null;
+    }
+    catch {
+        return null;
+    }
+}
+function broadcastAuthHandoff(code) {
+    for (const w of electron_1.BrowserWindow.getAllWindows()) {
+        if (w.isDestroyed())
+            continue;
+        w.webContents.send("viper:auth-callback", { code });
+    }
+    const focused = electron_1.BrowserWindow.getFocusedWindow();
+    if (focused && !focused.isDestroyed()) {
+        focused.focus();
+        return;
+    }
+    const fallback = mainWindow ?? electron_1.BrowserWindow.getAllWindows()[0];
+    if (fallback && !fallback.isDestroyed())
+        fallback.focus();
+}
+function handleAuthDeepLink(url) {
+    const code = parseViperAuthCallbackUrl(url);
+    if (!code)
+        return;
+    const wins = electron_1.BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+    if (wins.length === 0) {
+        pendingAuthCode = code;
+        return;
+    }
+    broadcastAuthHandoff(code);
+}
+function flushPendingAuthCode() {
+    if (!pendingAuthCode)
+        return;
+    const code = pendingAuthCode;
+    pendingAuthCode = null;
+    broadcastAuthHandoff(code);
 }
 function init() {
     // Backend services: workspace, files, terminal.
@@ -37,7 +88,27 @@ function init() {
             return;
         return electron_1.shell.openExternal(url.trim());
     });
+    try {
+        const electronProcess = process;
+        if (electronProcess.defaultApp && process.argv[1]) {
+            electron_1.app.setAsDefaultProtocolClient("viper", process.execPath, [path_1.default.resolve(process.argv[1])]);
+        }
+        else {
+            electron_1.app.setAsDefaultProtocolClient("viper");
+        }
+    }
+    catch {
+        /* protocol registration may fail in restricted environments */
+    }
     mainWindow = (0, window_1.createMainWindow)(isDev);
+    mainWindow.webContents.once("did-finish-load", () => {
+        flushPendingAuthCode();
+    });
+    for (const arg of process.argv) {
+        if (typeof arg === "string" && arg.startsWith("viper://")) {
+            handleAuthDeepLink(arg);
+        }
+    }
     // macOS application menu – let Electron generate the standard app menu
     // (it will automatically use app.name, which we've set to "Viper AI").
     const macAppMenu = process.platform === "darwin" ? { role: "appMenu" } : undefined;
@@ -246,14 +317,29 @@ function init() {
         mainWindow = null;
     });
 }
-electron_1.app.whenReady().then(init);
-electron_1.app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-        electron_1.app.quit();
-    }
-});
-electron_1.app.on("activate", () => {
-    if (mainWindow === null) {
-        init();
-    }
-});
+const gotTheLock = electron_1.app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    electron_1.app.quit();
+}
+else {
+    electron_1.app.on("second-instance", (_e, argv) => {
+        const url = argv.find((a) => typeof a === "string" && a.startsWith("viper://"));
+        if (url)
+            handleAuthDeepLink(url);
+    });
+    electron_1.app.on("open-url", (event, url) => {
+        event.preventDefault();
+        handleAuthDeepLink(url);
+    });
+    electron_1.app.whenReady().then(init);
+    electron_1.app.on("window-all-closed", () => {
+        if (process.platform !== "darwin") {
+            electron_1.app.quit();
+        }
+    });
+    electron_1.app.on("activate", () => {
+        if (mainWindow === null) {
+            init();
+        }
+    });
+}

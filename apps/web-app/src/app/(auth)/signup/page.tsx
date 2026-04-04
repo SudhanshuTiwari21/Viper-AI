@@ -91,7 +91,7 @@ function SignupForm() {
   return (
     <AuthCard
       title="Create account"
-      subtitle="Passwords are hashed with Argon2id. Use a strong unique password (10+ chars, mixed case and numbers)."
+      subtitle="We never store your password as plain text. Pick a unique password—at least 10 characters with uppercase, lowercase, and numbers."
     >
       {error ? (
         <div

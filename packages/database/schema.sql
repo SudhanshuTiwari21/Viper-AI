@@ -82,12 +82,58 @@ CREATE TABLE IF NOT EXISTS users (
   display_name     TEXT,
   auth_provider    TEXT,
   external_subject TEXT,
+  password_hash    TEXT        NULL,
+  email_verified_at TIMESTAMPTZ NULL,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
   ON users (lower(trim(email)));
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_provider_subject
+  ON users (auth_provider, external_subject)
+  WHERE external_subject IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash      TEXT        NOT NULL,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at      TIMESTAMPTZ NULL,
+  user_agent      TEXT        NULL,
+  ip_inferred     TEXT        NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens (user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_expires ON auth_refresh_tokens (expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_oauth_states (
+  state_hash      TEXT        PRIMARY KEY,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS auth_oauth_exchange_codes (
+  code_hash       TEXT        PRIMARY KEY,
+  user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  consumed_at     TIMESTAMPTZ NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_oauth_exchange_expires ON auth_oauth_exchange_codes (expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_email_verification_tokens (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash      TEXT        NOT NULL,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_email_verify_user ON auth_email_verification_tokens (user_id);
 
 CREATE TABLE IF NOT EXISTS workspaces (
   id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -157,12 +203,20 @@ CREATE TABLE IF NOT EXISTS usage_events (
   output_tokens       INT         NULL,
   total_tokens        INT         NULL,
   tool_call_count     INT         NULL,
+  billing_bucket      TEXT        NULL,
+  cost_units          BIGINT      NOT NULL DEFAULT 1,
   metadata            JSONB       NOT NULL DEFAULT '{}'::jsonb,
-  CONSTRAINT usage_events_request_id_uq UNIQUE (request_id)
+  CONSTRAINT usage_events_request_id_uq UNIQUE (request_id),
+  CONSTRAINT usage_events_billing_bucket_chk CHECK (
+    billing_bucket IS NULL OR billing_bucket IN ('auto', 'premium')
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_workspace_occurred
   ON usage_events (workspace_path_key, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_workspace_bucket_occurred
+  ON usage_events (workspace_path_key, billing_bucket, occurred_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_occurred
   ON usage_events (occurred_at DESC);

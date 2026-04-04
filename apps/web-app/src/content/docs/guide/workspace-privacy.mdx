@@ -1,0 +1,24 @@
+---
+title: Workspace & privacy
+description: What Viper sees in your project and what you should know before you chat.
+---
+
+## Your workspace
+
+The folder you open in Viper is your **workspace**. Features that need context—chat, search, indexing—use files **inside that folder** (and paths the app is allowed to read). Don’t open a directory that contains secrets you never want in context unless you exclude or relocate them.
+
+## What may leave your machine
+
+To generate answers, **prompts and relevant excerpts** are sent to the model provider your organization configures. Treat chat like any cloud AI tool: avoid pasting passwords, production keys, or regulated data you’re not allowed to share.
+
+## Sensitive projects
+
+- Prefer a **dedicated clone** or branch for experiments if policy requires it.
+- Keep credentials in **environment files or secret managers**, not in files you reference casually in chat.
+- If your team has **data residency** requirements, confirm the deployment matches policy before using hosted models.
+
+## Local vs hosted
+
+The Viper app runs on your computer; **the AI service runs in the cloud** so you get answers without running anything yourself. If your employer uses a **private** Viper deployment, your IT team can explain where requests go.
+
+For everyday connection issues, see [Troubleshooting](/docs/guide/troubleshooting).

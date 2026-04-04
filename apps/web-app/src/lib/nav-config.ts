@@ -1,23 +1,17 @@
 export const NAV_CONFIG = [
   {
-    group: 'Guide',
+    group: 'Using Viper',
     items: [
-      { label: 'Introduction', slug: ['guide', 'introduction'] },
-      { label: 'Installation', slug: ['guide', 'installation'] },
-      { label: 'Accessibility', slug: ['guide', 'accessibility'] },
-      { label: 'MCP', slug: ['guide', 'mcp'] },
+      { label: 'Welcome', slug: ['guide', 'welcome'] },
+      { label: 'Get started', slug: ['guide', 'get-started'] },
+      { label: 'Chat', slug: ['guide', 'chat'] },
+      { label: 'Models', slug: ['guide', 'models'] },
+      { label: 'Workspace & privacy', slug: ['guide', 'workspace-privacy'] },
       { label: 'Troubleshooting', slug: ['guide', 'troubleshooting'] },
-      { label: 'Changelog', slug: ['guide', 'changelog'] },
-      { label: 'Roadmap', slug: ['guide', 'roadmap'] },
-      { label: 'Other distributions', slug: ['guide', 'other-distributions'] },
     ],
   },
   {
-    group: 'Menu',
-    items: [
-      { label: 'Components', slug: ['components'] },
-      { label: 'Primitives', slug: ['primitives'] },
-      { label: 'Icons', slug: ['icons'] },
-    ],
+    group: 'Developers',
+    items: [{ label: 'Build from source', slug: ['guide', 'for-developers'] }],
   },
 ]

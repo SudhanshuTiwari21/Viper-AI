@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { useWorkspaceContext } from "../contexts/workspace-context";
+import { useAppRoute } from "../contexts/app-route-context";
 import { DiagnosticsSubscription } from "../components/diagnostics-subscription";
+import { LoginPlaceholderPage, RegisterPlaceholderPage } from "../components/auth-placeholder-pages";
 import { ContextMenuProvider } from "../context-menu/context-menu-provider";
 
 interface LayoutProps {
@@ -16,7 +18,9 @@ function getWorkspaceName(root: string | undefined): string {
 
 export function Layout({ children }: LayoutProps) {
   const { workspace } = useWorkspaceContext();
-  const title = getWorkspaceName(workspace?.root);
+  const { route } = useAppRoute();
+  const isAuth = route === "login" || route === "register";
+  const title = isAuth ? "Viper AI" : getWorkspaceName(workspace?.root);
 
   return (
     <ContextMenuProvider>
@@ -30,10 +34,16 @@ export function Layout({ children }: LayoutProps) {
           </span>
           <div className="flex-1 min-w-0" />
         </header>
-        <DiagnosticsSubscription />
-        <main className="flex-1 flex min-h-0">
-          {children}
-        </main>
+        {isAuth ? (
+          <main className="flex-1 min-h-0 overflow-auto">
+            {route === "login" ? <LoginPlaceholderPage /> : <RegisterPlaceholderPage />}
+          </main>
+        ) : (
+          <>
+            <DiagnosticsSubscription />
+            <main className="flex-1 flex min-h-0">{children}</main>
+          </>
+        )}
       </div>
     </ContextMenuProvider>
   );

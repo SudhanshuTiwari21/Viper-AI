@@ -9,6 +9,7 @@ import {
   insertUsageEvent,
   getUsageEventByRequestId,
   countUsageEventsForDay,
+  sumCostUnitsForWorkspaceMonth,
   type UsageEventRow,
   type InsertUsageEventParams,
 } from "../usage-events.repository.js";
@@ -49,6 +50,8 @@ const BASE_PARAMS: InsertUsageEventParams = {
   output_tokens: 300,
   total_tokens: 450,
   tool_call_count: null,
+  billing_bucket: "premium",
+  cost_units: 42,
   metadata: { stream: false },
 };
 
@@ -59,6 +62,8 @@ const BASE_ROW: UsageEventRow = {
   workspace_uuid: null,
   user_uuid: null,
   tool_call_count: null,
+  billing_bucket: "premium",
+  cost_units: "42",
   metadata: { stream: false },
 } as UsageEventRow;
 
@@ -122,11 +127,15 @@ describe("insertUsageEvent", () => {
     expect(params[2]).toBeNull();
     expect(params[3]).toBeNull();
     expect(params[4]).toBeNull();
-    // input_tokens ($16), output_tokens ($17), total_tokens ($18), tool_call_count ($19)
+    // input_tokens ($16), output_tokens ($17), total_tokens ($18), tool_call_count ($19),
+    // billing_bucket ($20), cost_units ($21), metadata ($22)
     expect(params[15]).toBeNull();
     expect(params[16]).toBeNull();
     expect(params[17]).toBeNull();
     expect(params[18]).toBeNull();
+    expect(params[19]).toBeNull();
+    expect(params[20]).toBe("1");
+    expect(params[21]).toBe("{}");
   });
 
   it("returns null on duplicate request_id (ON CONFLICT DO NOTHING returns empty)", async () => {
@@ -140,8 +149,8 @@ describe("insertUsageEvent", () => {
     await insertUsageEvent(pool, { ...BASE_PARAMS, metadata: { stream: true, extra: 42 } });
     const call0 = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const [, params] = call0;
-    // metadata is $20
-    expect(params[19]).toBe(JSON.stringify({ stream: true, extra: 42 }));
+    // metadata is $22
+    expect(params[21]).toBe(JSON.stringify({ stream: true, extra: 42 }));
   });
 
   it("defaults metadata to '{}' when not provided", async () => {
@@ -150,7 +159,7 @@ describe("insertUsageEvent", () => {
     await insertUsageEvent(pool, noMeta);
     const call0 = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const [, params] = call0;
-    expect(params[19]).toBe("{}");
+    expect(params[21]).toBe("{}");
   });
 
   it("populates workspace_uuid and user_uuid when provided", async () => {
@@ -235,5 +244,27 @@ describe("countUsageEventsForDay", () => {
     expect(sql).toMatch(/occurred_at >= /i);
     expect(sql).toMatch(/occurred_at < /i);
     expect(sql).toMatch(/INTERVAL '1 day'/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sumCostUnitsForWorkspaceMonth
+// ---------------------------------------------------------------------------
+
+describe("sumCostUnitsForWorkspaceMonth", () => {
+  it("returns bigint from COALESCE(SUM(cost_units), 0)", async () => {
+    const pool = makePool([{ s: "12345" }]);
+    const total = await sumCostUnitsForWorkspaceMonth(pool, "mykey", "auto", "2026-04-15");
+    expect(total).toBe(12345n);
+    const call0 = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, params] = call0;
+    expect(params[0]).toBe("mykey");
+    expect(params[1]).toBe("auto");
+    expect(params[2]).toBe("2026-04-15");
+  });
+
+  it("returns 0n when no rows", async () => {
+    const pool = makePool([{ s: "0" }]);
+    expect(await sumCostUnitsForWorkspaceMonth(pool, "k", "premium", "2026-01-10")).toBe(0n);
   });
 });

@@ -17,6 +17,9 @@ export interface UserRow {
   display_name: string | null;
   auth_provider: string | null;
   external_subject: string | null;
+  /** Server-only: never expose in API responses. */
+  password_hash: string | null;
+  email_verified_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -26,6 +29,8 @@ export interface CreateUserParams {
   display_name?: string | null;
   auth_provider?: string | null;
   external_subject?: string | null;
+  password_hash?: string | null;
+  email_verified_at?: string | null;
 }
 
 /**
@@ -35,14 +40,16 @@ export interface CreateUserParams {
  */
 export async function createUser(pool: Pool, params: CreateUserParams): Promise<UserRow> {
   const result = await pool.query<UserRow>(
-    `INSERT INTO users (email, display_name, auth_provider, external_subject)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO users (email, display_name, auth_provider, external_subject, password_hash, email_verified_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
     [
       params.email,
       params.display_name ?? null,
       params.auth_provider ?? null,
       params.external_subject ?? null,
+      params.password_hash ?? null,
+      params.email_verified_at ?? null,
     ],
   );
   return result.rows[0]!;
@@ -79,6 +86,23 @@ export async function getUserByExternalSubject(
     [auth_provider, external_subject],
   );
   return result.rows[0] ?? null;
+}
+
+/** Public profile fields only (safe for JSON responses). */
+export function toPublicUser(row: UserRow): {
+  id: string;
+  email: string;
+  display_name: string | null;
+  auth_provider: string | null;
+  email_verified: boolean;
+} {
+  return {
+    id: row.id,
+    email: row.email,
+    display_name: row.display_name,
+    auth_provider: row.auth_provider,
+    email_verified: row.email_verified_at != null,
+  };
 }
 
 export interface UpdateUserParams {

@@ -75,7 +75,7 @@ function LoginForm() {
   return (
     <AuthCard
       title="Sign in"
-      subtitle="Use your Viper account. OAuth and email credentials are protected with Argon2id and rotating refresh tokens."
+      subtitle="Sign in with email or Google. One Viper account for the web and desktop—we protect your session in the background so you stay signed in safely."
     >
       {error ? (
         <div

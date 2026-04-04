@@ -33,5 +33,10 @@ export interface ModelSpec {
   latencyClass?: LatencyClass;
   /** When true, allowed for Premium tier picker (API `premiumModelId` + desktop UI). */
   selectableInPremiumUi?: boolean;
+  /**
+   * Usage-credit weight per 1k tokens (input+output) for quota metering.
+   * Baseline: `gpt-4o-mini` = 1. Higher models burn included credits faster.
+   */
+  usageCreditWeightPer1k?: number;
 }
 

@@ -294,7 +294,7 @@ function Newsletter() {
           className="text-neutral-400 text-lg mb-12 font-light max-w-md mx-auto leading-relaxed"
         >
           New posts on autonomous engineering, agent architecture, and product
-          updates — delivered straight to your inbox.
+          updates. Email signup is coming soon.
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 18 }}
@@ -304,11 +304,19 @@ function Newsletter() {
         >
           <input
             type="email"
+            disabled
+            readOnly
             placeholder="you@company.com"
-            className="h-12 flex-1 w-full sm:w-auto bg-black border border-border-muted hover:border-border-active focus:border-border-active outline-none px-4 text-sm text-white placeholder:text-neutral-600 transition-colors font-sans"
+            aria-label="Email (coming soon)"
+            className="h-12 flex-1 w-full sm:w-auto cursor-not-allowed bg-black/50 border border-border-muted outline-none px-4 text-sm text-white/50 placeholder:text-neutral-600 font-sans opacity-70"
           />
-          <ShimmerButton className="h-12 px-7 text-sm font-semibold cursor-pointer hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200 whitespace-nowrap">
-            Subscribe →
+          <ShimmerButton
+            type="button"
+            disabled
+            aria-disabled="true"
+            className="h-12 px-7 text-sm font-semibold cursor-not-allowed opacity-70 hover:scale-100 whitespace-nowrap"
+          >
+            Coming soon
           </ShimmerButton>
         </motion.div>
       </div>

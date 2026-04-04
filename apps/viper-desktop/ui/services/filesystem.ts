@@ -5,47 +5,6 @@ export interface FileNode {
   children?: FileNode[];
 }
 
-declare global {
-  interface Window {
-    viper: {
-      workspace: {
-        list: (root: string | null) => Promise<{ root: string | null; tree: FileNode[] }>;
-        select: () => Promise<{ root: string; tree: FileNode[] } | null>;
-        watch: (root: string | null) => Promise<void>;
-      };
-      fs: {
-        readFile: (root: string, rel: string) => Promise<string>;
-        writeFile: (root: string, rel: string, content: string) => Promise<void>;
-        createFile: (root: string, rel: string) => Promise<void>;
-        createFolder: (root: string, rel: string) => Promise<void>;
-        deletePath: (root: string, rel: string) => Promise<void>;
-        renamePath: (root: string, oldRel: string, newRel: string) => Promise<void>;
-        onFileChanged: (cb: (payload: { path: string }) => void) => void;
-      };
-      terminal: {
-        create: (root: string) => Promise<{ ok: boolean }>;
-        write: (data: string) => Promise<void>;
-        resize: (cols: number, rows: number) => Promise<void>;
-        destroy: () => Promise<void>;
-        onData: (cb: (data: string) => void) => void;
-      };
-      shell: {
-        revealInFolder: (workspaceRoot: string, relPath: string) => Promise<void>;
-      };
-      git: {
-        branch: (root: string) => Promise<string>;
-        log: (root: string, relPath: string) => Promise<string[]>;
-      };
-      diagnostics: {
-        start: (root: string | null) => Promise<void>;
-        runForFile: (root: string, relPath: string) => Promise<void>;
-        restart: () => Promise<void>;
-        onUpdate: (cb: (payload: Array<[string, Array<{ file: string; line: number; column?: number; message: string; severity: "error" | "warning" | "info"; source?: string }>]>) => void) => () => void;
-      };
-    };
-  }
-}
-
 export async function listWorkspace(root: string | null) {
   return window.viper.workspace.list(root);
 }
@@ -81,6 +40,5 @@ export const diagnosticsApi = {
   runForFile: (root: string, relPath: string) =>
     window.viper.diagnostics.runForFile(root, relPath),
   restart: () => window.viper.diagnostics.restart(),
-  onUpdate: (cb: (payload: Array<[string, Array<{ file: string; line: number; column?: number; message: string; severity: "error" | "warning" | "info"; source?: string }>]>) => void) =>
-    window.viper.diagnostics.onUpdate(cb),
+  onUpdate: (cb: (payload: Array<[string, unknown[]]>) => void) => window.viper.diagnostics.onUpdate(cb),
 };

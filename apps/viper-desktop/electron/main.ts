@@ -10,12 +10,59 @@ import { setupExtensionService } from "../backend/extension-service";
 import { setupDebugService } from "../backend/debug-service";
 
 let mainWindow: BrowserWindow | null = null;
+/** One-time OAuth-style code from viper://auth/callback?code=… before any window is ready. */
+let pendingAuthCode: string | null = null;
 
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 // Ensure the macOS app name (menu bar, Cmd+Tab, etc.) says "Viper AI" instead of "Electron".
 if (process.platform === "darwin") {
   app.setName("Viper AI");
+}
+
+function parseViperAuthCallbackUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "viper:") return null;
+    if (u.hostname !== "auth") return null;
+    if (u.pathname !== "/callback") return null;
+    const code = u.searchParams.get("code");
+    return code && code.length > 0 ? code.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function broadcastAuthHandoff(code: string): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    w.webContents.send("viper:auth-callback", { code });
+  }
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) {
+    focused.focus();
+    return;
+  }
+  const fallback = mainWindow ?? BrowserWindow.getAllWindows()[0];
+  if (fallback && !fallback.isDestroyed()) fallback.focus();
+}
+
+function handleAuthDeepLink(url: string): void {
+  const code = parseViperAuthCallbackUrl(url);
+  if (!code) return;
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  if (wins.length === 0) {
+    pendingAuthCode = code;
+    return;
+  }
+  broadcastAuthHandoff(code);
+}
+
+function flushPendingAuthCode(): void {
+  if (!pendingAuthCode) return;
+  const code = pendingAuthCode;
+  pendingAuthCode = null;
+  broadcastAuthHandoff(code);
 }
 
 function init(): void {
@@ -38,7 +85,28 @@ function init(): void {
     return shell.openExternal(url.trim());
   });
 
+  try {
+    const electronProcess = process as NodeJS.Process & { defaultApp?: boolean };
+    if (electronProcess.defaultApp && process.argv[1]) {
+      app.setAsDefaultProtocolClient("viper", process.execPath, [path.resolve(process.argv[1])]);
+    } else {
+      app.setAsDefaultProtocolClient("viper");
+    }
+  } catch {
+    /* protocol registration may fail in restricted environments */
+  }
+
   mainWindow = createMainWindow(isDev);
+
+  mainWindow.webContents.once("did-finish-load", () => {
+    flushPendingAuthCode();
+  });
+
+  for (const arg of process.argv) {
+    if (typeof arg === "string" && arg.startsWith("viper://")) {
+      handleAuthDeepLink(arg);
+    }
+  }
 
   // macOS application menu – let Electron generate the standard app menu
   // (it will automatically use app.name, which we've set to "Viper AI").
@@ -240,16 +308,32 @@ function init(): void {
   });
 }
 
-app.whenReady().then(init);
+const gotTheLock = app.requestSingleInstanceLock();
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_e, argv) => {
+    const url = argv.find((a) => typeof a === "string" && a.startsWith("viper://"));
+    if (url) handleAuthDeepLink(url);
+  });
 
-app.on("activate", () => {
-  if (mainWindow === null) {
-    init();
-  }
-});
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleAuthDeepLink(url);
+  });
+
+  app.whenReady().then(init);
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
+  app.on("activate", () => {
+    if (mainWindow === null) {
+      init();
+    }
+  });
+}

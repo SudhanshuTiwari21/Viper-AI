@@ -5,16 +5,11 @@
  *  - Never UPDATE rows — append only.
  *  - UNIQUE(request_id) is enforced at DB level; insertUsageEvent silently
  *    swallows conflict (ON CONFLICT DO NOTHING) for idempotent re-insertion.
- *  - Token columns (input_tokens, output_tokens, total_tokens) are nullable:
- *    * Non-stream path: populated when OpenAI response includes a `usage` object.
- *    * Stream path: NULL in F.31 — streaming usage deltas are not yet aggregated
- *      (deferred to F.32+, or until OpenAI stream-usage is wired).
- *  - tool_call_count: nullable; agentic paths will populate this in F.32 when
- *    tool-round counting is wired through RouteMeta.
- *  - metadata JSONB carries `stream: boolean`, `fallback_chain: string[]`,
- *    and any future extensibility without a schema migration.
+ *  - billing_bucket + cost_units: credit-based quota (see VIPER_USAGE_AND_REVENUE_MODEL.md).
  */
 import type { Pool } from "pg";
+
+export type UsageBillingBucket = "auto" | "premium";
 
 export interface UsageEventRow {
   id: string;
@@ -38,6 +33,8 @@ export interface UsageEventRow {
   output_tokens: number | null;
   total_tokens: number | null;
   tool_call_count: number | null;
+  billing_bucket: UsageBillingBucket | null;
+  cost_units: string;
   metadata: Record<string, unknown>;
 }
 
@@ -61,6 +58,8 @@ export interface InsertUsageEventParams {
   output_tokens?: number | null;
   total_tokens?: number | null;
   tool_call_count?: number | null;
+  billing_bucket?: UsageBillingBucket | null;
+  cost_units?: bigint | number | string;
   metadata?: Record<string, unknown>;
 }
 
@@ -73,19 +72,28 @@ export async function insertUsageEvent(
   pool: Pool,
   params: InsertUsageEventParams,
 ): Promise<UsageEventRow | null> {
+  const costUnits =
+    typeof params.cost_units === "bigint"
+      ? params.cost_units.toString()
+      : params.cost_units != null
+        ? String(params.cost_units)
+        : "1";
+
   const result = await pool.query<UsageEventRow>(
     `INSERT INTO usage_events (
        request_id, workspace_path_key, workspace_uuid, user_uuid,
        conversation_id, mode, intent, provider,
        primary_model_id, final_model_id, route_mode,
        effective_model_tier, tier_downgraded, fallback_count, latency_ms,
-       input_tokens, output_tokens, total_tokens, tool_call_count, metadata
+       input_tokens, output_tokens, total_tokens, tool_call_count,
+       billing_bucket, cost_units, metadata
      ) VALUES (
        $1, $2, $3, $4,
        $5, $6, $7, $8,
        $9, $10, $11,
        $12, $13, $14, $15,
-       $16, $17, $18, $19, $20::jsonb
+       $16, $17, $18, $19,
+       $20, $21::bigint, $22::jsonb
      )
      ON CONFLICT (request_id) DO NOTHING
      RETURNING *`,
@@ -109,16 +117,14 @@ export async function insertUsageEvent(
       params.output_tokens ?? null,
       params.total_tokens ?? null,
       params.tool_call_count ?? null,
+      params.billing_bucket ?? null,
+      costUnits,
       JSON.stringify(params.metadata ?? {}),
     ],
   );
   return result.rows[0] ?? null;
 }
 
-/**
- * Fetch a single usage event by request_id (for tests / reconciliation).
- * Not used on the hot path.
- */
 export async function getUsageEventByRequestId(
   pool: Pool,
   request_id: string,
@@ -132,20 +138,11 @@ export async function getUsageEventByRequestId(
 
 /**
  * F.33 — Count usage events for a workspace on the current UTC day.
- *
- * This is the "live tail" component of monthly quota computation:
- * because the aggregation job only processes closed days, the current
- * day's events are not yet in usage_rollups_daily and must be counted
- * directly from usage_events.
- *
- * todayUtc: the current UTC date as "YYYY-MM-DD" (caller supplies for testability).
- *
- * Returns a BigInt-safe string that should be parsed with parseInt() or BigInt().
  */
 export async function countUsageEventsForDay(
   pool: Pool,
   workspacePathKey: string,
-  dayUtc: string, // "YYYY-MM-DD"
+  dayUtc: string,
 ): Promise<string> {
   const result = await pool.query<{ cnt: string }>(
     `SELECT COUNT(*)::text AS cnt
@@ -156,4 +153,25 @@ export async function countUsageEventsForDay(
     [workspacePathKey, dayUtc],
   );
   return result.rows[0]?.cnt ?? "0";
+}
+
+/**
+ * Sum cost_units for a workspace in the UTC calendar month containing `todayUtc` ("YYYY-MM-DD").
+ */
+export async function sumCostUnitsForWorkspaceMonth(
+  pool: Pool,
+  workspacePathKey: string,
+  billingBucket: UsageBillingBucket,
+  todayUtc: string,
+): Promise<bigint> {
+  const result = await pool.query<{ s: string }>(
+    `SELECT COALESCE(SUM(cost_units), 0)::text AS s
+     FROM usage_events
+     WHERE workspace_path_key = $1
+       AND billing_bucket = $2
+       AND occurred_at >= date_trunc('month', ($3::date)::timestamptz)
+       AND occurred_at < date_trunc('month', ($3::date)::timestamptz) + interval '1 month'`,
+    [workspacePathKey, billingBucket, todayUtc],
+  );
+  return BigInt(result.rows[0]?.s ?? "0");
 }

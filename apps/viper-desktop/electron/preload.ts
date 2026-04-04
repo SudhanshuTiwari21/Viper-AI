@@ -6,6 +6,13 @@ declare const window: any;
 
 contextBridge.exposeInMainWorld("viper", {
   platform: process.platform,
+  auth: {
+    onAuthCallback: (cb: (payload: { code: string }) => void) => {
+      const handler = (_e: unknown, payload: { code: string }) => cb(payload);
+      ipcRenderer.on("viper:auth-callback", handler);
+      return () => ipcRenderer.removeListener("viper:auth-callback", handler);
+    },
+  },
   workspace: {
     list: (root: string | null) =>
       ipcRenderer.invoke("workspace:list", root) as Promise<{ root: string | null; tree: { name: string; path: string; isDirectory: boolean; children?: unknown[] }[] }>,

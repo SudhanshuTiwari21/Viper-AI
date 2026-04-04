@@ -1,6 +1,8 @@
 import React, { Component, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { WorkspaceProvider } from "./contexts/workspace-context";
+import { AuthProvider } from "./contexts/auth-context";
+import { AppRouteProvider } from "./contexts/app-route-context";
 import { CurrentFileProvider } from "./contexts/current-file-context";
 import { OutputProvider } from "./contexts/output-context";
 import { StatusBarProvider } from "./contexts/status-bar-context";
@@ -9,6 +11,7 @@ import { DiagnosticsProvider } from "./contexts/diagnostics-context";
 import { PendingEditsProvider } from "./contexts/pending-edits-context";
 import { Layout } from "./app/layout";
 import { Page } from "./app/page";
+import { DesktopAuthDeepLinkListener } from "./components/desktop-auth-deep-link";
 import "./styles/globals.css";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -56,21 +59,26 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 function App() {
   return (
     <WorkspaceProvider>
-      <CurrentFileProvider>
-        <OutputProvider>
-          <StatusBarProvider>
-            <DiagnosticsProvider>
-              <ChatProvider>
-                <PendingEditsProvider>
-                  <Layout>
-                    <Page />
-                  </Layout>
-                </PendingEditsProvider>
-              </ChatProvider>
-            </DiagnosticsProvider>
-          </StatusBarProvider>
-        </OutputProvider>
-      </CurrentFileProvider>
+      <AuthProvider>
+        <AppRouteProvider>
+          <DesktopAuthDeepLinkListener />
+          <CurrentFileProvider>
+            <OutputProvider>
+              <StatusBarProvider>
+                <DiagnosticsProvider>
+                  <ChatProvider>
+                    <PendingEditsProvider>
+                      <Layout>
+                        <Page />
+                      </Layout>
+                    </PendingEditsProvider>
+                  </ChatProvider>
+                </DiagnosticsProvider>
+              </StatusBarProvider>
+            </OutputProvider>
+          </CurrentFileProvider>
+        </AppRouteProvider>
+      </AuthProvider>
     </WorkspaceProvider>
   );
 }

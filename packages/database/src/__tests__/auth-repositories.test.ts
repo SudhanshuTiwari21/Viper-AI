@@ -65,6 +65,8 @@ const USER_ROW = {
   display_name: "Alice",
   auth_provider: null,
   external_subject: null,
+  password_hash: null,
+  email_verified_at: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -101,6 +103,8 @@ describe("createUser", () => {
     expect(params[1]).toBe("Alice");
     expect(params[2]).toBeNull(); // auth_provider
     expect(params[3]).toBeNull(); // external_subject
+    expect(params[4]).toBeNull(); // password_hash
+    expect(params[5]).toBeNull(); // email_verified_at
   });
 
   it("propagates unique-violation error (duplicate email)", async () => {

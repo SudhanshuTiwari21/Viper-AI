@@ -16,6 +16,7 @@ import { editorRoutes } from "./routes/editor.routes.js";
 import { gitRoutes } from "./routes/git.routes.js";
 import { testingRoutes } from "./routes/testing.routes.js";
 import { opsRoutes } from "./routes/ops.routes.js";
+import { authRoutes } from "./routes/auth.routes.js";
 
 const app = Fastify({
   logger: true,
@@ -33,8 +34,24 @@ if (process.env.DATABASE_URL) {
   }
 }
 
+const webOrigins = (process.env["VIPER_WEB_APP_ORIGIN"] ?? "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 await app.register(cors, {
-  origin: true,
+  origin: (origin, cb) => {
+    if (!origin) {
+      cb(null, true);
+      return;
+    }
+    if (webOrigins.length === 0 || webOrigins.includes(origin)) {
+      cb(null, true);
+      return;
+    }
+    cb(null, false);
+  },
+  credentials: true,
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 });
@@ -53,6 +70,7 @@ await app.register(editorRoutes);
 await app.register(gitRoutes);
 await app.register(testingRoutes);
 await app.register(opsRoutes);
+await app.register(authRoutes, { prefix: "/auth" });
 
 const port = Number(process.env.PORT) || 4000;
 const host = process.env.HOST || "0.0.0.0";

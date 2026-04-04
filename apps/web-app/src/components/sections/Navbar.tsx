@@ -30,13 +30,12 @@ const NAV_ITEMS: NavItem[] = [
   {
     label: 'Use Cases',
     dropdown: [
-      { label: 'Code Review', href: '/code-review' },
+      { label: 'Codebase review', href: '/code-review' },
       { label: 'Agents', href: '/agents' },
       { label: 'Product Management', href: '/product-management' },
     ],
   },
-  { label: 'Documentation', href: '/docs' },
-  { label: 'Pricing', href: '#' },
+  { label: 'Pricing', href: '/pricing' },
   {
     label: 'Resources',
     dropdown: [
@@ -47,11 +46,10 @@ const NAV_ITEMS: NavItem[] = [
 ]
 
 const MOBILE_ITEMS: { label: string; href: string }[] = [
-  { label: 'Code Review', href: '/code-review' },
+  { label: 'Codebase review', href: '/code-review' },
   { label: 'Agents', href: '/agents' },
   { label: 'Product Management', href: '/product-management' },
-  { label: 'Documentation', href: '/docs' },
-  { label: 'Pricing', href: '#' },
+  { label: 'Pricing', href: '/pricing' },
   { label: 'Blog', href: '/blog' },
   { label: 'Support', href: '/support' },
 ]
@@ -222,31 +220,16 @@ export default function Navbar() {
           })}
         </div>
 
-        {/* ── Right: Download + Mobile toggle ── */}
+        {/* ── Right: Coming soon + Mobile toggle ── */}
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className={cn(
-              buttonVariants({ variant: 'ghost' }),
-              'hidden md:inline-flex text-[15px] font-sans font-normal text-white/90 hover:text-white hover:bg-white/10 h-8 px-3',
-            )}
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className={cn(
-              buttonVariants({ variant: 'outline' }),
-              'hidden md:inline-flex text-[15px] font-sans font-medium h-8 px-4 border-white/30 hover:bg-white hover:text-black',
-            )}
-          >
-            Sign up
-          </Link>
           <Button
+            type="button"
             variant="outline"
-            className="hidden lg:inline-flex cursor-pointer text-[15px] font-sans font-medium h-8 px-5 border-white/30 hover:bg-white hover:text-black hover:border-white transition-all duration-200"
+            disabled
+            aria-disabled="true"
+            className="hidden lg:inline-flex text-[15px] font-sans font-medium h-8 px-5 border-white/20 text-white/50 cursor-not-allowed opacity-80"
           >
-            Download
+            Coming soon
           </Button>
 
           {/* Mobile hamburger */}
@@ -283,22 +266,14 @@ export default function Navbar() {
             ))}
           </div>
           <div className="flex flex-col gap-2 pb-4">
-            <Link
-              href="/login"
-              onClick={() => setMobileOpen(false)}
-              className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-center')}
+            <Button
+              type="button"
+              variant="outline"
+              disabled
+              aria-disabled="true"
+              className="w-full cursor-not-allowed border-white/20 text-white/50 opacity-80"
             >
-              Sign in
-            </Link>
-            <Link
-              href="/signup"
-              onClick={() => setMobileOpen(false)}
-              className={cn(buttonVariants({ variant: 'default' }), 'w-full justify-center')}
-            >
-              Sign up
-            </Link>
-            <Button className="w-full" onClick={() => setMobileOpen(false)}>
-              Download
+              Coming soon
             </Button>
           </div>
         </div>

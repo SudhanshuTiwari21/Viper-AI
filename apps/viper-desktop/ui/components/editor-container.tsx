@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { MonacoEditor } from "./monaco-editor";
 import { MonacoDiffEditor, UndoAIBar } from "./monaco-diff-editor";
 import { EditorWelcome } from "./editor-welcome";
+import { IdeSettingsPage } from "./ide-settings-page";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useCurrentFile } from "../contexts/current-file-context";
 import { useStatusBar } from "../contexts/status-bar-context";
@@ -67,10 +68,28 @@ export function EditorContainer() {
       window.removeEventListener("viper:open-file", handler as EventListener);
   }, [openTab]);
 
+  useEffect(() => {
+    const openSettings = () => {
+      openTab({
+        id: "viper-settings",
+        path: "viper://settings",
+        title: "Settings",
+        language: "plaintext",
+        content: "",
+        kind: "settings",
+      });
+    };
+    window.addEventListener("viper:open-settings", openSettings);
+    return () => window.removeEventListener("viper:open-settings", openSettings);
+  }, [openTab]);
+
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
 
   useEffect(() => {
-    if (activeTab) {
+    if (activeTab?.kind === "settings") {
+      setCurrentFile(null, null);
+      setStatus({ language: "", cursorLine: 0, cursorCol: 0 });
+    } else if (activeTab) {
       setCurrentFile(activeTab.path, activeTab.content);
       setStatus({
         language: activeTab.language,
@@ -81,7 +100,15 @@ export function EditorContainer() {
       setCurrentFile(null, null);
       setStatus({ language: "", cursorLine: 0, cursorCol: 0 });
     }
-  }, [activeTab?.id, activeTab?.path, activeTab?.content, activeTab?.language, setCurrentFile, setStatus]);
+  }, [
+    activeTab?.id,
+    activeTab?.path,
+    activeTab?.content,
+    activeTab?.language,
+    activeTab?.kind,
+    setCurrentFile,
+    setStatus,
+  ]);
 
   const handleCursorChange = useCallback(
     (line: number, col: number) => {
@@ -91,7 +118,7 @@ export function EditorContainer() {
   );
 
   const handleSave = useCallback(async () => {
-    if (!workspace || !activeTab) return;
+    if (!workspace || !activeTab || activeTab.kind === "settings") return;
     setSaving(true);
     try {
       await fsApi.writeFile(workspace.root, activeTab.path, activeTab.content);
@@ -207,6 +234,10 @@ export function EditorContainer() {
       if (aiEditInFlight) return;
       if (!activeTab) {
         window.alert("No file is open.");
+        return;
+      }
+      if (activeTab.kind === "settings") {
+        window.alert("Open a code file to use AI Edit.");
         return;
       }
       if (!workspace) {
@@ -347,7 +378,7 @@ export function EditorContainer() {
             color: "#0b0f17",
           }}
           onClick={handleSave}
-          disabled={!activeTab || saving}
+          disabled={!activeTab || saving || activeTab.kind === "settings"}
         >
           {saving ? "Saving…" : "Save"}
         </button>
@@ -356,7 +387,8 @@ export function EditorContainer() {
       {/* Editor body or welcome */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {!activeTab && <EditorWelcome />}
-        {activeTab && (() => {
+        {activeTab?.kind === "settings" && <IdeSettingsPage />}
+        {activeTab && activeTab.kind !== "settings" && (() => {
           const pendingEdit = getPendingEditForFile(activeTab.path);
           if (pendingEdit) {
             return (

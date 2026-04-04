@@ -19,14 +19,21 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 // Hoisted mocks
 // ---------------------------------------------------------------------------
 
-const { mockListRollups, mockCountToday, mockGetPool, mockGetWorkspaceByPathKey, mockGetWorkspaceEntitlements } =
-  vi.hoisted(() => ({
-    mockListRollups: vi.fn(),
-    mockCountToday: vi.fn(),
-    mockGetPool: vi.fn().mockReturnValue({}),
-    mockGetWorkspaceByPathKey: vi.fn(),
-    mockGetWorkspaceEntitlements: vi.fn(),
-  }));
+const {
+  mockListRollups,
+  mockCountToday,
+  mockGetPool,
+  mockGetWorkspaceByPathKey,
+  mockGetWorkspaceEntitlements,
+  mockSumCostUnitsForWorkspaceMonth,
+} = vi.hoisted(() => ({
+  mockListRollups: vi.fn(),
+  mockCountToday: vi.fn(),
+  mockGetPool: vi.fn().mockReturnValue({}),
+  mockGetWorkspaceByPathKey: vi.fn(),
+  mockGetWorkspaceEntitlements: vi.fn(),
+  mockSumCostUnitsForWorkspaceMonth: vi.fn(),
+}));
 
 vi.mock("@repo/database", () => ({
   getPool: mockGetPool,
@@ -34,6 +41,7 @@ vi.mock("@repo/database", () => ({
   countUsageEventsForDay: mockCountToday,
   getWorkspaceByPathKey: mockGetWorkspaceByPathKey,
   getWorkspaceEntitlements: mockGetWorkspaceEntitlements,
+  sumCostUnitsForWorkspaceMonth: mockSumCostUnitsForWorkspaceMonth,
 }));
 
 const { mockWorkflowLog } = vi.hoisted(() => ({ mockWorkflowLog: vi.fn() }));
@@ -49,6 +57,7 @@ import {
   computeMonthlyUsage,
   checkMonthlyQuota,
   QuotaError,
+  usesCreditQuota,
 } from "./quota.service.js";
 
 // ---------------------------------------------------------------------------
@@ -183,6 +192,29 @@ describe("parseQuotaConfig", () => {
   it("ignores invalid ratio (out of range)", () => {
     const { softThresholdRatio } = parseQuotaConfig({ quota_soft_threshold_ratio: 1.5 });
     expect(softThresholdRatio).toBe(0.8);
+  });
+
+  it("parses included_auto_usage_credits_monthly", () => {
+    delete process.env["VIPER_QUOTA_DEFAULT_MONTHLY_REQUESTS"];
+    const cfg = parseQuotaConfig({ included_auto_usage_credits_monthly: 50_000 });
+    expect(cfg.monthlyRequestQuota).toBeNull();
+    expect(cfg.includedAutoCredits).toBe(50_000n);
+    expect(cfg.includedPremiumCredits).toBeNull();
+    expect(usesCreditQuota(cfg)).toBe(true);
+  });
+
+  it("parses included_premium_usage_credits_monthly", () => {
+    delete process.env["VIPER_QUOTA_DEFAULT_MONTHLY_REQUESTS"];
+    const cfg = parseQuotaConfig({ included_premium_usage_credits_monthly: 12_000 });
+    expect(cfg.monthlyRequestQuota).toBeNull();
+    expect(cfg.includedPremiumCredits).toBe(12_000n);
+    expect(cfg.includedAutoCredits).toBeNull();
+    expect(usesCreditQuota(cfg)).toBe(true);
+  });
+
+  it("usesCreditQuota is false when no credit flags", () => {
+    const cfg = parseQuotaConfig({ monthly_request_quota: 100 });
+    expect(usesCreditQuota(cfg)).toBe(false);
   });
 });
 
@@ -357,7 +389,7 @@ describe("checkMonthlyQuota — hard deny (429)", () => {
       userId: null,
     };
     await expect(
-      checkMonthlyQuota("key", entitlements, IDENTITY, "2026-04-15"),
+      checkMonthlyQuota("key", entitlements, IDENTITY, { todayUtc: "2026-04-15" }),
     ).rejects.toThrow(QuotaError);
   });
 
@@ -373,7 +405,7 @@ describe("checkMonthlyQuota — hard deny (429)", () => {
       userId: null,
     };
     try {
-      await checkMonthlyQuota("key", entitlements, IDENTITY, "2026-04-15");
+      await checkMonthlyQuota("key", entitlements, IDENTITY, { todayUtc: "2026-04-15" });
       expect.fail("should have thrown");
     } catch (err) {
       expect(err instanceof QuotaError).toBe(true);
@@ -395,7 +427,7 @@ describe("checkMonthlyQuota — hard deny (429)", () => {
       userId: null,
     };
     try {
-      await checkMonthlyQuota("key", entitlements, IDENTITY, "2026-04-15");
+      await checkMonthlyQuota("key", entitlements, IDENTITY, { todayUtc: "2026-04-15" });
     } catch {
       // expected
     }
@@ -434,7 +466,7 @@ describe("checkMonthlyQuota — soft warning", () => {
       userId: null,
     };
     await expect(
-      checkMonthlyQuota("key", entitlements, IDENTITY, "2026-04-15"),
+      checkMonthlyQuota("key", entitlements, IDENTITY, { todayUtc: "2026-04-15" }),
     ).resolves.toBeUndefined(); // does not throw
 
     expect(mockWorkflowLog).toHaveBeenCalledWith(
@@ -456,7 +488,102 @@ describe("checkMonthlyQuota — soft warning", () => {
       flags: { monthly_request_quota: 100 },
       userId: null,
     };
-    await checkMonthlyQuota("key", entitlements, IDENTITY, "2026-04-15");
+    await checkMonthlyQuota("key", entitlements, IDENTITY, { todayUtc: "2026-04-15" });
     expect(mockWorkflowLog).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkMonthlyQuota — credit quota", () => {
+  const ORIG_ENFORCE = process.env["VIPER_QUOTA_ENFORCE"];
+  const ORIG_DB = process.env["DATABASE_URL"];
+  const ORIG_PREFLIGHT = process.env["VIPER_QUOTA_PREFLIGHT_CREDITS"];
+
+  beforeEach(() => {
+    process.env["VIPER_QUOTA_ENFORCE"] = "1";
+    process.env["DATABASE_URL"] = "postgresql://localhost:5432/viper_test";
+    delete process.env["VIPER_QUOTA_PREFLIGHT_CREDITS"];
+    delete process.env["VIPER_QUOTA_PREFLIGHT_AUTO_CREDITS"];
+    mockSumCostUnitsForWorkspaceMonth.mockReset();
+    mockListRollups.mockReset();
+    mockCountToday.mockReset();
+    mockWorkflowLog.mockClear();
+  });
+
+  afterEach(() => {
+    if (ORIG_ENFORCE === undefined) delete process.env["VIPER_QUOTA_ENFORCE"];
+    else process.env["VIPER_QUOTA_ENFORCE"] = ORIG_ENFORCE;
+    if (ORIG_DB === undefined) delete process.env["DATABASE_URL"];
+    else process.env["DATABASE_URL"] = ORIG_DB;
+    if (ORIG_PREFLIGHT === undefined) delete process.env["VIPER_QUOTA_PREFLIGHT_CREDITS"];
+    else process.env["VIPER_QUOTA_PREFLIGHT_CREDITS"] = ORIG_PREFLIGHT;
+    delete process.env["VIPER_QUOTA_PREFLIGHT_AUTO_CREDITS"];
+  });
+
+  const entitlementsAutoCredits = {
+    workspaceId: "ws-1",
+    pathKey: "key",
+    allowedModes: new Set(["agent"] as const),
+    allowedModelTiers: new Set(["auto"] as const),
+    flags: { included_auto_usage_credits_monthly: 10_000 },
+    userId: null,
+  };
+
+  it("throws QuotaError when used credits >= limit", async () => {
+    mockSumCostUnitsForWorkspaceMonth.mockResolvedValue(10_000n);
+    await expect(
+      checkMonthlyQuota("key", entitlementsAutoCredits, IDENTITY, {
+        billingBucket: "auto",
+        todayUtc: "2026-04-15",
+      }),
+    ).rejects.toThrow(QuotaError);
+    expect(mockSumCostUnitsForWorkspaceMonth).toHaveBeenCalledWith(
+      expect.anything(),
+      "key",
+      "auto",
+      "2026-04-15",
+    );
+    expect(mockListRollups).not.toHaveBeenCalled();
+  });
+
+  it("throws when used + preflight reserve exceeds limit (auto default reserve 8000)", async () => {
+    mockSumCostUnitsForWorkspaceMonth.mockResolvedValue(2500n);
+    await expect(
+      checkMonthlyQuota("key", entitlementsAutoCredits, IDENTITY, {
+        billingBucket: "auto",
+        todayUtc: "2026-04-15",
+      }),
+    ).rejects.toThrow(QuotaError);
+    expect(mockWorkflowLog).toHaveBeenCalledWith(
+      "quota:check",
+      IDENTITY,
+      expect.objectContaining({ reason: "preflight_reserve", meter: "credits" }),
+    );
+  });
+
+  it("skips credit check when only premium allowance is set and bucket is auto", async () => {
+    const ent = {
+      ...entitlementsAutoCredits,
+      flags: { included_premium_usage_credits_monthly: 5_000 },
+    };
+    await checkMonthlyQuota("key", ent, IDENTITY, { billingBucket: "auto", todayUtc: "2026-04-10" });
+    expect(mockSumCostUnitsForWorkspaceMonth).not.toHaveBeenCalled();
+  });
+
+  it("emits soft_warning when auto credits at default soft threshold", async () => {
+    const ent = {
+      ...entitlementsAutoCredits,
+      flags: { included_auto_usage_credits_monthly: 50_000 },
+    };
+    // 80% soft threshold = 40_000; preflight reserve 8_000 → need room: 40_000 + 8_000 < 50_000
+    mockSumCostUnitsForWorkspaceMonth.mockResolvedValue(40_000n);
+    await checkMonthlyQuota("key", ent, IDENTITY, {
+      billingBucket: "auto",
+      todayUtc: "2026-04-15",
+    });
+    expect(mockWorkflowLog).toHaveBeenCalledWith(
+      "quota:check",
+      IDENTITY,
+      expect.objectContaining({ status: "soft_warning", meter: "credits" }),
+    );
   });
 });

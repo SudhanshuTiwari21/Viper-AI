@@ -91,11 +91,13 @@ function Hero() {
           transition={{ duration: 0.6, delay: 0.28, ease: [0.25, 0.4, 0.25, 1] }}
           className="flex flex-col sm:flex-row gap-4"
         >
-          <ShimmerButton className="h-12 px-7 text-sm font-semibold cursor-pointer hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200">
-            Request Early Access →
-          </ShimmerButton>
-          <ShimmerButton className="h-12 px-7 text-sm font-semibold cursor-pointer hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200">
-            See the PM Workflow
+          <ShimmerButton
+            type="button"
+            disabled
+            aria-disabled="true"
+            className="h-12 px-7 text-sm font-semibold cursor-not-allowed opacity-70 hover:scale-100"
+          >
+            Coming soon
           </ShimmerButton>
         </motion.div>
       </div>
@@ -475,11 +477,13 @@ function CTASection() {
           transition={{ duration: 0.6, delay: 0.28, ease: [0.25, 0.4, 0.25, 1] }}
           className="flex flex-col sm:flex-row gap-4 justify-center items-center"
         >
-          <ShimmerButton className="h-14 w-full sm:w-56 text-sm font-bold hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200">
-            Request Early Access
-          </ShimmerButton>
-          <ShimmerButton className="h-14 w-full sm:w-56 text-sm font-bold hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200">
-            See How It Works
+          <ShimmerButton
+            type="button"
+            disabled
+            aria-disabled="true"
+            className="h-14 w-full sm:w-56 text-sm font-bold cursor-not-allowed opacity-70 hover:scale-100"
+          >
+            Coming soon
           </ShimmerButton>
         </motion.div>
       </div>

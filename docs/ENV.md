@@ -152,6 +152,45 @@ curl -s -X POST -H "Authorization: Bearer $VIPER_SLO_OPS_TOKEN" \
      http://localhost:4000/ops/slo-check | jq .
 ```
 
+### Web app auth (email/password + Google OAuth)
+
+Used by `apps/web-app` BFF routes under `/api/auth/*` and `apps/backend` routes under `/auth/*`. Requires `DATABASE_URL` and applied migrations (including `017_web_auth_password_sessions_oauth.sql`).
+
+| Variable | Where | Required | Default / notes |
+|---|---|---|---|
+| `VIPER_JWT_SECRET` | Backend signing key for short-lived access JWTs. Alias: `JWT_SECRET`. | **Yes** for auth | Must be ≥ 32 random characters. |
+| `JWT_SECRET` | Same as `VIPER_JWT_SECRET` if the latter is unset. | No | — |
+| `VIPER_WEB_APP_URL` | Backend: base URL of the Next app (redirects after Google OAuth, email verification links in dev logs). | No | `http://localhost:3000` |
+| `VIPER_WEB_APP_ORIGIN` | Backend CORS allowlist (comma-separated origins). Must include the browser origin that calls the API (with `credentials: true`). | No | `http://localhost:3000` |
+| `VIPER_API_PUBLIC_URL` | Public base URL of the API (no trailing path). Google redirect URI = `{VIPER_API_PUBLIC_URL}/auth/google/callback`. | No | `http://localhost:4000` (or `PORT`) |
+| `VIPER_GOOGLE_CLIENT_ID` | Google OAuth 2.0 client ID. | Yes for Google sign-in | — |
+| `VIPER_GOOGLE_CLIENT_SECRET` | Google OAuth client secret (server only). | Yes for Google sign-in | — |
+| `VIPER_AUTH_SKIP_EMAIL_VERIFICATION` | When truthy, new email/password users are treated as verified without clicking the link. | No | off |
+| `VIPER_AUTH_LOG_VERIFY_TOKEN` | Set to `1` to log a one-time email verification URL to stdout in development (never enable in production). Only used when SMTP is **not** configured. | No | off |
+| `NEXT_PUBLIC_BACKEND_URL` | Web app (browser): absolute URL of the backend for client-side calls if any. | Recommended | e.g. `http://localhost:4000` |
+| `BACKEND_URL` | Web app (server/BFF): backend URL for `fetch` from Route Handlers. If unset, implementations may fall back to `NEXT_PUBLIC_BACKEND_URL`. | Recommended in prod | Same as public API URL |
+
+**Verification email (SMTP):** When `VIPER_SMTP_PASS` is set, signups that require email verification send a **one-time link** from your mailbox (not a separate numeric OTP flow). GoDaddy [Titan Email](https://secureserver.titan.email/) typically uses outbound host `smtp.titan.email`. If SMTP is unset, verification links are not sent (use `VIPER_AUTH_LOG_VERIFY_TOKEN=1` locally or enable `VIPER_AUTH_SKIP_EMAIL_VERIFICATION` for dev only).
+
+| Variable | Required | Default / notes |
+|---|---|---|
+| `VIPER_SMTP_PASS` | For real verification mail in prod | Alias: `VIPER_SMTP_PASSWORD`. Titan/GoDaddy: the password for the mailbox (or app-specific password if your provider supports it). |
+| `VIPER_SMTP_HOST` | No | `smtp.titan.email`. Some accounts use `smtpout.secureserver.net` — check Titan/GoDaddy SMTP help for your product. |
+| `VIPER_SMTP_PORT` | No | `465` (implicit TLS). Use `587` with `VIPER_SMTP_SECURE=0` if your provider requires STARTTLS. |
+| `VIPER_SMTP_SECURE` | No | If unset, `secure` is **true** when port is `465`, otherwise false. Set `0` for port 587 STARTTLS. |
+| `VIPER_SMTP_USER` | No | SMTP login — usually the full email address. Default `info@viperai.tech`. |
+| `VIPER_MAIL_FROM` | No | RFC From header. Default `Viper AI <info@viperai.tech>`. Must be allowed by your SMTP provider (often must match or be an alias of the authenticated user). |
+
+**Google Cloud Console:** add authorized redirect URI exactly: `https://<your-api-host>/auth/google/callback` (must match `VIPER_API_PUBLIC_URL`).
+
+### Viper Desktop → web sign-in handoff
+
+The IDE opens `VITE_WEB_APP_URL/login?source=desktop` (and `/signup?source=desktop`) in the system browser. After a successful session, the web app redirects to **`viper://auth/callback?code=…`**; the packaged app registers the **`viper`** protocol so Electron can exchange the code with `POST /auth/oauth/exchange` and store tokens locally.
+
+| Variable | Where | Required | Default / notes |
+|---|---|---|---|
+| `VITE_WEB_APP_URL` | `apps/viper-desktop` (Vite **build-time**) | Recommended in prod | e.g. `http://localhost:3000` — must match where users sign in (`VIPER_WEB_APP_URL` on the backend for redirects). |
+
 ## Summary
 
 1. **Database** – Set `DATABASE_URL` (e.g. in `.env`) if you use the metadata persistence layer. Run `packages/database/schema.sql` (or migrations under `packages/database/migrations/`) against that database first. D.20 **conversation model preferences** (`conversation_model_preferences`), D.21 **chat feedback** (`chat_feedback`), and E.23 **media objects** (`chat_media`) are stored when `DATABASE_URL` is set; without it, the backend uses an in-memory store for those features.

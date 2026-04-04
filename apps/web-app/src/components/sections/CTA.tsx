@@ -25,8 +25,8 @@ export default function CTA() {
           transition={{ duration: 0.6, delay: 0.15, ease: [0.25, 0.4, 0.25, 1] }}
           className="text-neutral-400 text-lg mb-12 max-w-lg mx-auto leading-relaxed"
         >
-          Viper is in early access. Join the waitlist and help define the next
-          generation of engineering tooling.
+          Viper is on the way. We are not onboarding new installs yet—stay tuned
+          for when early access opens.
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 18 }}
@@ -34,11 +34,13 @@ export default function CTA() {
           transition={{ duration: 0.6, delay: 0.28, ease: [0.25, 0.4, 0.25, 1] }}
           className="flex flex-col sm:flex-row gap-4 justify-center items-center"
         >
-          <ShimmerButton type="button" className="h-14 w-full sm:w-56 text-sm font-bold hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200">
-            Request Early Access
-          </ShimmerButton>
-          <ShimmerButton type="button" className="h-14 w-full sm:w-56 text-sm font-bold hover:border-slate-500 hover:text-white hover:scale-[1.03] transition-transform duration-200">
-            See How It Works
+          <ShimmerButton
+            type="button"
+            disabled
+            aria-disabled="true"
+            className="h-14 w-full sm:w-56 text-sm font-bold cursor-not-allowed opacity-70 hover:scale-100"
+          >
+            Coming soon
           </ShimmerButton>
         </motion.div>
       </div>

@@ -9,7 +9,6 @@ import { PanelContainer } from "./panel-container";
 import { StatusBar } from "./status-bar";
 import { CommandPalette } from "./command-palette";
 import { QuickOpen } from "./quick-open";
-import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useRegisterDefaultCommands } from "../commands/default-commands";
 
 const MIN_LEFT_SIDEBAR_WIDTH = 200;
@@ -22,7 +21,6 @@ const DEFAULT_CHAT_WIDTH = 420;
 const CHAT_COLLAPSE_THRESHOLD = 80;
 
 export function IDEContainer() {
-  const { workspace } = useWorkspaceContext();
   useRegisterDefaultCommands();
   const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
@@ -52,6 +50,12 @@ export function IDEContainer() {
     const onOpen = () => setCommandPaletteOpen(true);
     window.addEventListener("viper:open-command-palette", onOpen);
     return () => window.removeEventListener("viper:open-command-palette", onOpen);
+  }, []);
+
+  useEffect(() => {
+    const onOpen = () => setQuickOpenVisible(true);
+    window.addEventListener("viper:open-quick-open", onOpen);
+    return () => window.removeEventListener("viper:open-quick-open", onOpen);
   }, []);
 
   useEffect(() => {
@@ -147,6 +151,18 @@ export function IDEContainer() {
     const onFocusSearch = () => setSidebarView("search");
     window.addEventListener("viper:focus-search", onFocusSearch);
     return () => window.removeEventListener("viper:focus-search", onFocusSearch);
+  }, []);
+
+  // ⌘, / Ctrl+, — open Settings in editor (Cursor-style)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ",") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("viper:open-settings"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
