@@ -122,6 +122,12 @@ Engineering should prioritize **PM2-style integrations** once PM0–PM1 are stab
 
 ---
 
+## 7.1 Usage, pricing buckets, and BYOK (commercial)
+
+Subscription economics for **Viper-hosted** inference should split **Auto-style** vs **premium / pinned-model** pools (Cursor-class expectation) and support **bring-your-own API keys** in settings with clear routing (e.g. Claude models → user’s Anthropic key). See draft plan: [`VIPER_USAGE_AND_REVENUE_MODEL.md`](VIPER_USAGE_AND_REVENUE_MODEL.md).
+
+---
+
 ## 8. Relationship to Cursor-class IDE work
 
 - **Experience gap plan** ([`VIPER_CURSOR_EXPERIENCE_GAP_AND_PLAN.md`](VIPER_CURSOR_EXPERIENCE_GAP_AND_PLAN.md)): make the **daily IDE + chat** competitive with **modern AI coding tools**.
@@ -138,3 +144,4 @@ Successful execution: **one workspace** that combines **best-in-class AI coding*
 | 2026-04 | Initial PM vision doc |
 | 2026-04 | Reframed: single workspace + integrate Jira/Linear/enterprise PM and AI tools; explicitly not building in-house Jira |
 | 2026-04 | Sequencing note: Cursor-class experience (gap doc Phase 1) before Phase 2 PM integrations |
+| 2026-04 | §7.1 link to [`VIPER_USAGE_AND_REVENUE_MODEL.md`](VIPER_USAGE_AND_REVENUE_MODEL.md) (Auto/premium pools + BYOK) |

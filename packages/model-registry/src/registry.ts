@@ -29,6 +29,18 @@ const REGISTRY: Record<ModelId, ModelSpec> = {
     limits: { maxOutputTokens: 4096, maxToolCalls: 15, timeoutMs: 300_000 },
     priceClass: "high",
     latencyClass: "medium",
+    selectableInPremiumUi: true,
+  },
+  [asModelId("gpt-4-turbo")]: {
+    id: asModelId("gpt-4-turbo"),
+    provider: "openai",
+    displayName: "GPT-4 Turbo",
+    tier: "premium",
+    capabilities: { tools: true, vision: true, json: true },
+    limits: { maxOutputTokens: 4096, maxToolCalls: 15, timeoutMs: 300_000 },
+    priceClass: "high",
+    latencyClass: "medium",
+    selectableInPremiumUi: true,
   },
 } as const;
 
@@ -62,5 +74,15 @@ export function getDefaultModelForTier(tier: ModelTier): ModelSpec {
     throw new Error(`Default model missing for tier: ${tier}`);
   }
   return spec;
+}
+
+/** Models the user may select when `modelTier === "premium"` (OpenAI today; more providers later). */
+export function listPremiumSelectableModels(): ModelSpec[] {
+  return Object.values(REGISTRY).filter((s) => s.selectableInPremiumUi === true);
+}
+
+export function isPremiumSelectableModelId(id: string): boolean {
+  const spec = resolveModelSpec(id);
+  return spec?.selectableInPremiumUi === true;
 }
 

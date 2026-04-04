@@ -12,5 +12,7 @@ export {
   getDefaultModelForTier,
   resolveModelSpec,
   assertValidModelId,
+  listPremiumSelectableModels,
+  isPremiumSelectableModelId,
 } from "./registry.js";
 

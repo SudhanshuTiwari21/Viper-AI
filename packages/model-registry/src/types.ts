@@ -31,5 +31,7 @@ export interface ModelSpec {
   };
   priceClass?: PriceClass;
   latencyClass?: LatencyClass;
+  /** When true, allowed for Premium tier picker (API `premiumModelId` + desktop UI). */
+  selectableInPremiumUi?: boolean;
 }
 

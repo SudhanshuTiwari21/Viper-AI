@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
+import { ChatModeSelect } from "./chat-mode-select";
+import { ChatModelTierSelect } from "./chat-model-tier-select";
 import { useChat } from "../contexts/chat-context";
 import type { ExecutionStep, PendingDiff, ChatMode } from "../contexts/chat-context";
 import { useWorkspaceContext } from "../contexts/workspace-context";
@@ -1030,45 +1032,21 @@ export function ChatPanel() {
 
       {/* ─── Sticky input ─── */}
       <div className="shrink-0 border-t border-v-border bg-v-bg px-3 py-1.5 max-w-3xl mx-auto w-full space-y-1.5">
-        <div className="flex items-center gap-1">
-          {(["ask", "plan", "debug", "agent"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              disabled={streaming}
-              onClick={() => activeSessionId && setChatMode(activeSessionId, m)}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium capitalize transition-colors ${
-                currentMode === m
-                  ? "bg-v-accent/15 text-v-accent"
-                  : "text-v-text3 hover:bg-white/[0.04] hover:text-v-text"
-              } disabled:opacity-40 disabled:pointer-events-none`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1">
-          {(
-            [
-              { tier: "auto" as const, label: "Auto" },
-              { tier: "premium" as const, label: "Premium" },
-              { tier: "fast" as const, label: "Fast" },
-            ] as const
-          ).map(({ tier, label }) => (
-            <button
-              key={tier}
-              type="button"
-              disabled={streaming}
-              onClick={() => activeSessionId && setModelTier(activeSessionId, tier)}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
-                currentModelTier === tier
-                  ? "bg-v-accent/15 text-v-accent"
-                  : "text-v-text3 hover:bg-white/[0.04] hover:text-v-text"
-              } disabled:opacity-40 disabled:pointer-events-none`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <ChatModeSelect
+            value={currentMode}
+            onChange={(m) => {
+              if (activeSessionId) setChatMode(activeSessionId, m);
+            }}
+            disabled={streaming}
+          />
+          <ChatModelTierSelect
+            value={currentModelTier}
+            onChange={(tier) => {
+              if (activeSessionId) setModelTier(activeSessionId, tier);
+            }}
+            disabled={streaming}
+          />
         </div>
 
         {/* E.25 — pending attachment thumbnails */}

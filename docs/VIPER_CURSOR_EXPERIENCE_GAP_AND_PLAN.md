@@ -23,6 +23,7 @@ This document focuses on **product experience parity** (IDE shell, chat UX, sett
 - Desktop **chat composer** (mode, model tier, layout, professionalism).
 - **Streaming / phase** presentation (labels, “Intent” / planning, thinking).
 - **Answer shape** (why replies feel repetitive; mode contracts).
+- **Perceived mode parity** — chat should *feel* like the selected mode; agents and routing should **match** user expectation (**§4.5**, **§9 P1.6**).
 - **Multi-file / agent runs** (pause-after-edit vs “keep going”).
 - **Settings** and product shell (centralized vs scattered).
 - **Phased implementation plan** and acceptance hints (maps to **Phase 1** above).
@@ -57,16 +58,16 @@ The repo has shipped a **deep backend and platform layer** relative to early roa
 
 ### 3.1 Current behavior
 
-- **Mode** (`Ask`, `Plan`, `Debug`, `Agent`) and **model tier** (`Auto`, `Premium`, `Fast`) are rendered as **two rows of small inline buttons** in [`apps/viper-desktop/ui/components/chat-panel.tsx`](apps/viper-desktop/ui/components/chat-panel.tsx) (sticky input area). No chevron, no dropdown, high visual density in the top-left of the composer—matches user feedback that the UI feels “not professional.”
+- **Mode** (`Ask`, `Plan`, `Debug`, `Agent`) and **model tier** (`Auto`, `Premium`, `Fast`) each use a **dropdown** on **one horizontal row** in [`chat-panel.tsx`](apps/viper-desktop/ui/components/chat-panel.tsx) ([`chat-mode-select.tsx`](apps/viper-desktop/ui/components/chat-mode-select.tsx), [`chat-model-tier-select.tsx`](apps/viper-desktop/ui/components/chat-model-tier-select.tsx); **P0.1** + **P0.2** + **P0.1b**).
 - **Prototype exists but is unused:** [`apps/viper-desktop/ui/components/chat-prompt-box.tsx`](apps/viper-desktop/ui/components/chat-prompt-box.tsx) implements **dropdown-style** controls (chevron, popover). The main IDE uses [`ChatPanel`](apps/viper-desktop/ui/components/ide-container.tsx) only; `ChatPromptBox` is not wired in.
 
 ### 3.2 Gaps vs Cursor-class expectation
 
 | Cursor-class expectation | Viper today | Gap |
 |--------------------------|-------------|-----|
-| Compact composer chrome; mode/model in menus or segmented controls | Chip rows | **High** |
-| Consistent keyboard/focus behavior | Button-only | **Medium** |
-| Optional “power user” density (single row) | Two rows always visible | **Medium** |
+| Compact composer chrome; mode/model in menus or segmented controls | Mode + tier menus, single row | **Low** (polish: **P0.3** focus trap, shortcuts) |
+| Consistent keyboard/focus behavior | Both listboxes: arrows, Escape, `focus-visible` rings | **Low** |
+| Optional “power user” density (single row) | One row for mode + tier | **Met** |
 
 ### 3.3 Implementation directions
 
@@ -108,6 +109,32 @@ The repo has shipped a **deep backend and platform layer** relative to early roa
 ### 4.4 @ context / Cmd+K (deferred)
 
 **Cursor-class** expectation: `@file`, `@folder`, symbol picks. **Viper:** not first-class in chat composer. **Track as Phase P3+** (desktop + API contract).
+
+### 4.5 Perceived mode parity — chat should *feel* like the mode; agents must match
+
+**Cursor-class expectation:** Choosing **Ask**, **Plan**, **Debug**, or **Agent** changes what the user *sees* (phases, tool activity, edit affordances) and what the **runtime** does (tools allowed, routing depth, safety). The selection should never be “cosmetic.”
+
+**Viper today**
+
+- **`mode` is sent and logged** correctly on every request (`request:start` includes `mode`).
+- **Tool policy** is mode-aware ([`mode-tool-policy.ts`](apps/backend/src/lib/mode-tool-policy.ts), C.12): Ask/Plan are read-only; Debug adds `run_command`; Agent gets full tools.
+- **Intent routing** (`route:direct-llm` vs `route:agentic`) in [`assistant.service.ts`](apps/backend/src/services/assistant.service.ts) is driven primarily by **intent**, not by **mode** — so many prompts hit the **same** high-level path (e.g. agentic for `CODE_EXPLANATION`) regardless of Ask vs Plan. Read-only Q&A can therefore **feel identical** across modes even though tooling differs under the hood.
+- **Desktop** suppresses some tool UI for Ask/Plan, which can further **hide** behavioral differences.
+
+**Gap**
+
+| Expectation | Viper today | Gap |
+|-------------|-------------|-----|
+| User *perceives* mode from stream + composer | Often similar for common questions | **High** |
+| Agent behavior obviously matches mode (edits only in Agent, etc.) | Enforced server-side but not always *visible* | **Medium** |
+| Mode influences *when* to use full agentic loop | Mostly intent-driven | **Medium** (product + backend) |
+
+**Implementation directions** (tracked as **§9 P1.6**)
+
+- **Composer / status chrome:** Persistent hint for active contract (e.g. “Read-only — no file edits” for Ask/Plan) plus **P0.1b** polish (icons, checkmark, single row).
+- **Backend routing (product decision):** For selected intents, **bias Ask/Plan toward `route:direct-llm`** or a lighter path when safe, so behavior matches user mental model; keep strict tool gates regardless.
+- **Prompts + tests:** Strengthen mode-aware system text in [`build-agentic-system-prompt.ts`](packages/agents/agentic-loop/prompt/build-agentic-system-prompt.ts) / [`mode-narration.ts`](apps/backend/src/lib/mode-narration.ts); add or extend integration tests so **mode changes** produce **observably different** streams or tool sets for a **golden** prompt set.
+- **Regression:** Ensure [`mode-contract.integration.test.ts`](apps/backend/src/integration/mode-contract.integration.test.ts) (or successor) stays the guardrail for “agents work accordingly.”
 
 ---
 
@@ -176,7 +203,7 @@ In [`run-agentic-loop.ts`](packages/agents/agentic-loop/loop/run-agentic-loop.ts
 | Phase | Focus | Examples |
 |-------|--------|----------|
 | **P0** | Composer chrome | Dropdowns for mode + tier; unify `intent`/`Planning` copy; align `thinking-indicator` with `PHASE_LABEL` |
-| **P1** | Narration | `Structured` vs `Natural` setting; soften strict templates where safe; optional Markdown policy (product decision) |
+| **P1** | Narration + **mode parity** | `Structured` vs `Natural`; softer templates; **perceived mode alignment** — chat feels like selected mode; routing/prompts/UI so **agents match** user expectation (see **§4.5**, **§9 P1.6**) |
 | **P2** | Agent run modes | Feature-flagged batch / composer; “continue” affordance; loop tests |
 | **P3** | Settings hub + rules | Central settings UI; `.viper/rules` or workspace rules (spec + enforcement) |
 | **PW** | Web app — auth, dashboard, OAuth | [`apps/web-app`](apps/web-app): auth hub, dashboard route, PM-ready OAuth framework; desktop consumes tokens |
@@ -192,8 +219,11 @@ Use **`- [ ]`** for not started, **`- [x]`** when done (update this file in-repo
 
 ### P0 — Composer chrome and phase labels
 
-- [ ] **P0.1** Replace Ask/Plan/Debug/Agent chip row with a **dropdown** (or compact menu) in [`chat-panel.tsx`](apps/viper-desktop/ui/components/chat-panel.tsx); reuse or extract patterns from [`chat-prompt-box.tsx`](apps/viper-desktop/ui/components/chat-prompt-box.tsx) where sensible.
-- [ ] **P0.2** Replace Auto/Premium/Fast chip row with a **dropdown** (or combine mode + tier into one control if product prefers).
+**Note — Mode in logs vs “it feels the same”:** Backend logs (`request:start`, `request:complete`) should show the selected `mode` — that confirms the desktop sends the right value. **Intent routing** (`route:direct-llm` vs `route:agentic`) is decided in [`assistant.service.ts`](apps/backend/src/services/assistant.service.ts) from **intent** (e.g. `GENERIC` → direct-LLM; `CODE_EXPLANATION` / `CODE_FIX` → often **agentic** for all modes). **Mode** still changes **tool allowlists** (Ask/Plan: no edits), **system narration**, and **desktop tool-timeline suppression** — so for read-only Q&A the stream can *look* similar even when `mode` differs. Making modes *feel* distinct is a **product/backend** follow-up (e.g. mode-first routing, stronger on-screen mode chrome, or P1 narration); not a bug in the mode dropdown wiring.
+
+- [x] **P0.1** Replace Ask/Plan/Debug/Agent chip row with a **dropdown** (or compact menu) in [`chat-panel.tsx`](apps/viper-desktop/ui/components/chat-panel.tsx); reuse or extract patterns from [`chat-prompt-box.tsx`](apps/viper-desktop/ui/components/chat-prompt-box.tsx) where sensible. **Done:** [`chat-mode-select.tsx`](apps/viper-desktop/ui/components/chat-mode-select.tsx) + `ChatModeSelect` in sticky composer.
+- [x] **P0.1b** **Cursor-class composer polish (mode + tier row):** **Icons** per mode (aligned with product: e.g. Ask / Plan / Debug / Agent), **checkmark** (or equivalent) on the active menu row, **single horizontal row** for mode dropdown + model-tier dropdown (after **P0.2** tier dropdown exists — implement P0.2 first or in same PR), **focus-visible** rings that match Viper tokens (avoid harsh browser default on options). **Optional:** keyboard shortcut hints in the menu — only if **shortcuts are actually registered** (Electron/global or composer scope); no fake ⌘ labels without handlers. **Done:** with **P0.2** — icons + checkmarks + `focus-visible` rings in [`chat-mode-select.tsx`](apps/viper-desktop/ui/components/chat-mode-select.tsx); one `flex` row in [`chat-panel.tsx`](apps/viper-desktop/ui/components/chat-panel.tsx).
+- [x] **P0.2** Replace Auto/Premium/Fast chip row with a **dropdown** (or combine mode + tier into one control if product prefers). **Done:** [`chat-model-tier-select.tsx`](apps/viper-desktop/ui/components/chat-model-tier-select.tsx) + `ChatModelTierSelect`; chips removed from `chat-panel.tsx`.
 - [ ] **P0.3** **Accessibility:** focus trap in popovers, `aria-expanded`, **Escape** to close, **arrow-key** navigation between items.
 - [ ] **P0.4** **Single source of truth** for streaming phase **user-facing labels** (new small module, e.g. `streaming-phase-labels.ts` under `ui/`); wire [`chat-message.tsx`](apps/viper-desktop/ui/components/chat-message.tsx) and [`thinking-indicator.tsx`](apps/viper-desktop/ui/components/thinking-indicator.tsx) so `intent` / `planning` never contradict.
 - [ ] **P0.5** *(Optional)* Default UX: hide or soften raw phase line; keep full labels behind debug/preview flag if desired.
@@ -205,6 +235,7 @@ Use **`- [ ]`** for not started, **`- [x]`** when done (update this file in-repo
 - [ ] **P1.3** Soften **“EXACTLY”** / rigid template wording for **Agent** (and **Debug** if safe); keep stricter **Ask/Plan** behavior if required for read-only guarantees.
 - [ ] **P1.4** **Streaming polish:** richer tool summaries, stall handling (align with WS8-style goals); refresh [`STEP_NARRATIONS`](apps/viper-desktop/ui/components/chat-panel.tsx) copy where stale.
 - [ ] **P1.5** **Product decision + implementation:** allow **Markdown** in agent final replies or keep plain-text; align [`build-agentic-system-prompt.ts`](packages/agents/agentic-loop/prompt/build-agentic-system-prompt.ts) and desktop rendering.
+- [ ] **P1.6** **Perceived mode parity — chat *feels* like the mode; agents work accordingly:** (1) **Desktop:** visible contract for the selected mode (e.g. subtitle or badge: Ask/Plan = read-only, Agent = edits allowed, Debug = commands/evidence) so users are not surprised by behavior. (2) **Backend:** product decision + implementation in [`assistant.service.ts`](apps/backend/src/services/assistant.service.ts) — where safe, **bias Ask/Plan** toward **`route:direct-llm`** or a lighter path for intents that today always enter **agentic**, so mode and routing align with user mental model; keep [`mode-tool-policy.ts`](apps/backend/src/lib/mode-tool-policy.ts) enforcement as the safety floor. (3) **Prompts:** tighten mode instructions in [`mode-narration.ts`](apps/backend/src/lib/mode-narration.ts) / agentic system prompt so the *assistant’s* tone and steps match the mode. (4) **Tests:** extend [`mode-contract.integration.test.ts`](apps/backend/src/integration/mode-contract.integration.test.ts) (or add cases) so a **fixed prompt set** shows **observable** differences (tools, route, or SSE shape) across modes. **Acceptance:** manual smoke — same workspace, same style of question — user can **tell** Ask vs Plan vs Agent apart without reading server logs.
 
 ### P2 — Agent / multi-file (“Composer-like” behavior)
 
@@ -247,9 +278,10 @@ Use **`- [ ]`** for not started, **`- [x]`** when done (update this file in-repo
 
 ## 10. Metrics and acceptance
 
-- **UX:** Default composer uses **dropdowns or compact menus**, not two chip rows (unless behind “compact mode”).
+- **UX:** Composer uses **dropdowns** for **mode** and **model tier** on **one row** (not chip rows), unless a deliberate “compact mode” regresses that.
 - **Copy:** Single **canonical** label set for streaming phases (documented in one component or `constants.ts`).
 - **Product:** At least one **user-visible** control for **narration strictness** or **agent pause policy** (even if gated).
+- **Modes:** Users can **perceive** Ask / Plan / Debug / Agent in the **chat experience** (not only in logs); **tooling and routing** match that selection per **§4.5** and **§9 P1.6**.
 - **Web / account:** [`apps/web-app`](apps/web-app) exposes a **signed-in dashboard route** and **auth hub**; **integration OAuth** is **extensible** to multiple PM tools (see **§9 PW**).
 - **Engineering:** `npm run quality-gate` green; manual **smoke checklist** for chat send, stream, edit pause, resume.
 
@@ -263,6 +295,7 @@ Use **`- [ ]`** for not started, **`- [x]`** when done (update this file in-repo
 | [`RELEASE.md`](RELEASE.md) | Pre-release commands |
 | [`SLO.md`](SLO.md) | SLOs and ops APIs |
 | [`VIPER_PRODUCT_MANAGEMENT_VISION.md`](VIPER_PRODUCT_MANAGEMENT_VISION.md) | **Phase 2** — integrations + single-workspace PM story (**after** Cursor-class UX per this doc) |
+| [`VIPER_USAGE_AND_REVENUE_MODEL.md`](VIPER_USAGE_AND_REVENUE_MODEL.md) | **Auto vs premium pools**, example tier allocation, **BYOK** — commercial usage model (draft) |
 
 ---
 
@@ -274,3 +307,8 @@ Use **`- [ ]`** for not started, **`- [x]`** when done (update this file in-repo
 | 2026-04 | Added execution order: Cursor-class experience (Phase 1) before PM integrations (Phase 2) |
 | 2026-04 | Added §9 sequenced checklist with checkboxes; renumbered former §9–§10 to §10–§11 |
 | 2026-04 | §8 **PW** row + §9 **PW** checklist (web-app auth hub, dashboard, OAuth framework, desktop handoff) |
+| 2026-04 | **P0.1** complete — desktop chat mode dropdown (`chat-mode-select.tsx`) |
+| 2026-04 | §9 P0 note (mode in logs vs intent routing) + **P0.1b** checklist (Cursor-class composer polish) |
+| 2026-04 | **§4.5** perceived mode parity gap; **§8 P1** + **§9 P1.6** + **§10** metrics; §3.1 mode dropdown note |
+| 2026-04 | **P0.2** + **P0.1b** complete — `chat-model-tier-select.tsx`, mode icons/checkmarks/focus rings, single composer row |
+| 2026-04 | Related: [`VIPER_USAGE_AND_REVENUE_MODEL.md`](VIPER_USAGE_AND_REVENUE_MODEL.md) (Auto/premium buckets + BYOK) |
