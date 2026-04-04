@@ -30,30 +30,30 @@ const NAV_ITEMS: NavItem[] = [
   {
     label: 'Use Cases',
     dropdown: [
-      { label: 'Code Review', href: '#' },
-      { label: 'Agents', href: '#' },
-      { label: 'Product Management', href: '#' },
+      { label: 'Code Review', href: '/code-review' },
+      { label: 'Agents', href: '/agents' },
+      { label: 'Product Management', href: '/product-management' },
     ],
   },
-  { label: 'Documentation', href: '#' },
+  { label: 'Documentation', href: '/docs' },
   { label: 'Pricing', href: '#' },
   {
     label: 'Resources',
     dropdown: [
-      { label: 'Blog', href: '#' },
-      { label: 'Support', href: '#' },
+      { label: 'Blog', href: '/blog' },
+      { label: 'Support', href: '/support' },
     ],
   },
 ]
 
 const MOBILE_ITEMS: { label: string; href: string }[] = [
-  { label: 'Code Review', href: '#' },
-  { label: 'Agents', href: '#' },
-  { label: 'Product Management', href: '#' },
-  { label: 'Documentation', href: '#' },
+  { label: 'Code Review', href: '/code-review' },
+  { label: 'Agents', href: '/agents' },
+  { label: 'Product Management', href: '/product-management' },
+  { label: 'Documentation', href: '/docs' },
   { label: 'Pricing', href: '#' },
-  { label: 'Blog', href: '#' },
-  { label: 'Support', href: '#' },
+  { label: 'Blog', href: '/blog' },
+  { label: 'Support', href: '/support' },
 ]
 
 // ── Hover dropdown item ───────────────────────────────────────────────────────

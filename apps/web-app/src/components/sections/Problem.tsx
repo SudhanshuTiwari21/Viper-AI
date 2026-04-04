@@ -43,14 +43,14 @@ export default function Problem() {
           </h2>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border-muted border border-border-muted">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {PROBLEMS.map((p, i) => (
             <motion.div
               key={p.id}
               initial={{ opacity: 0, y: 20 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.55, delay: 0.15 + i * 0.12, ease: [0.25, 0.4, 0.25, 1] }}
-              className="bg-black p-10 md:p-12 flex flex-col gap-8"
+              className="bg-[#0a0a0a] border border-white/10 rounded-lg p-10 md:p-12 flex flex-col gap-8 hover:border-white/25 hover:bg-[#111111] transition-all duration-300"
             >
               <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-700">
                 {p.id}

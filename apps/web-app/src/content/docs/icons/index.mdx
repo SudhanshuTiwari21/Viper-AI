@@ -1,0 +1,58 @@
+---
+title: Icons
+description: Icon system used throughout Viper AI.
+section: Menu
+prev: null
+next: null
+---
+
+Viper AI uses **Lucide React** as its primary icon library — a community-maintained fork of Feather Icons with 1000+ consistent, clean SVG icons.
+
+---
+
+## Installation
+
+Lucide React is already included in the Viper AI setup:
+
+```bash
+npm install lucide-react
+```
+
+## Usage
+
+```tsx
+import { Github, Zap, ArrowRight, Check } from 'lucide-react'
+
+<Github className="size-5" />
+<Zap className="size-4 text-yellow-400" />
+<ArrowRight className="size-4" />
+<Check className="size-4 text-green-400" />
+```
+
+## Common Icons
+
+| Icon | Component | Use Case |
+|------|-----------|----------|
+| Arrow Right | `<ArrowRight />` | CTAs, links |
+| Check | `<Check />` | Success states |
+| X | `<X />` | Close, dismiss |
+| Menu | `<Menu />` | Mobile nav |
+| Github | `<Github />` | GitHub links |
+| Zap | `<Zap />` | Features, speed |
+| Terminal | `<Terminal />` | CLI references |
+| Code | `<Code />` | Code blocks |
+
+## Sizing
+
+Use Tailwind's `size-*` utility for consistent icon sizing:
+
+```tsx
+<Zap className="size-3" />   // 12px
+<Zap className="size-4" />   // 16px
+<Zap className="size-5" />   // 20px
+<Zap className="size-6" />   // 24px
+```
+
+## Custom SVG Icons
+
+For brand icons not in Lucide (GitHub, Notion, Jira, etc.), inline SVGs are used directly in components. See `src/components/sections/Hero.tsx` for examples.

@@ -1,0 +1,47 @@
+---
+title: Introduction
+description: Use Viper AI components to power your engineering workflow.
+section: Guide
+prev: null
+next: installation
+---
+
+**Viper AI is a distribution of engineering components** built for autonomous software teams. Based on the shadcn registry and inspired by modern AI-native tooling, our goal is to help any engineering team ship production-ready software — faster, with full system context.
+
+---
+
+## Not a library — an open component distribution
+
+Like shadcn/ui, **Viper AI is not a typical install-from-NPM library**. It's an open collection you can copy, modify, and customize directly in your codebase. This "open code" approach gives you maximum flexibility without wrapper overhead or styling workarounds.
+
+Every component ships as plain TypeScript and Tailwind CSS. You own the code from day one. No hidden abstractions, no breaking upgrades, no black boxes.
+
+## What's included
+
+Viper AI ships with everything you need to build a production-grade AI engineering platform:
+
+1. **Agent Components** — Pre-built UI for Code, Review, PM, and Ops agents with built-in state management and real-time streaming support.
+
+2. **Context Engine** — A shared context layer that keeps every agent, ticket, and code change in sync across your entire workflow.
+
+3. **CLI Integration** — The Viper CLI connects your terminal directly to the agent fleet — spin up agents, monitor runs, and review outputs without leaving your editor.
+
+4. **Developer Primitives** — Accessible, motion-powered UI primitives (buttons, dialogs, cards, toasts) built on Radix UI and Framer Motion.
+
+## Why Viper AI?
+
+Current AI coding tools see a single file — not a system. They lack the architectural context, cross-agent coordination, and workflow integration required to ship real software autonomously.
+
+Viper was built from first principles to solve this. Every agent shares the same context graph. Every action is scoped, audited, and reversible. Every output is production-ready.
+
+## Getting Started
+
+Viper AI is currently in early access. Install the CLI and connect your workspace:
+
+```bash
+npm install @viper-ai/cli -g
+viper init
+viper connect --workspace my-project
+```
+
+For detailed installation instructions, see the [Installation](/docs/guide/installation) guide.

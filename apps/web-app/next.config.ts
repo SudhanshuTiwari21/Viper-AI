@@ -1,6 +1,8 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
+import { createMDX } from 'fumadocs-mdx/next'
 
-/** Next.js 16+ — `experimental.turbo` root is no longer a valid config key; use Turborepo at the monorepo root instead. */
-const nextConfig: NextConfig = {};
+const withMDX = createMDX()
 
-export default nextConfig;
+const nextConfig: NextConfig = {}
+
+export default withMDX(nextConfig)
