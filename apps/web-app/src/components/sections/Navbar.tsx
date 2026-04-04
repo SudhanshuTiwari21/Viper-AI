@@ -224,9 +224,27 @@ export default function Navbar() {
 
         {/* ── Right: Download + Mobile toggle ── */}
         <div className="flex items-center gap-3">
+          <Link
+            href="/login"
+            className={cn(
+              buttonVariants({ variant: 'ghost' }),
+              'hidden md:inline-flex text-[15px] font-sans font-normal text-white/90 hover:text-white hover:bg-white/10 h-8 px-3',
+            )}
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/signup"
+            className={cn(
+              buttonVariants({ variant: 'outline' }),
+              'hidden md:inline-flex text-[15px] font-sans font-medium h-8 px-4 border-white/30 hover:bg-white hover:text-black',
+            )}
+          >
+            Sign up
+          </Link>
           <Button
             variant="outline"
-            className="hidden md:inline-flex cursor-pointer text-[15px] font-sans font-medium h-8 px-5 border-white/30 hover:bg-white hover:text-black hover:border-white transition-all duration-200"
+            className="hidden lg:inline-flex cursor-pointer text-[15px] font-sans font-medium h-8 px-5 border-white/30 hover:bg-white hover:text-black hover:border-white transition-all duration-200"
           >
             Download
           </Button>
@@ -265,6 +283,20 @@ export default function Navbar() {
             ))}
           </div>
           <div className="flex flex-col gap-2 pb-4">
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-center')}
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/signup"
+              onClick={() => setMobileOpen(false)}
+              className={cn(buttonVariants({ variant: 'default' }), 'w-full justify-center')}
+            >
+              Sign up
+            </Link>
             <Button className="w-full" onClick={() => setMobileOpen(false)}>
               Download
             </Button>
