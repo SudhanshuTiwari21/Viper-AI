@@ -6,7 +6,6 @@ import { createPortal } from 'react-dom'
 import { Logo } from '@/components/ui/Logo'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { MenuToggleIcon } from '@/components/ui/menu-toggle-icon'
-import { useScroll } from '@/components/ui/use-scroll'
 import { cn } from '@/lib/utils'
 
 // ── Dropdown spring config (from navbar-menu.tsx) ────────────────────────────
@@ -167,7 +166,6 @@ function MobileMenu({ open, children }: MobileMenuProps) {
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [activeDropdown, setActiveDropdown] = React.useState<string | null>(null)
-  const scrolled = useScroll(10)
 
   // Lock body scroll when mobile menu is open
   React.useEffect(() => {
@@ -176,14 +174,8 @@ export default function Navbar() {
   }, [mobileOpen])
 
   return (
-    <header
-      className={cn(
-        'sticky top-0 z-50 w-full border-b border-transparent transition-all duration-300',
-        scrolled &&
-          'border-white/20 bg-black/80 backdrop-blur-lg shadow-[0_1px_0_0_rgba(255,255,255,0.08)]',
-      )}
-    >
-      <nav className="mx-auto flex h-14 w-full max-w-350 items-center justify-between px-8">
+    <header className="sticky top-0 z-50 w-full border-b border-white/20 bg-black/80 shadow-[0_1px_0_0_rgba(255,255,255,0.08)] backdrop-blur-lg">
+      <nav className="mx-auto box-border flex h-14 min-h-14 max-h-14 w-full max-w-350 items-center justify-between px-8">
         {/* ── Left: Logo ── */}
         <Link href="/" aria-label="ViperAI home" className="hover:opacity-80 transition-opacity">
           <Logo />
