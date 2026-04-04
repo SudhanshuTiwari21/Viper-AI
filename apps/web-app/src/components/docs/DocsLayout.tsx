@@ -101,7 +101,7 @@ function RightSidebar() {
       if (el.id) {
         found.push({
           id: el.id,
-          text: el.textContent?.replace(/\s*#\s*$/, '').trim() ?? '',
+          text: el.textContent?.replace(/^#\s*/, '').trim() ?? '',
           level: el.tagName === 'H2' ? 2 : 3,
         })
       }
@@ -113,6 +113,11 @@ function RightSidebar() {
   useEffect(() => {
     if (headings.length === 0) return
     const handleScroll = () => {
+      const isAtBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 100
+      if (isAtBottom) {
+        setActiveId(headings[headings.length - 1]?.id ?? '')
+        return
+      }
       let current = headings[0]?.id ?? ''
       for (const h of headings) {
         const el = document.getElementById(h.id)
