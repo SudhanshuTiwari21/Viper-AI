@@ -15,7 +15,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   // C.11: chat interaction mode
   ChatMode: z.enum(["ask", "plan", "debug", "agent"]),
   // D.19: model tier selector
-  ModelTier: z.enum(["auto", "premium", "fast"]),
+  ModelTier: z.enum(["auto", "premium"]),
 };
 
 export async function runSchemaValidationCase(

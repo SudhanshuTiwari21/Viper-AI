@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import type { CodePatch } from "../lib/patch-types";
+import { getDefaultModelForTier, isPremiumSelectableModelId } from "@repo/model-registry";
 import type { ModelTier } from "../services/agent-api";
+
+const DEFAULT_PREMIUM_MODEL_ID = String(getDefaultModelForTier("premium").id);
 import { useWorkspaceContext } from "./workspace-context";
 import type { HunkApprovalStatus } from "../components/inline-diff-viewer";
 
@@ -130,6 +133,8 @@ export interface ChatSession {
   chatMode?: ChatMode;
   /** D.19: model tier for API requests; default `auto` when omitted (legacy localStorage). */
   modelTier?: ModelTier;
+  /** When `modelTier === "premium"`, registry model id sent as `premiumModelId`. */
+  premiumModelId?: string;
 }
 
 interface ChatContextValue {
@@ -174,6 +179,7 @@ interface ChatContextValue {
   setAwaitingApproval: (sessionId: string, messageId: string, data: ChatMessage["awaitingApproval"]) => void;
   setChatMode: (sessionId: string, mode: ChatMode) => void;
   setModelTier: (sessionId: string, tier: ModelTier) => void;
+  setPremiumModelId: (sessionId: string, modelId: string) => void;
   setRequestId: (sessionId: string, messageId: string, requestId: string) => void;
   setFeedbackRating: (sessionId: string, messageId: string, rating: "up" | "down" | null) => void;
 }
@@ -185,7 +191,12 @@ function newId() {
 }
 
 function normalizeModelTier(raw: unknown): ModelTier {
-  return raw === "premium" || raw === "fast" ? raw : "auto";
+  if (raw === "premium") return "premium";
+  return "auto";
+}
+
+function normalizePremiumModelId(raw: unknown): string {
+  return typeof raw === "string" && isPremiumSelectableModelId(raw) ? raw : DEFAULT_PREMIUM_MODEL_ID;
 }
 
 function createNewSession(): ChatSession {
@@ -195,6 +206,7 @@ function createNewSession(): ChatSession {
     messages: [],
     createdAt: Date.now(),
     modelTier: "auto",
+    premiumModelId: DEFAULT_PREMIUM_MODEL_ID,
   };
 }
 
@@ -249,10 +261,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       };
       if (Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
         setSessions(
-          parsed.sessions.map((s) => ({
-            ...s,
-            modelTier: normalizeModelTier((s as ChatSession).modelTier),
-          })),
+          parsed.sessions.map((s) => {
+            const tier = normalizeModelTier((s as ChatSession).modelTier);
+            return {
+              ...s,
+              modelTier: tier,
+              premiumModelId: normalizePremiumModelId((s as ChatSession).premiumModelId),
+            };
+          }),
         );
       } else {
         setSessions([createNewSession()]);
@@ -590,7 +606,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const setModelTier = useCallback((sessionId: string, tier: ModelTier) => {
     setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, modelTier: tier } : s)),
+      prev.map((s) =>
+        s.id === sessionId
+          ? {
+              ...s,
+              modelTier: tier,
+              premiumModelId:
+                tier === "premium"
+                  ? normalizePremiumModelId(s.premiumModelId)
+                  : s.premiumModelId,
+            }
+          : s,
+      ),
+    );
+  }, []);
+
+  const setPremiumModelId = useCallback((sessionId: string, modelId: string) => {
+    if (!isPremiumSelectableModelId(modelId)) return;
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, premiumModelId: modelId } : s)),
     );
   }, []);
 
@@ -665,6 +699,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setAwaitingApproval,
     setChatMode,
     setModelTier,
+    setPremiumModelId,
     setRequestId,
     setFeedbackRating,
     pendingAttachments,

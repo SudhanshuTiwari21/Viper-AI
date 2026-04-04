@@ -25,6 +25,7 @@ export {
   upsertConversationModelPreference,
   getConversationModelPreference,
   type ConversationModelTier,
+  type ConversationModelPreferenceRow,
 } from "./conversation-model-preferences.repository";
 export {
   insertChatFeedback,

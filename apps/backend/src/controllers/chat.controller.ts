@@ -93,6 +93,7 @@ export async function postChat(
       messages,
       chatMode,
       tierRes.effective,
+      tierRes.effectivePremiumModelId,
       attachments,
     );
 
@@ -315,6 +316,7 @@ export async function postChatStream(
       ac.signal,
       chatMode,
       tierRes.effective,
+      tierRes.effectivePremiumModelId,
       { tierDowngraded: tierRes.downgraded, requestedTier: tierRes.requested },
       attachments,
     );

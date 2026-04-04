@@ -11,7 +11,7 @@ describe("resolveEffectiveModelTier (D.20)", () => {
   it("downgrades premium when entitled set excludes premium", async () => {
     const config = parseWorkflowRuntimeConfig({
       ...process.env,
-      VIPER_ALLOWED_MODEL_TIERS: "auto,fast",
+      VIPER_ALLOWED_MODEL_TIERS: "auto",
     } as NodeJS.ProcessEnv);
 
     const tierRes = await resolveEffectiveModelTier({
@@ -30,9 +30,10 @@ describe("resolveEffectiveModelTier (D.20)", () => {
     });
 
     expect(tierRes.requested).toBe("premium");
-    expect(tierRes.effective).toBe("fast");
+    expect(tierRes.effective).toBe("auto");
     expect(tierRes.downgraded).toBe(true);
-    expect(tierRes.tier_downgraded_to).toBe("fast");
+    expect(tierRes.tier_downgraded_to).toBe("auto");
+    expect(tierRes.effectivePremiumModelId).toBeNull();
   });
 
   it("loads persisted tier when modelTier omitted", async () => {
@@ -43,7 +44,7 @@ describe("resolveEffectiveModelTier (D.20)", () => {
         prompt: "x",
         workspacePath: "/w",
         mode: "agent",
-        modelTier: "fast",
+        modelTier: "premium",
       },
       identity: {
         request_id: "r2",
@@ -67,8 +68,9 @@ describe("resolveEffectiveModelTier (D.20)", () => {
       config,
     });
 
-    expect(second.requested).toBe("fast");
-    expect(second.effective).toBe("fast");
+    expect(second.requested).toBe("premium");
+    expect(second.effective).toBe("premium");
     expect(second.downgraded).toBe(false);
+    expect(second.effectivePremiumModelId).toBe("gpt-4o");
   });
 });

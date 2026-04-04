@@ -13,13 +13,12 @@ Products like Cursor separate:
 1. **Included “Auto” (or router-managed) usage** — cheaper for the platform to optimize (routing, caps, model mix). Users stay in a **predictable cost band**.
 2. **Premium / pinned-model usage** — user picks a **concrete** strong model; marginal cost is higher and less predictable, so it is **metered separately** and often **smaller** on a fixed-price tier.
 
-Viper already exposes **`modelTier`**: `auto` | `premium` | `fast` in the API. The **revenue plan** below treats:
+Viper exposes **`modelTier`**: `auto` | `premium` in the product API (legacy clients may send `fast`; it is normalized to `auto`). Optional **`premiumModelId`** selects an allowlisted flagship model when tier is premium. The **revenue plan** below treats:
 
 | User-facing concept | Maps to Viper (today / near-term) | Billing bucket |
 |----------------------|-----------------------------------|----------------|
 | **Auto-style included usage** | Client `modelTier: "auto"` (router + env defaults) | **Bucket A — included auto** |
-| **Specific / premium model usage** | Client `modelTier: "premium"` or future **pinned `modelId`** | **Bucket B — premium / API-style** |
-| **Fast tier** | `modelTier: "fast"` | Product choice: sub-bucket of A, or share B with a different multiplier |
+| **Specific / premium model usage** | Client `modelTier: "premium"` + optional `premiumModelId` | **Bucket B — premium / API-style** |
 
 **Rule:** Every completed chat request must classify into **exactly one** billable bucket for **Viper-hosted** inference (unless BYOK — see §5).
 
@@ -32,8 +31,7 @@ Assume a **single seat**, **Viper-hosted** keys, monthly reset (UTC), **request-
 | Pool | Purpose | Example monthly cap | Overage behavior (product choice) |
 |------|---------|----------------------|-----------------------------------|
 | **A — Auto** | `modelTier: "auto"`; router picks model within allowed registry | **500 requests** | Soft warning at 80%; hard stop at 100% **or** switch to “upgrade / wait for reset” |
-| **B — Premium / specific** | `modelTier: "premium"` or future pinned high-cost models | **100 requests** | Stricter: no silent spill to Auto unless user toggles tier in UI |
-| **C — Fast-only** *(optional)* | `modelTier: "fast"` only | Include in A (e.g. unlimited within A) **or** separate small pool if you want to cap cheapest path | Document clearly in marketing |
+| **B — Premium / specific** | `modelTier: "premium"` (+ `premiumModelId` when set) | **100 requests** | Stricter: no silent spill to Auto unless user toggles tier in UI |
 
 **Composition example (story for landing page):**
 
@@ -106,9 +104,9 @@ Recommendation for v1: **BYOK requests do not consume A/B Viper-hosted pools**; 
 
 ## 6. Engineering backlog (ordered)
 
-1. **Schema:** Extend `usage_events` / rollups with `billing_bucket` (`auto` | `premium` | `fast` | `byok_orchestration`) and optional `used_customer_key: boolean`.
+1. **Schema:** Extend `usage_events` / rollups with `billing_bucket` (`auto` | `premium` | `byok_orchestration`) and optional `used_customer_key: boolean`.
 2. **Entitlements:** New flags on `workspace_entitlements` for split quotas; Stripe price JSON mapping in [`docs/ENV.md`](ENV.md) pattern.
-3. **Quota service:** Dual (or triple) counters per workspace per UTC month; **F.33** branch on resolved bucket.
+3. **Quota service:** Dual counters per workspace per UTC month (Auto vs Premium); **F.33** branch on resolved bucket.
 4. **Desktop + web:** Usage panel shows **Auto used / Auto limit** and **Premium used / Premium limit** (and BYOK indicator).
 5. **BYOK:** Key vault API + registry-driven routing in model resolution layer (before OpenAI/Anthropic client creation).
 
@@ -119,7 +117,23 @@ Recommendation for v1: **BYOK requests do not consume A/B Viper-hosted pools**; 
 - Token-based vs request-based caps (or **weighted requests**: premium = 3× Auto).
 - Rollover, annual plans, and **true-up** for teams.
 - Regional pricing and tax (Stripe Tax).
-- Whether **fast** tier is unlimited on low tiers (abuse risk).
+- Weighted metering when multiple premium models have very different COGS.
+
+---
+
+## 8. Illustrative **$20 / month** economics (how to think about “who gets what”)
+
+**This is not accounting** — it is a **planning frame** until you have measured token distributions. Stripe collects **$20**; that is **revenue**. What you **allocate** to Auto vs Premium is a **product promise** (included usage), not cash sitting in two piles.
+
+**A simple story that matches §2 (500 Auto + 100 Premium requests):**
+
+1. **Reserve COGS headroom (illustrative):** Suppose you target **~35% of list price** for **Viper-hosted inference** at the **mix** you expect on this tier (mostly Auto, some Premium), and you hold the rest for payment fees, support, infra, and margin. On **$20**, that is about **$7** you are willing to spend on **average** inference COGS if the user exhausts both pools in the expected ratio. (Real teams often model **p50/p95** usage instead of “everyone maxes both.”)
+
+2. **Split that COGS budget by intent (not by the $20 list price):** If Premium requests cost roughly **~5×** Auto per request at your router mix, then **500 Auto + 100 Premium** is loosely like **500 + 500 = 1000 “auto-equivalent units.”** Roughly **half** of the **inference COGS budget** is for Auto-shaped usage and **half** for Premium-shaped usage — even though Premium is only **100/600 ≈ 17%** of the **request count**. The **$20** does not divide cleanly into “$X for Auto / $Y for Premium” in dollars until you fix **actual** per-request COGS; the **operational** split is the **quota** (500 vs 100).
+
+3. **Gross margin (illustrative):** If **$7** goes to inference COGS at max included usage and **~$3** goes to Stripe/taxes (varies), you have **~$10** left for everything else (salaries, IDE, observability, profit). If users **under-use** Premium, **margin goes up**; if they **max Premium** with heavy tokens, **margin goes down** — that is why Premium is a **smaller pool**.
+
+**Rule of thumb for messaging:** The **$20** buys the **seat + product**; **included requests** are the **metered promise**. Tune **pool sizes** and **price** after **`usage_events`** shows real **tokens per bucket**.
 
 ---
 
@@ -128,3 +142,4 @@ Recommendation for v1: **BYOK requests do not consume A/B Viper-hosted pools**; 
 | Date | Note |
 |------|------|
 | 2026-04 | Initial draft: dual bucket $20 example, BYOK, enforcement sketch |
+| 2026-04-02 | Product API: `auto` \| `premium` + `premiumModelId`; §8 illustrative $20 COGS/margin framing |

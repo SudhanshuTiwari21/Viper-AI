@@ -28,9 +28,7 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(c.modelRouteDefault).toBe("pinned");
     expect(c.modelFailoverMaxAttempts).toBe(3);
     expect(c.modelFailoverEnabledOverride).toBeUndefined();
-    expect(c.entitledModelTiers.has("auto")).toBe(true);
-    expect(c.entitledModelTiers.has("fast")).toBe(true);
-    expect(c.entitledModelTiers.has("premium")).toBe(true);
+    expect([...c.entitledModelTiers].sort()).toEqual(["auto", "premium"]);
     expect(c.disableLlmCache).toBe(false);
     expect(c.directLlmCacheTtl).toBe(900);
     expect(c.chatHistoryLimit).toBe(10);

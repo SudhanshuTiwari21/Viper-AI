@@ -47,7 +47,7 @@ describe("buildRouteTelemetry", () => {
     const t = buildRouteTelemetry({
       identity: { ...identity, conversation_id: null },
       mode: "ask",
-      effectiveModelTier: "fast",
+      effectiveModelTier: "auto",
       tierDowngraded: true,
       routeMeta,
       latencyMs: 500,

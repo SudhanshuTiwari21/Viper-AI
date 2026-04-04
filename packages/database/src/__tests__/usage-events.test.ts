@@ -110,7 +110,7 @@ describe("insertUsageEvent", () => {
       primary_model_id: "gpt-4o-mini",
       final_model_id: "gpt-4o-mini",
       route_mode: "pinned",
-      effective_model_tier: "fast",
+      effective_model_tier: "auto",
       tier_downgraded: false,
       fallback_count: 0,
       latency_ms: 500,

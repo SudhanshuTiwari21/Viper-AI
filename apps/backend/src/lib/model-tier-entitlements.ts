@@ -1,18 +1,20 @@
 import type { ModelTierSelection } from "../validators/request.schemas.js";
 
-const ALL_TIERS: ModelTierSelection[] = ["auto", "fast", "premium"];
-const DOWNGRADE_ORDER: ModelTierSelection[] = ["premium", "fast", "auto"];
+const ALL_TIERS: ModelTierSelection[] = ["auto", "premium"];
+const DOWNGRADE_ORDER: ModelTierSelection[] = ["premium", "auto"];
 
-/** Parse `VIPER_ALLOWED_MODEL_TIERS` — comma-separated subset of auto|fast|premium. */
+/** Parse `VIPER_ALLOWED_MODEL_TIERS` — comma-separated subset of auto|premium (legacy `fast` → auto). */
 export function parseAllowedModelTiersFromEnv(env: NodeJS.ProcessEnv): Set<ModelTierSelection> {
-  const raw = env.VIPER_ALLOWED_MODEL_TIERS?.trim() ?? "auto,fast,premium";
+  const raw = env.VIPER_ALLOWED_MODEL_TIERS?.trim() ?? "auto,premium";
   const parts = raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   const set = new Set<ModelTierSelection>();
   for (const p of parts) {
-    if (p === "auto" || p === "premium" || p === "fast") {
+    if (p === "fast") {
+      set.add("auto");
+    } else if (p === "auto" || p === "premium") {
       set.add(p);
     }
   }
@@ -75,7 +77,7 @@ export function resolveTierWithEntitlements(
       };
     }
   }
-  for (const t of ["auto", "fast", "premium"] as const) {
+  for (const t of ALL_TIERS) {
     if (entitled.has(t)) {
       return {
         effective: t,

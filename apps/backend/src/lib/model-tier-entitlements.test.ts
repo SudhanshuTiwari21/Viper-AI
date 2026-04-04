@@ -6,11 +6,11 @@ import {
 } from "./model-tier-entitlements.js";
 
 describe("parseAllowedModelTiersFromEnv", () => {
-  it("defaults to all tiers", () => {
+  it("defaults to auto and premium", () => {
     const s = parseAllowedModelTiersFromEnv({});
     expect(s.has("auto")).toBe(true);
-    expect(s.has("fast")).toBe(true);
     expect(s.has("premium")).toBe(true);
+    expect(s.size).toBe(2);
   });
 
   it("parses comma list", () => {
@@ -18,32 +18,31 @@ describe("parseAllowedModelTiersFromEnv", () => {
       VIPER_ALLOWED_MODEL_TIERS: "auto, fast",
     } as NodeJS.ProcessEnv);
     expect(s.has("auto")).toBe(true);
-    expect(s.has("fast")).toBe(true);
     expect(s.has("premium")).toBe(false);
+  });
+
+  it("maps legacy fast entry to auto", () => {
+    const s = parseAllowedModelTiersFromEnv({
+      VIPER_ALLOWED_MODEL_TIERS: "fast",
+    } as NodeJS.ProcessEnv);
+    expect([...s]).toEqual(["auto"]);
   });
 });
 
 describe("resolveTierWithEntitlements", () => {
-  it("downgrades premium to fast when premium missing from entitled set", () => {
-    const entitled = new Set<"auto" | "fast" | "premium">(["auto", "fast"]);
-    const r = resolveTierWithEntitlements("premium", entitled);
-    expect(r.effective).toBe("fast");
-    expect(r.downgraded).toBe(true);
-    expect(r.tier_downgraded_from).toBe("premium");
-    expect(r.tier_downgraded_to).toBe("fast");
-  });
-
-  it("downgrades premium to auto when only auto allowed", () => {
-    const entitled = new Set<"auto" | "fast" | "premium">(["auto"]);
+  it("downgrades premium to auto when premium missing from entitled set", () => {
+    const entitled = new Set<"auto" | "premium">(["auto"]);
     const r = resolveTierWithEntitlements("premium", entitled);
     expect(r.effective).toBe("auto");
     expect(r.downgraded).toBe(true);
+    expect(r.tier_downgraded_from).toBe("premium");
+    expect(r.tier_downgraded_to).toBe("auto");
   });
 
   it("no-op when requested tier is allowed", () => {
-    const entitled = new Set<"auto" | "fast" | "premium">(["auto", "fast", "premium"]);
-    const r = resolveTierWithEntitlements("fast", entitled);
-    expect(r.effective).toBe("fast");
+    const entitled = new Set<"auto" | "premium">(["auto", "premium"]);
+    const r = resolveTierWithEntitlements("premium", entitled);
+    expect(r.effective).toBe("premium");
     expect(r.downgraded).toBe(false);
   });
 });
@@ -51,11 +50,11 @@ describe("resolveTierWithEntitlements", () => {
 describe("buildEntitledTierSet", () => {
   it("removes premium when premiumRequiresEntitlement and not entitled", () => {
     const s = buildEntitledTierSet({
-      allowedFromEnv: new Set(["auto", "fast", "premium"]),
+      allowedFromEnv: new Set(["auto", "premium"]),
       premiumRequiresEntitlement: true,
       premiumEntitled: false,
     });
     expect(s.has("premium")).toBe(false);
-    expect(s.has("fast")).toBe(true);
+    expect(s.has("auto")).toBe(true);
   });
 });

@@ -83,7 +83,8 @@ function resetBaseEnv() {
 async function runGenericStream(
   modeEnv: string | undefined,
   chatMode: "ask" | "plan" | "debug" | "agent",
-  modelTier: "auto" | "premium" | "fast" = "auto",
+  modelTier: "auto" | "premium" = "auto",
+  premiumModelId: string | null = null,
 ) {
   // Force fresh module graph with new env snapshot.
   resetBaseEnv();
@@ -111,6 +112,7 @@ async function runGenericStream(
     undefined,
     chatMode,
     modelTier,
+    premiumModelId,
   );
   return { seenModels, events };
 }
@@ -153,6 +155,7 @@ describe("H.44 shadow mode + staged rollout integration", () => {
       undefined,
       "ask",
       "auto",
+      null,
     );
     // ask → fast → gpt-4o-mini — live path unchanged
     expect(seenModels[0]).toBe("gpt-4o-mini");
@@ -185,6 +188,7 @@ describe("H.44 shadow mode + staged rollout integration", () => {
       undefined,
       "plan",
       "auto",
+      null,
     );
     // Candidate: plan + CODE_FIX → premium → gpt-4o
     expect(seenModels[0]).toBe("gpt-4o");
@@ -216,6 +220,7 @@ describe("H.44 shadow mode + staged rollout integration", () => {
       undefined,
       "plan",
       "auto",
+      null,
     );
     // Live: plan → fast → gpt-4o-mini
     expect(seenModels[0]).toBe("gpt-4o-mini");
@@ -246,6 +251,25 @@ describe("D.17 integration: auto model router uses registry defaults", () => {
     expect(seenModels[0]).toBe("gpt-4o");
   });
 
+  it("D.19: modelTier=premium + premiumModelId=gpt-4-turbo uses that model", async () => {
+    vi.resetModules();
+    process.env.OPENAI_API_KEY = "test";
+    process.env.VIPER_ENABLE_STREAM_CONTEXT_PRIMER = "false";
+    process.env.VIPER_STREAM_ANALYSIS_WARMUP_MS = "0";
+    process.env.VIPER_DEBUG_ASSISTANT = "0";
+    process.env.VIPER_DEBUG_WORKFLOW = "0";
+    process.env.VIPER_MODEL_ROUTE_DEFAULT = "pinned";
+
+    intentMock.runIntentPipeline.mockResolvedValue({
+      intent: { intentType: "GENERIC" },
+      entities: { entities: [] },
+      response: { intent: "GENERIC", summary: "GENERIC" },
+    });
+
+    const { seenModels } = await runGenericStream("pinned", "agent", "premium", "gpt-4-turbo");
+    expect(seenModels[0]).toBe("gpt-4-turbo");
+  });
+
   it("D.19: modelTier=premium overrides pinned primary to registry premium default", async () => {
     vi.resetModules();
     process.env.OPENAI_API_KEY = "test";
@@ -261,13 +285,8 @@ describe("D.17 integration: auto model router uses registry defaults", () => {
       response: { intent: "GENERIC", summary: "GENERIC" },
     });
 
-    const { seenModels } = await runGenericStream("pinned", "agent", "premium");
+    const { seenModels } = await runGenericStream("pinned", "agent", "premium", null);
     expect(seenModels[0]).toBe("gpt-4o");
-  });
-
-  it("D.19: modelTier=fast overrides auto debug (premium) routing", async () => {
-    const { seenModels } = await runGenericStream("auto", "debug", "fast");
-    expect(seenModels[0]).toBe("gpt-4o-mini");
   });
 
   it("D.18: generic streaming failovers to cross-tier model on 429", async () => {
@@ -299,6 +318,7 @@ describe("D.17 integration: auto model router uses registry defaults", () => {
       undefined,
       "agent",
       "auto",
+      null,
     );
     expect(seenModels.length).toBeGreaterThanOrEqual(2);
     expect(seenModels[0]).toBe("gpt-4o-mini");

@@ -59,10 +59,10 @@
     },
     {
       "id": "schema-009",
-      "description": "ModelTier 'fast' is valid",
+      "description": "ModelTier 'fast' is invalid (legacy; use auto)",
       "tier": "offline",
       "input": { "schema": "ModelTier", "value": "fast" },
-      "expect": { "valid": true }
+      "expect": { "valid": false }
     },
     {
       "id": "schema-010",

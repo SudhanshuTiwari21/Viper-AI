@@ -109,7 +109,7 @@ describe("ChatRequestSchema (D.19/D.20 modelTier)", () => {
     if (r2.success) expect(r2.data.modelTier).toBeUndefined();
   });
 
-  it.each(["auto", "premium", "fast"] as const)("accepts modelTier %s", (t) => {
+  it.each(["auto", "premium"] as const)("accepts modelTier %s", (t) => {
     const r = ChatRequestSchema.safeParse({
       prompt: "x",
       workspacePath: "/w",
@@ -117,6 +117,37 @@ describe("ChatRequestSchema (D.19/D.20 modelTier)", () => {
     });
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.modelTier).toBe(t);
+  });
+
+  it("maps legacy modelTier fast to auto", () => {
+    const r = ChatRequestSchema.safeParse({
+      prompt: "x",
+      workspacePath: "/w",
+      modelTier: "fast",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.modelTier).toBe("auto");
+  });
+
+  it("accepts allowlisted premiumModelId", () => {
+    const r = ChatRequestSchema.safeParse({
+      prompt: "x",
+      workspacePath: "/w",
+      modelTier: "premium",
+      premiumModelId: "gpt-4-turbo",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.premiumModelId).toBe("gpt-4-turbo");
+  });
+
+  it("rejects unknown premiumModelId", () => {
+    const r = ChatRequestSchema.safeParse({
+      prompt: "x",
+      workspacePath: "/w",
+      modelTier: "premium",
+      premiumModelId: "not-a-real-model-id",
+    });
+    expect(r.success).toBe(false);
   });
 
   it("normalizes case and whitespace for modelTier", () => {

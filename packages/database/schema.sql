@@ -36,7 +36,8 @@ CREATE INDEX IF NOT EXISTS idx_repository_files_repo_id ON repository_files(repo
 CREATE TABLE IF NOT EXISTS conversation_model_preferences (
   workspace_id TEXT NOT NULL,
   conversation_id TEXT NOT NULL,
-  model_tier TEXT NOT NULL CHECK (model_tier IN ('auto', 'premium', 'fast')),
+  model_tier TEXT NOT NULL CHECK (model_tier IN ('auto', 'premium')),
+  preferred_premium_model_id TEXT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace_id, conversation_id)
 );

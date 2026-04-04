@@ -112,7 +112,7 @@ async function runStream(opts: {
   prompt: string;
   openAI: unknown;
   workspacePath: string;
-  modelTier?: "auto" | "premium" | "fast";
+  modelTier?: "auto" | "premium";
 }) {
   openAIHolder.current = opts.openAI;
   const mod = await import("../services/assistant.service.js");
@@ -127,6 +127,7 @@ async function runStream(opts: {
     undefined,
     opts.mode,
     opts.modelTier ?? "auto",
+    null,
   );
   return events;
 }

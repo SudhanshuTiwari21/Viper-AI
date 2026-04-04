@@ -1,7 +1,11 @@
+import {
+  getDefaultModelForTier,
+  isPremiumSelectableModelId,
+} from "@repo/model-registry";
 import type { WorkflowRuntimeConfig } from "../config/workflow-flags.js";
 import {
-  loadConversationModelPreference,
-  saveConversationModelPreference,
+  loadConversationRoutingPreference,
+  saveConversationRoutingPreference,
 } from "./conversation-model-preference-store.js";
 import { resolveTierWithEntitlements } from "./model-tier-entitlements.js";
 import type { RequestIdentity } from "../types/request-identity.js";
@@ -15,6 +19,8 @@ export interface EffectiveModelTierResult {
   tier_downgraded_from?: ModelTierSelection;
   tier_downgraded_to?: ModelTierSelection;
   denyReason?: string;
+  /** OpenAI model id when `effective === "premium"`; otherwise null. */
+  effectivePremiumModelId: string | null;
 }
 
 /** True when the client sent a `modelTier` field (D.20 upsert + skip load). */
@@ -23,6 +29,15 @@ export function isModelTierExplicitInParsedBody(parsedBody: ChatRequest): boolea
     "modelTier" in parsedBody &&
     parsedBody.modelTier !== undefined &&
     parsedBody.modelTier !== null
+  );
+}
+
+function isPremiumModelIdExplicitInParsedBody(parsedBody: ChatRequest): boolean {
+  return (
+    "premiumModelId" in parsedBody &&
+    parsedBody.premiumModelId !== undefined &&
+    parsedBody.premiumModelId !== null &&
+    String(parsedBody.premiumModelId).trim() !== ""
   );
 }
 
@@ -35,34 +50,65 @@ export async function resolveEffectiveModelTier(params: {
   identity: RequestIdentity;
   config: WorkflowRuntimeConfig;
 }): Promise<EffectiveModelTierResult> {
-  const explicit = isModelTierExplicitInParsedBody(params.parsedBody);
+  const explicitTier = isModelTierExplicitInParsedBody(params.parsedBody);
+  const explicitPremiumId = isPremiumModelIdExplicitInParsedBody(params.parsedBody);
+  const bodyPremiumRaw = explicitPremiumId ? String(params.parsedBody.premiumModelId).trim() : null;
+  const bodyPremium =
+    bodyPremiumRaw && isPremiumSelectableModelId(bodyPremiumRaw) ? bodyPremiumRaw : null;
+
+  const defaultPremiumId = String(getDefaultModelForTier("premium").id);
+
   const { identity, config } = params;
   const parsedModelTier = params.parsedBody.modelTier;
 
+  const persisted =
+    identity.conversation_id != null && identity.conversation_id !== ""
+      ? await loadConversationRoutingPreference(identity.workspace_id, identity.conversation_id)
+      : null;
+
   let requested: ModelTierSelection;
-  if (explicit && parsedModelTier !== undefined) {
+  if (explicitTier && parsedModelTier !== undefined) {
     requested = parsedModelTier;
-    if (identity.conversation_id) {
-      await saveConversationModelPreference(
-        identity.workspace_id,
-        identity.conversation_id,
-        requested,
-      );
-    }
   } else if (identity.conversation_id) {
-    const persisted = await loadConversationModelPreference(
-      identity.workspace_id,
-      identity.conversation_id,
-    );
-    requested = persisted ?? "auto";
+    requested = persisted?.modelTier ?? "auto";
   } else {
     requested = "auto";
   }
 
-  const r = resolveTierWithEntitlements(requested, params.config.entitledModelTiers);
+  const persistedPremiumOk =
+    persisted?.preferredPremiumModelId &&
+    isPremiumSelectableModelId(persisted.preferredPremiumModelId)
+      ? persisted.preferredPremiumModelId
+      : null;
+
+  const candidatePremiumModelId: string | null =
+    requested === "premium" ? bodyPremium ?? persistedPremiumOk ?? defaultPremiumId : null;
+
+  if (identity.conversation_id) {
+    if (explicitTier && parsedModelTier !== undefined) {
+      const newTier = parsedModelTier;
+      const premiumToStore =
+        newTier === "premium"
+          ? bodyPremium ?? persistedPremiumOk ?? defaultPremiumId
+          : persisted?.preferredPremiumModelId ?? null;
+      await saveConversationRoutingPreference(identity.workspace_id, identity.conversation_id, {
+        modelTier: newTier,
+        preferredPremiumModelId: premiumToStore,
+      });
+    } else if (!explicitTier && requested === "premium" && bodyPremium) {
+      await saveConversationRoutingPreference(identity.workspace_id, identity.conversation_id, {
+        modelTier: requested,
+        preferredPremiumModelId: bodyPremium,
+      });
+    }
+  }
+
+  const r = resolveTierWithEntitlements(requested, config.entitledModelTiers);
   const denyReason = r.downgraded
     ? `tier_not_entitled:${r.tier_downgraded_from}->${r.tier_downgraded_to}`
     : undefined;
+
+  const effectivePremiumModelId = r.effective === "premium" ? candidatePremiumModelId : null;
 
   return {
     effective: r.effective,
@@ -71,5 +117,6 @@ export async function resolveEffectiveModelTier(params: {
     tier_downgraded_from: r.tier_downgraded_from,
     tier_downgraded_to: r.tier_downgraded_to,
     denyReason,
+    effectivePremiumModelId,
   };
 }

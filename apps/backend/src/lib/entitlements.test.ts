@@ -128,7 +128,7 @@ describe("isEntitlementsEnforced", () => {
 // mergeEntitlements — composition rule: DB ∩ D.20 env
 // ---------------------------------------------------------------------------
 
-const ALL_TIERS_SET = new Set(["auto", "fast", "premium"] as const);
+const ALL_TIERS_SET = new Set(["auto", "premium"] as const);
 const mockConfig = { entitledModelTiers: ALL_TIERS_SET };
 
 describe("mergeEntitlements — null planRow (allow-all from DB)", () => {
@@ -139,13 +139,13 @@ describe("mergeEntitlements — null planRow (allow-all from DB)", () => {
 
   it("returns all tiers when planRow is null and env allows all", () => {
     const { allowedModelTiers } = mergeEntitlements(null, mockConfig);
-    expect([...allowedModelTiers].sort()).toEqual(["auto", "fast", "premium"]);
+    expect([...allowedModelTiers].sort()).toEqual(["auto", "premium"]);
   });
 
   it("respects D.20 env cap even when planRow is null", () => {
-    const restrictedConfig = { entitledModelTiers: new Set(["auto", "fast"] as const) };
+    const restrictedConfig = { entitledModelTiers: new Set(["auto"] as const) };
     const { allowedModelTiers } = mergeEntitlements(null, restrictedConfig);
-    expect([...allowedModelTiers].sort()).toEqual(["auto", "fast"]);
+    expect([...allowedModelTiers].sort()).toEqual(["auto"]);
     expect(allowedModelTiers.has("premium")).toBe(false);
   });
 });
@@ -169,7 +169,7 @@ describe("mergeEntitlements — planRow restricts modes", () => {
 
   it("allows all tiers when plan specifies null tiers", () => {
     const { allowedModelTiers } = mergeEntitlements(readOnlyPlan, mockConfig);
-    expect([...allowedModelTiers].sort()).toEqual(["auto", "fast", "premium"]);
+    expect([...allowedModelTiers].sort()).toEqual(["auto", "premium"]);
   });
 });
 
@@ -182,10 +182,9 @@ describe("mergeEntitlements — planRow restricts tiers", () => {
     updated_at: "2026-01-01T00:00:00Z",
   };
 
-  it("only allows tiers from DB plan", () => {
+  it("only allows tiers from DB plan (legacy fast maps to auto)", () => {
     const { allowedModelTiers } = mergeEntitlements(freePlan, mockConfig);
     expect(allowedModelTiers.has("auto")).toBe(true);
-    expect(allowedModelTiers.has("fast")).toBe(true);
     expect(allowedModelTiers.has("premium")).toBe(false);
   });
 
@@ -215,7 +214,7 @@ describe("mergeEntitlements — both restrictions", () => {
     };
     const { allowedModes, allowedModelTiers } = mergeEntitlements(strictPlan, mockConfig);
     expect([...allowedModes]).toEqual(["ask"]);
-    expect([...allowedModelTiers]).toEqual(["fast"]);
+    expect([...allowedModelTiers]).toEqual(["auto"]);
   });
 });
 
@@ -265,20 +264,25 @@ describe("assertModelTierAllowed", () => {
     workspaceId: "ws-uuid",
     pathKey: "abc123",
     allowedModes: new Set(["ask"]),
-    allowedModelTiers: new Set(["auto", "fast"]),
+    allowedModelTiers: new Set(["auto", "premium"]),
     flags: {},
     userId: "user-uuid",
   };
 
+  const autoOnly: ResolvedEntitlements = {
+    ...resolved,
+    allowedModelTiers: new Set(["auto"]),
+  };
+
   it("does not throw when tier is allowed", () => {
     expect(() => assertModelTierAllowed(resolved, "auto")).not.toThrow();
-    expect(() => assertModelTierAllowed(resolved, "fast")).not.toThrow();
+    expect(() => assertModelTierAllowed(resolved, "premium")).not.toThrow();
   });
 
   it("throws EntitlementError 403 when tier is not allowed", () => {
-    expect(() => assertModelTierAllowed(resolved, "premium")).toThrow(EntitlementError);
+    expect(() => assertModelTierAllowed(autoOnly, "premium")).toThrow(EntitlementError);
     try {
-      assertModelTierAllowed(resolved, "premium");
+      assertModelTierAllowed(autoOnly, "premium");
     } catch (err) {
       expect((err as EntitlementError).statusCode).toBe(403);
       expect((err as EntitlementError).message).toMatch(/premium/);

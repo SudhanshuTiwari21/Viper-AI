@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPremiumSelectableModelId } from "@repo/model-registry";
 
 /** C.11 chat / interaction mode (tool policy enforcement is C.12 — schema only here). */
 export const ChatModeSchema = z.enum(["ask", "plan", "debug", "agent"]);
@@ -100,8 +101,14 @@ const AttachmentsSchema = z
 export type Attachment = z.infer<typeof AttachmentSchema>;
 export type ImageAttachment = z.infer<typeof ImageAttachmentSchema>;
 
-/** D.19: model tier selector (`auto` = D.17 router + D.18 failover; `premium`/`fast` = registry defaults). */
-export const ModelTierSelectionSchema = z.enum(["auto", "premium", "fast"]);
+/**
+ * D.19: model tier selector (`auto` = D.17 router + D.18 failover; `premium` = user-picked premium model).
+ * Legacy clients may send `fast` — normalized to `auto`.
+ */
+export const ModelTierSelectionSchema = z.preprocess(
+  (v) => (v === "fast" ? "auto" : v),
+  z.enum(["auto", "premium"]),
+);
 export type ModelTierSelection = z.infer<typeof ModelTierSelectionSchema>;
 
 /** Strip empty history rows so clients don’t 400 after failed streams leave content: "". */
@@ -155,6 +162,12 @@ export const ChatRequestSchema = z.preprocess(
       if (raw === undefined || raw === null || raw === "") return undefined;
       return String(raw).trim().toLowerCase();
     }, ModelTierSelectionSchema.optional()),
+    /** When `modelTier` is `premium`, optional registry allowlist id (e.g. `gpt-4o`). */
+    premiumModelId: z.preprocess((raw) => {
+      if (raw === undefined || raw === null || raw === "") return undefined;
+      const s = String(raw).trim();
+      return s.length > 0 ? s : undefined;
+    }, z.string().min(1).optional()),
     /**
      * E.22: optional image attachments for the current user turn.
      * Canonical shape: `{ kind: "image", source: { type: "media_ref", mediaId } }` (production).
@@ -162,7 +175,16 @@ export const ChatRequestSchema = z.preprocess(
      * Omitting this field preserves full backward compatibility with pre-E.22 clients.
      */
     attachments: AttachmentsSchema,
-  }),
+  })
+    .superRefine((data, ctx) => {
+      if (data.premiumModelId !== undefined && !isPremiumSelectableModelId(data.premiumModelId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Unknown premiumModelId",
+          path: ["premiumModelId"],
+        });
+      }
+    }),
 );
 
 export const AnalysisRequestSchema = z.object({

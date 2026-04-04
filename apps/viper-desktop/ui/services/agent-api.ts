@@ -53,7 +53,7 @@ export interface ChatResponse {
 export type ChatMode = "ask" | "plan" | "debug" | "agent";
 
 /** D.19: per-request model tier (matches backend `modelTier`). */
-export type ModelTier = "auto" | "premium" | "fast";
+export type ModelTier = "auto" | "premium";
 
 // ---------------------------------------------------------------------------
 // E.25 — Image attachment types (mirrors E.22 backend schema)
@@ -186,6 +186,7 @@ export async function sendChat(
   messages?: Array<{ role: "user" | "assistant"; content: string }>,
   mode?: ChatMode,
   modelTier: ModelTier = "auto",
+  premiumModelId?: string,
   attachments?: MediaRefAttachment[],
 ): Promise<ChatResponse> {
   let res: Response;
@@ -200,6 +201,7 @@ export async function sendChat(
         messages,
         ...(mode ? { mode } : {}),
         modelTier,
+        ...(modelTier === "premium" && premiumModelId ? { premiumModelId } : {}),
         // E.25: only include attachments key when non-empty (backward compat)
         ...(attachments?.length ? { attachments } : {}),
       }),
@@ -234,6 +236,7 @@ export async function sendChatStream(
   signal?: AbortSignal,
   mode?: ChatMode,
   modelTier: ModelTier = "auto",
+  premiumModelId?: string,
   /** E.25: validated media_ref attachments to include in the request body. */
   attachments?: MediaRefAttachment[],
 ): Promise<void> {
@@ -249,6 +252,7 @@ export async function sendChatStream(
         messages,
         ...(mode ? { mode } : {}),
         modelTier,
+        ...(modelTier === "premium" && premiumModelId ? { premiumModelId } : {}),
         // E.25: only include attachments key when non-empty (backward compat)
         ...(attachments?.length ? { attachments } : {}),
       }),

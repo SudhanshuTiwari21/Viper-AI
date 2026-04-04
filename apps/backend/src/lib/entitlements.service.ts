@@ -51,7 +51,7 @@ import type { WorkflowRuntimeConfig } from "../config/workflow-flags.js";
 // ---------------------------------------------------------------------------
 
 const ALL_MODES: ChatMode[] = ["ask", "plan", "debug", "agent"];
-const ALL_TIERS: ModelTierSelection[] = ["auto", "fast", "premium"];
+const ALL_TIERS: ModelTierSelection[] = ["auto", "premium"];
 
 // ---------------------------------------------------------------------------
 // Path key — must match deriveWorkspaceId in request-identity.ts exactly
@@ -253,10 +253,13 @@ export function mergeEntitlements(
     ALL_MODES.filter((m) => dbModes.has(m)),
   );
 
-  // Tiers: DB list or ALL_TIERS, then intersect with D.20 env-entitled tiers
-  const dbTiers: Set<string> = planRow?.allowed_model_tiers
-    ? new Set(planRow.allowed_model_tiers)
-    : new Set(ALL_TIERS);
+  // Tiers: DB list or ALL_TIERS (legacy `fast` → auto), then intersect with D.20 env-entitled tiers
+  const dbTiersRaw = planRow?.allowed_model_tiers ?? [...ALL_TIERS];
+  const dbTiers = new Set<string>();
+  for (const t of dbTiersRaw) {
+    if (t === "fast") dbTiers.add("auto");
+    else dbTiers.add(t);
+  }
   const allowedModelTiers = new Set<ModelTierSelection>(
     ALL_TIERS.filter(
       (t) => dbTiers.has(t) && config.entitledModelTiers.has(t),

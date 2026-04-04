@@ -15,6 +15,8 @@ import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
 import { ChatModeSelect } from "./chat-mode-select";
 import { ChatModelTierSelect } from "./chat-model-tier-select";
+import { ChatPremiumModelSelect } from "./chat-premium-model-select";
+import { getDefaultModelForTier } from "@repo/model-registry";
 import { useChat } from "../contexts/chat-context";
 import type { ExecutionStep, PendingDiff, ChatMode } from "../contexts/chat-context";
 import { useWorkspaceContext } from "../contexts/workspace-context";
@@ -91,6 +93,7 @@ export function ChatPanel() {
     setAwaitingApproval,
     setChatMode,
     setModelTier,
+    setPremiumModelId,
     setRequestId,
     setFeedbackRating,
     pendingAttachments,
@@ -116,6 +119,8 @@ export function ChatPanel() {
   const messages = activeSession?.messages ?? [];
   const currentMode: ChatMode = activeSession?.chatMode ?? "agent";
   const currentModelTier: ModelTier = activeSession?.modelTier ?? "auto";
+  const defaultPremiumModelId = String(getDefaultModelForTier("premium").id);
+  const currentPremiumModelId = activeSession?.premiumModelId ?? defaultPremiumModelId;
 
   useEffect(() => {
     scrollToBottom();
@@ -514,6 +519,7 @@ export function ChatPanel() {
           undefined,
           currentMode,
           currentModelTier,
+          currentModelTier === "premium" ? currentPremiumModelId : undefined,
           sendAttachments.length > 0 ? sendAttachments : undefined,
         );
       } catch (err) {
@@ -554,7 +560,9 @@ export function ChatPanel() {
       addPendingEdit,
       currentMode,
       currentModelTier,
+      currentPremiumModelId,
       setRequestId,
+      setPremiumModelId,
       pendingAttachments,
       clearPendingAttachments,
     ],
@@ -1047,6 +1055,13 @@ export function ChatPanel() {
             }}
             disabled={streaming}
           />
+          {currentModelTier === "premium" && activeSessionId ? (
+            <ChatPremiumModelSelect
+              value={currentPremiumModelId}
+              onChange={(id) => setPremiumModelId(activeSessionId, id)}
+              disabled={streaming}
+            />
+          ) : null}
         </div>
 
         {/* E.25 — pending attachment thumbnails */}

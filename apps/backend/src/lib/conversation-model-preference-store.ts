@@ -6,10 +6,20 @@ import {
 import { getPool } from "@repo/database";
 import type { ModelTierSelection } from "../validators/request.schemas.js";
 
-const memory = new Map<string, ConversationModelTier>();
+export type ConversationRoutingPreference = {
+  modelTier: ModelTierSelection;
+  preferredPremiumModelId: string | null;
+};
+
+const memory = new Map<string, ConversationRoutingPreference>();
 
 function memKey(workspaceId: string, conversationId: string): string {
   return `${workspaceId}\0${conversationId}`;
+}
+
+function normalizeTier(t: string): ModelTierSelection {
+  if (t === "premium") return "premium";
+  return "auto";
 }
 
 /** Use Postgres when `DATABASE_URL` is set; otherwise in-memory (tests / no DB). */
@@ -17,28 +27,35 @@ function usePostgresPersistence(): boolean {
   return Boolean(process.env.DATABASE_URL?.trim());
 }
 
-export async function loadConversationModelPreference(
+export async function loadConversationRoutingPreference(
   workspaceId: string,
   conversationId: string,
-): Promise<ModelTierSelection | null> {
+): Promise<ConversationRoutingPreference | null> {
   if (!usePostgresPersistence()) {
     return memory.get(memKey(workspaceId, conversationId)) ?? null;
   }
   try {
     const row = await getConversationModelPreference(getPool(), workspaceId, conversationId);
-    return row;
+    if (!row) return memory.get(memKey(workspaceId, conversationId)) ?? null;
+    return {
+      modelTier: normalizeTier(String(row.model_tier)),
+      preferredPremiumModelId: row.preferred_premium_model_id,
+    };
   } catch {
     return memory.get(memKey(workspaceId, conversationId)) ?? null;
   }
 }
 
-export async function saveConversationModelPreference(
+export async function saveConversationRoutingPreference(
   workspaceId: string,
   conversationId: string,
-  tier: ModelTierSelection,
+  pref: ConversationRoutingPreference,
 ): Promise<void> {
-  const t = tier as ConversationModelTier;
-  memory.set(memKey(workspaceId, conversationId), t);
+  const tier = pref.modelTier as ConversationModelTier;
+  memory.set(memKey(workspaceId, conversationId), {
+    modelTier: pref.modelTier,
+    preferredPremiumModelId: pref.preferredPremiumModelId,
+  });
   if (!usePostgresPersistence()) {
     return;
   }
@@ -46,7 +63,8 @@ export async function saveConversationModelPreference(
     await upsertConversationModelPreference(getPool(), {
       workspace_id: workspaceId,
       conversation_id: conversationId,
-      model_tier: t,
+      model_tier: tier,
+      preferred_premium_model_id: pref.preferredPremiumModelId,
     });
   } catch {
     /* keep memory copy */

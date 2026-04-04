@@ -93,7 +93,11 @@ import {
 import { workflowRuntimeConfig, modelFailoverEnabledForRoute } from "../config/workflow-flags.js";
 import type { RouteMeta } from "../types/route-telemetry.js";
 import type { ModelSpec } from "@repo/model-registry";
-import { resolveModelSpec, getDefaultModelForTier } from "@repo/model-registry";
+import {
+  resolveModelSpec,
+  getDefaultModelForTier,
+  isPremiumSelectableModelId,
+} from "@repo/model-registry";
 import { shouldBlockEditForRetrievalConfidence } from "../lib/retrieval-edit-gate.js";
 
 const FALLBACK_NO_CONTEXT = "No relevant code found in repository.";
@@ -368,8 +372,8 @@ export function workflowLog(stage: string, identity: RequestIdentity | null, dat
 
 /**
  * D.17 + D.19 routing precedence (single choke-point):
- * 1. Client **`modelTier` `premium` / `fast`** → primary is always `getDefaultModelForTier(tier)` for this
- *    request (including when `VIPER_MODEL_ROUTE_DEFAULT=pinned` — user tier wins). D.17 `selectModel` is
+ * 1. Client **`modelTier` `premium`** → primary is the allowlisted `premiumModelId` or the registry
+ *    default for premium (including when `VIPER_MODEL_ROUTE_DEFAULT=pinned`). D.17 `selectModel` is
  *    skipped for tier picking. D.18 failover remains a cross-tier chain from that primary.
  * 2. Client **`auto`** + env **pinned** → resolved `OPENAI_MODEL` id + pinned failover rules.
  * 3. Client **`auto`** + env **auto** → D.17 `selectModel` + auto failover rules.
@@ -385,6 +389,8 @@ function routeModelForRequest(params: {
   hasAttachments?: boolean;
   /** H.44: when true, the auto path uses selectModelCandidate instead of selectModel. */
   _useCandidate?: boolean;
+  /** When `clientModelTier === "premium"`, registry allowlist id from D.20 resolution. */
+  premiumModelId?: string | null;
 }): {
   modelId: string;
   provider: string;
@@ -403,8 +409,12 @@ function routeModelForRequest(params: {
 
   let result: ReturnType<typeof routeModelForRequest>;
 
-  if (params.clientModelTier === "premium" || params.clientModelTier === "fast") {
-    const selected = getDefaultModelForTier(params.clientModelTier);
+  if (params.clientModelTier === "premium") {
+    const raw = params.premiumModelId ?? null;
+    const selected =
+      raw && isPremiumSelectableModelId(raw)
+        ? (resolveModelSpec(raw) ?? getDefaultModelForTier("premium"))
+        : getDefaultModelForTier("premium");
     const fallbackChain = failoverEnabled
       ? buildFallbackChainForAuto(selected, maxFbSpecs)
       : [];
@@ -412,9 +422,10 @@ function routeModelForRequest(params: {
       modelId: String(selected.id),
       provider: selected.provider,
       tier: selected.tier,
-      reason: params.clientModelTier === "premium" ? "client_tier_premium" : "client_tier_fast",
+      reason: "client_tier_premium",
       signals: {
         clientModelTier: params.clientModelTier,
+        client_premium_model_id: String(selected.id),
         tier_override_from_client: true,
         ...(params.routeMode === "pinned" ? { env_pinned_primary_superseded: true } : {}),
       },
@@ -1186,6 +1197,8 @@ export async function runAssistantPipeline(
   chatMode: ChatMode = "agent",
   /** D.20: effective tier after persistence + entitlements (controller-resolved). */
   modelTier: ModelTierSelection = "auto",
+  /** When `modelTier === "premium"`, resolved registry model id (controller-resolved). */
+  premiumModelId: string | null = null,
   /** E.22: validated image attachments for the current user turn (ignored by LLM calls until E.24). */
   attachments?: Attachment[],
 ): Promise<AssistantPipelineResult> {
@@ -1251,6 +1264,7 @@ export async function runAssistantPipeline(
       intentType: intentResult.intent.intentType,
       isStreaming: false,
       hasAttachments: Boolean(attachments?.length),
+      premiumModelId: modelTier === "premium" ? premiumModelId : null,
     },
     identity,
     workspaceKey,
@@ -1265,7 +1279,7 @@ export async function runAssistantPipeline(
     routeMode,
     mode: chatMode,
     client_model_tier: modelTier,
-    tier_override_from_client: modelTier === "premium" || modelTier === "fast",
+    tier_override_from_client: modelTier === "premium",
   });
 
   const contextualDirectGuided =
@@ -2148,6 +2162,7 @@ export async function runAssistantStreamPipeline(
   signal?: AbortSignal,
   chatMode: ChatMode = "agent",
   modelTier: ModelTierSelection = "auto",
+  premiumModelId: string | null = null,
   telemetryCtx?: { tierDowngraded: boolean; requestedTier: string },
   /** E.22: validated image attachments for the current user turn (ignored by LLM calls until E.24). */
   attachments?: Attachment[],
@@ -2321,8 +2336,12 @@ export async function runAssistantStreamPipeline(
     );
     const resumeMaxFbSpecs = Math.min(2, Math.max(0, MODEL_FAILOVER_MAX_ATTEMPTS - 1));
     let resumeRouted: { modelId: string; fallbackModelIds: string[] };
-    if (modelTier === "premium" || modelTier === "fast") {
-      const selected = getDefaultModelForTier(modelTier);
+    if (modelTier === "premium") {
+      const raw = premiumModelId ?? null;
+      const selected =
+        raw && isPremiumSelectableModelId(raw)
+          ? (resolveModelSpec(raw) ?? getDefaultModelForTier("premium"))
+          : getDefaultModelForTier("premium");
       resumeRouted = {
         modelId: String(selected.id),
         fallbackModelIds: resumeFailoverEnabled
@@ -2442,6 +2461,7 @@ export async function runAssistantStreamPipeline(
         intentType: intentResult.intent.intentType,
         isStreaming: true,
         hasAttachments: Boolean(attachments?.length),
+        premiumModelId: modelTier === "premium" ? premiumModelId : null,
       },
       identity,
       workspaceKey,
@@ -2456,7 +2476,7 @@ export async function runAssistantStreamPipeline(
       routeMode,
       mode: chatMode,
       client_model_tier: modelTier,
-      tier_override_from_client: modelTier === "premium" || modelTier === "fast",
+      tier_override_from_client: modelTier === "premium",
     });
 
     workflowLog("route:direct-llm", identity, { intent: intentResult.intent.intentType });
@@ -2494,6 +2514,7 @@ export async function runAssistantStreamPipeline(
       intentType: intentResult.intent.intentType,
       isStreaming: true,
       hasAttachments: Boolean(attachments?.length),
+      premiumModelId: modelTier === "premium" ? premiumModelId : null,
     },
     identity,
     workspaceKey,
@@ -2508,7 +2529,7 @@ export async function runAssistantStreamPipeline(
     routeMode,
     mode: chatMode,
     client_model_tier: modelTier,
-    tier_override_from_client: modelTier === "premium" || modelTier === "fast",
+    tier_override_from_client: modelTier === "premium",
   });
 
   // Kick off codebase analysis (for embedding index) with a short warmup window.

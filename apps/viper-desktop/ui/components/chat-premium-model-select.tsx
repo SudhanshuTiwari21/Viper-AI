@@ -1,28 +1,25 @@
-import { useState, useRef, useEffect, useCallback, useId } from "react";
+import { useState, useRef, useEffect, useCallback, useId, useMemo } from "react";
 import { ChevronDown, Check } from "lucide-react";
-import type { ModelTier } from "../services/agent-api";
+import { listPremiumSelectableModels } from "@repo/model-registry";
 
-const TIERS: { value: ModelTier; label: string }[] = [
-  { value: "auto", label: "Auto" },
-  { value: "premium", label: "Premium" },
-];
-
-export interface ChatModelTierSelectProps {
-  value: ModelTier;
-  onChange: (tier: ModelTier) => void;
+export interface ChatPremiumModelSelectProps {
+  value: string;
+  onChange: (modelId: string) => void;
   disabled?: boolean;
 }
 
-export function ChatModelTierSelect({ value, onChange, disabled }: ChatModelTierSelectProps) {
+export function ChatPremiumModelSelect({ value, onChange, disabled }: ChatPremiumModelSelectProps) {
+  const models = useMemo(() => listPremiumSelectableModels(), []);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
-  const listboxId = `viper-chat-tier-${baseId.replace(/:/g, "")}`;
+  const listboxId = `viper-chat-premium-${baseId.replace(/:/g, "")}`;
   const triggerId = `${listboxId}-trigger`;
 
-  const currentLabel = TIERS.find((t) => t.value === value)?.label ?? value;
+  const currentLabel =
+    models.find((m) => String(m.id) === value)?.displayName ?? value;
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -70,8 +67,8 @@ export function ChatModelTierSelect({ value, onChange, disabled }: ChatModelTier
   }, []);
 
   const handleSelect = useCallback(
-    (tier: ModelTier) => {
-      onChange(tier);
+    (id: string) => {
+      onChange(id);
       setOpen(false);
       triggerRef.current?.focus();
     },
@@ -121,14 +118,14 @@ export function ChatModelTierSelect({ value, onChange, disabled }: ChatModelTier
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
-        aria-label="Model tier"
+        aria-label="Premium model"
         onClick={() => !disabled && setOpen((v) => !v)}
         onKeyDown={onTriggerKeyDown}
         className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border border-v-border/70 bg-v-bg2 text-v-text transition-colors ${triggerRing} ${
           open ? "ring-1 ring-v-accent/40 border-v-accent/40" : ""
-        } hover:bg-white/[0.04] hover:text-v-text disabled:opacity-40 disabled:pointer-events-none`}
+        } hover:bg-white/[0.04] hover:text-v-text disabled:opacity-40 disabled:pointer-events-none max-w-[10rem]`}
       >
-        <span>{currentLabel}</span>
+        <span className="truncate">{currentLabel}</span>
         <ChevronDown
           size={12}
           className={`shrink-0 text-v-text3 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
@@ -143,26 +140,32 @@ export function ChatModelTierSelect({ value, onChange, disabled }: ChatModelTier
           aria-labelledby={triggerId}
           tabIndex={-1}
           onKeyDown={onListKeyDown}
-          className="absolute left-0 bottom-full mb-1 py-1 rounded-md shadow-lg z-30 min-w-[8.5rem] border border-v-border bg-v-bg2"
+          className="absolute left-0 bottom-full mb-1 py-1 rounded-md shadow-lg z-30 min-w-[11rem] max-w-[14rem] border border-v-border bg-v-bg2"
         >
-          {TIERS.map((t) => {
-            const selected = value === t.value;
+          {models.map((m) => {
+            const id = String(m.id);
+            const selected = value === id;
             return (
               <button
-                key={t.value}
+                key={id}
                 type="button"
                 role="option"
                 aria-selected={selected}
-                onClick={() => handleSelect(t.value)}
-                className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${optionBase} ${
+                onClick={() => handleSelect(id)}
+                className={`flex w-full flex-col gap-0.5 px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${optionBase} ${
                   selected
                     ? "bg-v-accent/15 text-v-accent"
                     : "text-v-text2 hover:bg-white/[0.06] hover:text-v-text"
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{t.label}</span>
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-                  {selected ? <Check size={12} strokeWidth={2.5} className="text-v-accent" /> : null}
+                <span className="flex w-full items-center gap-2 min-w-0">
+                  <span className="min-w-0 flex-1 truncate">{m.displayName}</span>
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                    {selected ? <Check size={12} strokeWidth={2.5} className="text-v-accent" /> : null}
+                  </span>
+                </span>
+                <span className="text-[9px] font-normal text-v-text3 uppercase tracking-wide">
+                  {m.provider}
                 </span>
               </button>
             );
