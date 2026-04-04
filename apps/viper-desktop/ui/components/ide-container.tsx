@@ -8,6 +8,7 @@ import { ChatPanel } from "./chat-panel";
 import { PanelContainer } from "./panel-container";
 import { StatusBar } from "./status-bar";
 import { CommandPalette } from "./command-palette";
+import { QuickOpen } from "./quick-open";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useRegisterDefaultCommands } from "../commands/default-commands";
 
@@ -29,6 +30,7 @@ export function IDEContainer() {
   const [chatPanelVisible, setChatPanelVisible] = useState(true);
   const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_WIDTH);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const chatWidthBeforeCollapse = useRef(DEFAULT_CHAT_WIDTH);
 
   useEffect(() => {
@@ -36,6 +38,10 @@ export function IDEContainer() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setCommandPaletteOpen((open) => !open);
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setQuickOpenVisible((open) => !open);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -146,6 +152,7 @@ export function IDEContainer() {
   return (
     <>
       <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+      <QuickOpen open={quickOpenVisible} onClose={() => setQuickOpenVisible(false)} />
     <div className="flex-1 flex flex-col min-w-0 relative" style={{ background: "var(--viper-bg)" }}>
       <div className="flex flex-1 min-h-0">
         {/* Left: Activity bar (always visible) + optional resizable sidebar */}

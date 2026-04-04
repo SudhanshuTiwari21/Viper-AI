@@ -1,14 +1,9 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { getPool } from "@repo/database";
 import {
   runFullAnalysis,
-  RepoMetadataStoreService,
-  GraphStoreService,
-  PostgresGraphStoreAdapter,
-  VectorStoreService,
-  QdrantVectorStoreAdapter,
 } from "@repo/codebase-analysis-agent";
 import { getRepoId } from "../services/workspace.service.js";
+import { buildAnalysisOptions } from "../services/analysis-options.service.js";
 import type { AnalysisRequest } from "../validators/request.schemas.js";
 
 /** Scan-only: run Repo Scanner and return result (no workers). For testing with IDE workspace. */
@@ -47,37 +42,11 @@ export async function runAnalysis(
     const { workspacePath } = request.body;
     const repo_id = getRepoId(workspacePath);
 
-    const redisUrl = process.env.REDIS_URL;
-    const databaseUrl = process.env.DATABASE_URL;
-    const qdrantUrl = process.env.QDRANT_URL;
-
-    request.log.info({ redisUrl, databaseUrl, qdrantUrl }, "analysis options env");
-    const options: Parameters<typeof runFullAnalysis>[1] = {};
-    if (redisUrl) options.redis = { url: redisUrl };
-
-    if (databaseUrl) {
-      const pool = getPool();
-      const { default: PostgresRepoMetadataAdapter } = await import(
-        "@repo/codebase-analysis-agent/persistence/postgres-repo"
-      );
-    
-      const repoMetadataStore = new RepoMetadataStoreService();
-      const adapter = new PostgresRepoMetadataAdapter(pool);
-      request.log.info("Created PostgresRepoMetadataAdapter");
-      repoMetadataStore.setAdapter(adapter);
-      options.persistMetadata = repoMetadataStore;
-    
-      const graphStore = new GraphStoreService();
-      graphStore.setAdapter(new PostgresGraphStoreAdapter(pool));
-      options.graphStore = graphStore;
-    }
-
-    if (qdrantUrl) {
-      const vectorStore = new VectorStoreService();
-      vectorStore.setAdapter(new QdrantVectorStoreAdapter());
-      options.vectorStore = vectorStore;
-    }
-
+    request.log.info(
+      { redisUrl: process.env.REDIS_URL, databaseUrl: process.env.DATABASE_URL, qdrantUrl: process.env.QDRANT_URL },
+      "analysis options env",
+    );
+    const options = await buildAnalysisOptions();
     await runFullAnalysis({ workspacePath, repo_id }, options);
 
     await reply.send({ status: "analysis_started" });

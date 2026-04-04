@@ -10,25 +10,29 @@ export const CONTEXT_LIMITS = {
 
 const getScore = (rc: RankedCandidate) => rc.finalScore;
 
+export type TopKLimits = Partial<{
+  files: number;
+  functions: number;
+  snippets: number;
+}>;
+
 /**
  * Select top-K candidates by finalScore using min-heaps (O(n) over candidates).
  * Returns RankedContextBundle with files, functions, and snippets sorted by score descending.
+ *
+ * Optional `limits` overrides default CONTEXT_LIMITS (e.g. deeper retrieval on retry iterations).
  */
 export function selectTopK(
   rankedCandidates: RankedCandidate[],
+  limits?: TopKLimits,
 ): RankedContextBundle {
-  const filesHeap = new MinHeap<RankedCandidate>(
-    CONTEXT_LIMITS.files,
-    getScore,
-  );
-  const functionsHeap = new MinHeap<RankedCandidate>(
-    CONTEXT_LIMITS.functions,
-    getScore,
-  );
-  const snippetsHeap = new MinHeap<RankedCandidate>(
-    CONTEXT_LIMITS.snippets,
-    getScore,
-  );
+  const fileK = limits?.files ?? CONTEXT_LIMITS.files;
+  const fnK = limits?.functions ?? CONTEXT_LIMITS.functions;
+  const snipK = limits?.snippets ?? CONTEXT_LIMITS.snippets;
+
+  const filesHeap = new MinHeap<RankedCandidate>(fileK, getScore);
+  const functionsHeap = new MinHeap<RankedCandidate>(fnK, getScore);
+  const snippetsHeap = new MinHeap<RankedCandidate>(snipK, getScore);
 
   for (let i = 0; i < rankedCandidates.length; i++) {
     const rc = rankedCandidates[i]!;

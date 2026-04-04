@@ -6,6 +6,8 @@ import { setupFileService } from "../backend/file-service";
 import { setupTerminalService } from "../backend/terminal-service";
 import { setupGitService } from "../backend/git-service";
 import { setupDiagnosticsService } from "../diagnostics/diagnostics-service";
+import { setupExtensionService } from "../backend/extension-service";
+import { setupDebugService } from "../backend/debug-service";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -23,10 +25,17 @@ function init(): void {
   setupTerminalService();
   setupGitService();
   setupDiagnosticsService();
+  setupExtensionService();
+  setupDebugService();
 
   ipcMain.handle("shell:revealInFolder", (_e, workspaceRoot: string, relPath: string) => {
     const full = path.isAbsolute(relPath) ? relPath : path.join(workspaceRoot, relPath);
     shell.showItemInFolder(full);
+  });
+
+  ipcMain.handle("shell:openExternal", (_e, url: string) => {
+    if (typeof url !== "string" || !url.trim()) return;
+    return shell.openExternal(url.trim());
   });
 
   mainWindow = createMainWindow(isDev);

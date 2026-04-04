@@ -8,20 +8,79 @@ const INTENT_AGENT_MODULE = "@repo/intent-agent";
 export type IntentPipelineResult = {
   intent: { intentType: string };
   entities: { entities: Array<{ value: string }> };
-  tasks: { tasks: Array<{ type: string }> };
-  contextRequest: {
+  tasks?: { tasks: Array<{ type: string }> };
+  /** @deprecated Use backend `planTasks` + `buildContextRequest` for retrieval. */
+  contextRequest?: {
     symbolSearch?: string[];
     embeddingSearch?: string[];
     dependencyLookup?: boolean;
   };
-  response: { intent: string; summary: string };
+  response?: { intent: string; summary: string };
+  reasoning?: {
+    detectedComponents?: string[];
+    missingComponents?: string[];
+    potentialIssues?: string[];
+    recommendedNextStep?: string;
+  };
 };
 
-export async function runIntentPipeline(prompt: string): Promise<IntentPipelineResult> {
+export type IntentAgentCacheContext = {
+  workspaceKey?: string;
+  conversationId?: string;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
+  contextHash?: string;
+};
+
+export async function runIntentPipeline(
+  prompt: string,
+  options?: {
+    cacheContext?: IntentAgentCacheContext;
+    skipReasoning?: boolean;
+    skipContextRequest?: boolean;
+  },
+): Promise<IntentPipelineResult> {
   const mod = await import(INTENT_AGENT_MODULE) as {
-    runIntentPipeline: (p: string) => Promise<IntentPipelineResult>;
+    runIntentPipeline: (
+      p: string,
+      o?: {
+        cacheContext?: IntentAgentCacheContext;
+        skipReasoning?: boolean;
+        skipContextRequest?: boolean;
+      },
+    ) => Promise<IntentPipelineResult>;
   };
-  return mod.runIntentPipeline(prompt);
+  return mod.runIntentPipeline(prompt, options);
+}
+
+export async function runIntentReasoning(
+  userPrompt: string,
+  intent: unknown,
+  entities: unknown,
+  tasks: unknown,
+  context: unknown,
+  options?: { cacheContext?: IntentAgentCacheContext },
+): Promise<IntentPipelineResult["reasoning"]> {
+  const mod = await import(INTENT_AGENT_MODULE) as {
+    runReasoning: (
+      u: string,
+      i: unknown,
+      e: unknown,
+      t: unknown,
+      c: unknown,
+      o?: IntentAgentCacheContext,
+    ) => Promise<IntentPipelineResult["reasoning"]>;
+  };
+
+  // NOTE: intent-agent's runReasoning signature is:
+  // runReasoning(userPrompt, intent, entities, tasks, context, cacheContext?)
+  return mod.runReasoning(
+    userPrompt,
+    intent,
+    entities,
+    tasks,
+    context,
+    options?.cacheContext,
+  );
 }
 
 export type IntentAgentAdapter = {

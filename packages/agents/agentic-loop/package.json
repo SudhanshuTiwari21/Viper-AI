@@ -1,0 +1,26 @@
+{
+  "name": "@repo/agentic-loop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "lint": "echo lint",
+    "check-types": "tsc -p tsconfig.build.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "dev": "vitest"
+  },
+  "dependencies": {
+    "@repo/workspace-tools": "*",
+    "openai": "^4.77.0"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}

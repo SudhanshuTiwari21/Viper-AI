@@ -8,6 +8,7 @@ export { combineScores, SCORE_WEIGHTS } from "./score-aggregator/combine-scores.
 export type { RankedCandidate } from "./score-aggregator/score-aggregator.types.js";
 
 export { selectTopK, CONTEXT_LIMITS } from "./topk-selector/select-topk.js";
+export type { TopKLimits } from "./topk-selector/select-topk.js";
 export type { RankedContextBundle, RankedSnippet } from "./topk-selector/topk-selector.types.js";
 
 export {
@@ -16,3 +17,9 @@ export {
   CONTEXT_TOKEN_BUDGET,
 } from "./context-window-builder/build-context-window.js";
 export type { ContextWindow } from "./context-window-builder/context-window.types.js";
+
+export {
+  buildRetrievalConfidence,
+  RETRIEVAL_CONFIDENCE_SCHEMA_VERSION,
+} from "./retrieval-confidence/build-retrieval-confidence.js";
+export type { RetrievalConfidenceV1 } from "./retrieval-confidence/build-retrieval-confidence.js";

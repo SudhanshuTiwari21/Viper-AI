@@ -1,159 +1,154 @@
-# Turborepo starter
+# Viper AI
 
-This Turborepo starter is maintained by the Turborepo core team.
+Viper AI is an AI coding agent platform with project-aware planning and execution.
 
-## Using this example
+It combines:
+- AI Powered coding Agent IDE
+- project management-oriented workflows
 
-Run the following command:
+## Core Pipeline
 
-```sh
-npx create-turbo@latest
+```text
+User Prompt
+  -> Intent Agent
+  -> Planner Agent
+  -> Execution Engine
+      -> Context Tools
+      -> Implementation Agent
+  -> Code Changes
 ```
 
-## What's inside?
+## Architecture
 
-This Turborepo includes the following packages/apps:
+### Agent Packages
 
-### Apps and Packages
+- `@repo/intent-agent`: prompt normalization, intent classification, entity extraction
+- `@repo/planner-agent`: deterministic execution plan generation from intent + entities
+- `@repo/execution-engine`: step runner and tool dispatch system
+- `@repo/implementation-agent`: code generation, patch creation, file writing, validation
+- `@repo/codebase-analysis-agent`: repository scanning/analysis pipeline
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+### Context Stack
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+- `@repo/context-builder`: raw context retrieval (symbols, embeddings, dependencies)
+- `@repo/context-ranking`: scoring, ranking, context window building
+- `@repo/database`: persistence layer utilities
 
-### Utilities
+### Apps
 
-This Turborepo has some additional tools already setup for you:
+- `@repo/backend`: Fastify API and orchestration runtime
+- `web-app`: Next.js app
+- `viper-desktop`: Electron + Vite desktop client
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+## Repository Structure
 
-### Build
+```text
+apps/
+  backend/
+  web-app/
+  viper-desktop/
 
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+packages/
+  agents/
+    intent-agent/
+    planner-agent/
+    execution-engine/
+    implementation-agent/
+    codebase-analysis-agent/
+  context-builder/
+  context-ranking/
+  database/
+  shared/
 ```
 
-Without global `turbo`, use your package manager:
+## Getting Started
+
+### 1) Install dependencies
 
 ```sh
-cd my-turborepo
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+npm install
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+### 2) Configure environment
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+Create `.env` at repo root (see `docs/ENV.md` and `.env.example` if present).
+
+Common variables:
+- `OPENAI_API_KEY` for LLM-powered reasoning/code generation
+- `DATABASE_URL` (defaults to `postgresql://localhost:5432/viper`)
+- `QDRANT_URL` (optional, defaults to `http://localhost:6333`)
+
+### 3) Run the system
+
+Run all workspaces:
 
 ```sh
-turbo build --filter=docs
+npm run dev
 ```
 
-Without global `turbo`:
+Run backend only:
 
 ```sh
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+npm run dev --workspace=@repo/backend
 ```
 
-### Develop
+## Build & run (per package)
 
-To develop all apps and packages, run the following command:
+See **[docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)** for separate build commands (every agent, context packages, database, apps) and run instructions.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+## Useful Commands
+
+From repo root:
+
+**Pre-release / CI bar:** `npm run quality-gate` (alias: `npm run release:check`) — see [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ```sh
-cd my-turborepo
-turbo dev
+# Build all packages/apps
+npm run build
+
+# Type-check all packages/apps
+npm run check-types
+
+# Format repository
+npm run format
 ```
 
-Without global `turbo`, use your package manager:
+Workspace examples:
 
 ```sh
-cd my-turborepo
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
+# Backend tests
+npm run test --workspace=@repo/backend
+
+# Intent agent tests
+npm run test --workspace=@repo/intent-agent
+
+# Planner agent tests
+npm run test --workspace=@repo/planner-agent
+
+# Execution engine tests
+npm run test --workspace=@repo/execution-engine
+
+# Implementation agent tests
+npm run test --workspace=@repo/implementation-agent
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Product Direction
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+Viper AI is evolving from assistant-style responses to a full AI IDE runtime:
+- deterministic planning
+- step-wise execution
+- safe patching + file updates
+- future: rollback, patch preview, streaming execution, and deeper project management automation
 
-```sh
-turbo dev --filter=web
-```
+## Documentation
 
-Without global `turbo`:
+- **[Cursor-class experience gaps and plan](docs/VIPER_CURSOR_EXPERIENCE_GAP_AND_PLAN.md)** — IDE/chat/settings parity vs benchmark IDEs, phased UX and agent-behavior plan.
+- **[Product management vision](docs/VIPER_PRODUCT_MANAGEMENT_VISION.md)** — coding + planning + team coordination; future PM integration pillars and roadmap.
+- **[Competitive roadmap](docs/CURSOR_COMPETITIVE_ROADMAP.md)** — implementation-grounded step groups and §10 readiness.
+- **[Release / pre-release](docs/RELEASE.md)** — `quality-gate`, env kill-switches, migrations.
 
-```sh
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+## Notes
 
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+- This is an active monorepo under rapid iteration.
+- Backward-compatible adapters may exist while interfaces migrate between agent stages.
+- See `docs/` for architecture and rollout plans.

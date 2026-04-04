@@ -13,6 +13,7 @@ import {
   startEmbeddingWorkers,
   EmbeddingModelService,
   createOpenAIEmbeddingAdapter,
+  EMBEDDING_GENERATE_REQUEST_CHANNEL,
 } from "../modules/chunk-embedding-generator";
 import type { VectorStoreService } from "../modules/chunk-embedding-generator/services/vector-store.service";
 import { DEFAULT_METADATA_EXTRACT_QUEUE_NAME } from "../modules/ast-parser/services/metadata-publisher.service";
@@ -21,6 +22,15 @@ interface RedisQueueOptions {
   host?: string;
   port?: number;
 }
+
+/**
+ * Single-flight init: concurrent chats used to race on `await createRedisClient()` and
+ * `!analysisBackgroundWorkersStarted`, spawning duplicate worker pools + leaking Redis clients → SSE "Failed to fetch".
+ */
+let analysisBackgroundInit: Promise<void> | null = null;
+let embeddingPublishRedis: import("ioredis").Redis | null = null;
+/** repo_id → workspace root; updated each scan so long-lived workers resolve the correct folder. */
+const repoRootById = new Map<string, string>();
 
 async function createRedisClient(options: RedisQueueOptions) {
   const { default: Redis } = await import("ioredis");
@@ -94,6 +104,8 @@ export async function runFullAnalysis(
     persistMetadata: options.persistMetadata,
   });
 
+  repoRootById.set(input.repo_id, input.workspacePath);
+
   const redisConfig =
     options.redis && (options.redis.url || options.redis.host) ? options.redis : undefined;
 
@@ -109,37 +121,84 @@ export async function runFullAnalysis(
     await queue.disconnect();
     console.log("[Viper] runFullAnalysis: disconnected Redis queue client");
 
+    /** True when this request joined an in-flight or completed init (not the creator). */
+    const awaitedExistingInit = analysisBackgroundInit !== null;
 
-    const getRepoRoot = options.getRepoRoot ?? (() => input.workspacePath);
-    console.log("[Viper] runFullAnalysis: starting AST parser workers");
-    startASTParserWorkers({
-      redis: redisConfig,
-      getRepoRoot,
-      queueName: DEFAULT_AST_PARSE_QUEUE_NAME,
-      metadataPublish: { ...redisConfig, queueName: DEFAULT_METADATA_EXTRACT_QUEUE_NAME },
+    analysisBackgroundInit ??= (async () => {
+      if (!embeddingPublishRedis) {
+        embeddingPublishRedis = await createRedisClient(redisConfig);
+      }
+
+      const onEmbeddingRequest = async (job: {
+        repo_id: string;
+        file: string;
+        module: string;
+        content: string;
+      }) => {
+        await embeddingPublishRedis!.publish(
+          EMBEDDING_GENERATE_REQUEST_CHANNEL,
+          JSON.stringify(job),
+        );
+      };
+
+      const getRepoRoot =
+        options.getRepoRoot ??
+        ((repo: string) => {
+          const root = repoRootById.get(repo);
+          if (root === undefined) {
+            console.warn(
+              "[Viper] runFullAnalysis: no workspace mapped for repo_id — AST jobs may fail",
+              repo,
+            );
+          }
+          return root ?? "";
+        });
+
+      console.log("[Viper] runFullAnalysis: starting AST parser workers");
+      startASTParserWorkers({
+        redis: redisConfig,
+        getRepoRoot,
+        queueName: DEFAULT_AST_PARSE_QUEUE_NAME,
+        metadataPublish: { ...redisConfig, queueName: DEFAULT_METADATA_EXTRACT_QUEUE_NAME },
+        onEmbeddingRequest,
+      });
+
+      console.log("[Viper] runFullAnalysis: starting metadata extraction workers");
+      startMetadataExtractionWorkers({
+        redis: redisConfig,
+        queueName: DEFAULT_METADATA_EXTRACT_QUEUE_NAME,
+      });
+
+      console.log("[Viper] runFullAnalysis: starting graph builder workers");
+      startGraphBuilderWorkers({ redis: redisConfig, graphStore: options.graphStore });
+
+      const embeddingModel =
+        options.embeddingModel ??
+        (() => {
+          const svc = new EmbeddingModelService();
+          svc.setAdapter(createOpenAIEmbeddingAdapter());
+          return svc;
+        })();
+      console.log("[Viper] runFullAnalysis: starting embedding workers");
+      startEmbeddingWorkers({
+        redis: redisConfig,
+        embeddingModel,
+        vectorStore: options.vectorStore,
+      });
+    })().catch((err) => {
+      analysisBackgroundInit = null;
+      embeddingPublishRedis = null;
+      console.error("[Viper] runFullAnalysis: background worker init failed", err);
+      throw err;
     });
 
-    console.log("[Viper] runFullAnalysis: starting metadata extraction workers");
-    startMetadataExtractionWorkers({ redis: redisConfig,
-      queueName: DEFAULT_METADATA_EXTRACT_QUEUE_NAME,
-     });
+    await analysisBackgroundInit;
 
-    console.log("[Viper] runFullAnalysis: starting graph builder workers");
-    startGraphBuilderWorkers({ redis: redisConfig, graphStore: options.graphStore });
-
-    const embeddingModel =
-      options.embeddingModel ??
-      (() => {
-        const svc = new EmbeddingModelService();
-        svc.setAdapter(createOpenAIEmbeddingAdapter());
-        return svc;
-      })();
-    console.log("[Viper] runFullAnalysis: starting embedding workers");
-    startEmbeddingWorkers({
-      redis: redisConfig,
-      embeddingModel,
-      vectorStore: options.vectorStore,
-    });
+    if (awaitedExistingInit) {
+      console.log(
+        "[Viper] runFullAnalysis: awaited shared worker init — skipped duplicate start (jobs were pushed)",
+      );
+    }
   }
 
   return { status: "started", scan: scanResult };

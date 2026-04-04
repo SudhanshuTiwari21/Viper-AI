@@ -39,33 +39,72 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.setupTerminalService = setupTerminalService;
 const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
+const node_child_process_1 = require("node:child_process");
+const promises_1 = require("node:fs/promises");
+let nextTermId = 1;
 const ptyMap = new Map();
-function getPty(webContentsId) {
-    return ptyMap.get(webContentsId)?.pty;
+async function resolveValidCwd(workspaceRoot) {
+    const fallbackCwd = process.env.HOME ?? process.env.USERPROFILE ?? process.cwd();
+    const candidate = workspaceRoot && workspaceRoot.trim() !== "" ? workspaceRoot : fallbackCwd;
+    try {
+        const s = await (0, promises_1.stat)(candidate);
+        if (s.isDirectory())
+            return candidate;
+    }
+    catch { }
+    return fallbackCwd;
+}
+function buildPtyEnv() {
+    const env = {};
+    for (const [key, value] of Object.entries(process.env)) {
+        if (typeof value === "string")
+            env[key] = value;
+    }
+    if (!env.PATH || env.PATH.trim() === "") {
+        env.PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    }
+    env.TERM = env.TERM ?? "xterm-256color";
+    return env;
+}
+async function spawnFallbackShell(shell, cwd, env) {
+    return await new Promise((resolve, reject) => {
+        const args = process.platform === "win32" ? [] : ["-i"];
+        const proc = (0, node_child_process_1.spawn)(shell, args, {
+            cwd,
+            env,
+            stdio: "pipe",
+        });
+        let settled = false;
+        const onError = (err) => {
+            if (settled)
+                return;
+            settled = true;
+            reject(err);
+        };
+        const onSpawn = () => {
+            if (settled)
+                return;
+            settled = true;
+            proc.off("error", onError);
+            resolve(proc);
+        };
+        proc.once("error", onError);
+        proc.once("spawn", onSpawn);
+    });
 }
 function setupTerminalService() {
     electron_1.ipcMain.handle("terminal:create", async (event, workspaceRoot) => {
-        const id = event.sender.id;
-        const existing = ptyMap.get(id);
-        if (existing) {
-            try {
-                existing.pty.kill();
-            }
-            catch {
-                // ignore
-            }
-            ptyMap.delete(id);
-        }
+        const termId = String(nextTermId++);
         let nodePty;
         try {
             nodePty = await Promise.resolve().then(() => __importStar(require("node-pty")));
         }
         catch (err) {
-            console.error("terminal:create node-pty failed to load (rebuild for Electron? run: npx electron-rebuild):", err);
+            console.error("terminal:create node-pty failed to load:", err);
             return { ok: false, error: "Terminal runtime failed to load. Try: npx electron-rebuild" };
         }
-        const fallbackCwd = process.env.HOME ?? process.env.USERPROFILE ?? process.cwd();
-        const cwd = (workspaceRoot && workspaceRoot.trim() !== "") ? workspaceRoot : fallbackCwd;
+        const cwd = await resolveValidCwd(workspaceRoot);
+        const env = buildPtyEnv();
         const shells = process.platform === "win32"
             ? [process.env.COMSPEC ?? "cmd.exe"]
             : [
@@ -74,60 +113,105 @@ function setupTerminalService() {
                 "/bin/bash",
                 "/bin/sh",
             ].filter(Boolean);
+        let lastError = "No shell could be started";
         for (const shell of shells) {
             try {
                 const pty = nodePty.spawn(shell, [], {
                     cwd,
-                    env: { ...process.env },
+                    env,
                     cols: 80,
                     rows: 24,
                 });
                 pty.onData((data) => {
                     if (!event.sender.isDestroyed()) {
-                        event.sender.send("terminal:data", { data });
+                        event.sender.send("terminal:data", { termId, data });
                     }
                 });
                 pty.onExit(() => {
-                    ptyMap.delete(id);
+                    ptyMap.delete(termId);
+                    if (!event.sender.isDestroyed()) {
+                        event.sender.send("terminal:exit", { termId });
+                    }
                 });
-                ptyMap.set(id, { pty });
-                return { ok: true, shell };
+                ptyMap.set(termId, { pty, webContentsId: event.sender.id });
+                return { ok: true, termId, shell };
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                console.error("terminal:create failed for shell", shell, err);
-                if (shell === shells[shells.length - 1]) {
-                    return { ok: false, error: msg };
-                }
+                lastError = msg;
+                console.error("terminal:create failed for shell", shell, "cwd:", cwd, "error:", err);
             }
         }
-        console.error("terminal:create: all shell candidates failed");
-        return { ok: false, error: "No shell could be started" };
+        const fallbackShell = shells.find(Boolean) ?? (process.platform === "win32" ? "cmd.exe" : "/bin/sh");
+        try {
+            const proc = await spawnFallbackShell(fallbackShell, cwd, env);
+            proc.stdout.on("data", (data) => {
+                if (!event.sender.isDestroyed()) {
+                    event.sender.send("terminal:data", { termId, data: data.toString() });
+                }
+            });
+            proc.stderr.on("data", (data) => {
+                if (!event.sender.isDestroyed()) {
+                    event.sender.send("terminal:data", { termId, data: data.toString() });
+                }
+            });
+            proc.on("close", () => {
+                ptyMap.delete(termId);
+                if (!event.sender.isDestroyed()) {
+                    event.sender.send("terminal:exit", { termId });
+                }
+            });
+            ptyMap.set(termId, { proc, webContentsId: event.sender.id });
+            if (!event.sender.isDestroyed()) {
+                event.sender.send("terminal:data", {
+                    termId,
+                    data: `[viper] PTY unavailable, using fallback shell (${fallbackShell}).\r\n`,
+                });
+            }
+            return { ok: true, termId, shell: `${fallbackShell} (fallback)` };
+        }
+        catch (fallbackErr) {
+            const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+            return { ok: false, error: `${lastError}; fallback failed: ${msg}` };
+        }
     });
-    electron_1.ipcMain.handle("terminal:write", (event, data) => {
-        const pty = getPty(event.sender.id);
-        if (pty)
-            pty.write(data);
+    electron_1.ipcMain.handle("terminal:write", (_event, termId, data) => {
+        const entry = ptyMap.get(termId);
+        if (entry?.pty)
+            entry.pty.write(data);
+        if (entry?.proc?.stdin.writable)
+            entry.proc.stdin.write(data);
     });
-    electron_1.ipcMain.handle("terminal:resize", (event, cols, rows) => {
-        const pty = getPty(event.sender.id);
-        if (pty) {
+    electron_1.ipcMain.handle("terminal:resize", (_event, termId, cols, rows) => {
+        const entry = ptyMap.get(termId);
+        if (entry?.pty) {
             const c = Math.max(1, Math.min(cols || 80, 500));
             const r = Math.max(1, Math.min(rows || 24, 200));
-            pty.resize(c, r);
+            entry.pty.resize(c, r);
         }
     });
-    electron_1.ipcMain.handle("terminal:destroy", (event) => {
-        const id = event.sender.id;
-        const entry = ptyMap.get(id);
+    electron_1.ipcMain.handle("terminal:destroy", (_event, termId) => {
+        const entry = ptyMap.get(termId);
         if (entry) {
             try {
-                entry.pty.kill();
+                entry.pty?.kill();
+                entry.proc?.kill("SIGTERM");
             }
-            catch {
-                // ignore
+            catch { }
+            ptyMap.delete(termId);
+        }
+    });
+    electron_1.ipcMain.handle("terminal:destroyAll", (event) => {
+        const senderId = event.sender.id;
+        for (const [termId, entry] of ptyMap) {
+            if (entry.webContentsId === senderId) {
+                try {
+                    entry.pty?.kill();
+                    entry.proc?.kill("SIGTERM");
+                }
+                catch { }
+                ptyMap.delete(termId);
             }
-            ptyMap.delete(id);
         }
     });
 }

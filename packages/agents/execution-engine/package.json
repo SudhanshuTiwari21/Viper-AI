@@ -1,0 +1,30 @@
+{
+  "name": "@repo/execution-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "lint": "echo 'lint: skipped (no shared eslint config in this package yet)'",
+    "check-types": "tsc -p tsconfig.build.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "vitest --watch",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@repo/planner-agent": "*",
+    "@repo/context-builder": "*",
+    "@repo/context-ranking": "*",
+    "@repo/implementation-agent": "*",
+    "@repo/workspace-tools": "*"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "typescript": "5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

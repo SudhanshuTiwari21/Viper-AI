@@ -8,8 +8,12 @@
     "./context-builder-adapter": "./modules/context-builder-adapter/index.ts"
   },
   "scripts": {
-    "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "lint": "echo 'lint: skipped (no shared eslint config in this package yet)'",
+    "check-types": "tsc -p tsconfig.build.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "vitest --watch",
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@repo/shared": "*",

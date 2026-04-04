@@ -1,8 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
 import { terminalApi } from "../services/terminal";
+import { Plus, X, Trash2, TerminalSquare } from "lucide-react";
+
+interface TermInfo {
+  id: string;
+  xterm: XTerm;
+  fit: FitAddon;
+  label: string;
+  wrapperEl: HTMLDivElement;
+  opened: boolean;
+}
 
 interface TerminalProps {
   workspaceRoot: string | null;
@@ -10,139 +20,237 @@ interface TerminalProps {
 
 export function Terminal({ workspaceRoot }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const termRef = useRef<XTerm | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const rootRef = useRef<string | null>(null);
-  const hasShownBannerRef = useRef(false);
+  const [terminals, setTerminals] = useState<TermInfo[]>([]);
+  const [activeTermId, setActiveTermId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const terminalsRef = useRef(terminals);
+  terminalsRef.current = terminals;
 
   const cwd = workspaceRoot ?? "";
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+  const createNewTerminal = useCallback(async () => {
+    if (creating) return;
+    setCreating(true);
+    setCreateError(null);
+    const res = await terminalApi.create(cwd);
+    if (!res?.ok || !res.termId) {
+      setCreateError(res?.error ?? "Failed to create terminal");
+      setCreating(false);
+      return;
+    }
 
-    const term = new XTerm({
-      theme: { background: "#0b0f17", foreground: "#e5e7eb" },
+    const termId = res.termId;
+
+    const xterm = new XTerm({
+      theme: { background: "#0b0f17", foreground: "#e5e7eb", cursor: "#22c55e" },
       fontSize: 12,
       fontFamily: "'JetBrains Mono', monospace",
       cursorBlink: true,
       allowProposedApi: false,
     });
-    term.open(el);
-    termRef.current = term;
 
     const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    fitRef.current = fitAddon;
-    fitAddon.fit();
-    if (term.cols && term.rows) {
-      terminalApi.resize(term.cols, term.rows);
-    }
+    xterm.loadAddon(fitAddon);
 
-    const resizeObserver = new ResizeObserver(() => {
-      if (!fitRef.current || !termRef.current) return;
-      fitRef.current.fit();
-      if (termRef.current.cols && termRef.current.rows) {
-        terminalApi.resize(termRef.current.cols, termRef.current.rows);
+    xterm.onData((data: string) => {
+      terminalApi.write(termId, data);
+    });
+
+    const wrapperEl = document.createElement("div");
+    wrapperEl.style.width = "100%";
+    wrapperEl.style.height = "100%";
+    wrapperEl.style.display = "none";
+
+    const label = `Terminal ${terminalsRef.current.length + 1}`;
+    const info: TermInfo = { id: termId, xterm, fit: fitAddon, label, wrapperEl, opened: false };
+
+    setTerminals((prev) => [...prev, info]);
+    setActiveTermId(termId);
+    setCreating(false);
+  }, [cwd, creating]);
+
+  const destroyTerminal = useCallback((termId: string) => {
+    setTerminals((prev) => {
+      const t = prev.find((t) => t.id === termId);
+      if (t) {
+        t.xterm.dispose();
+        t.wrapperEl.remove();
+        terminalApi.destroy(termId);
       }
+      const next = prev.filter((t) => t.id !== termId);
+      return next;
     });
-    resizeObserver.observe(el);
-
-    terminalApi.onData((data: string) => {
-      term.write(data);
+    setActiveTermId((current) => {
+      if (current === termId) {
+        const remaining = terminalsRef.current.filter((t) => t.id !== termId);
+        return remaining.length > 0 ? remaining[remaining.length - 1]!.id : null;
+      }
+      return current;
     });
-    term.onData((data: string) => {
-      terminalApi.write(data);
-    });
-
-    const onOpenHere = (e: Event) => {
-      const detail = (e as CustomEvent<{ cwd?: string }>).detail;
-      const nextCwd = detail?.cwd ?? "";
-      rootRef.current = nextCwd;
-      terminalApi
-        .destroy()
-        .then(() => terminalApi.create(nextCwd))
-        .then(() => {
-          if (termRef.current?.cols && termRef.current?.rows) {
-            terminalApi.resize(termRef.current.cols, termRef.current.rows);
-          }
-        })
-        .catch(() => {});
-    };
-    window.addEventListener("viper:open-terminal-here", onOpenHere as EventListener);
-
-    return () => {
-      resizeObserver.disconnect();
-      terminalApi.destroy();
-      term.dispose();
-      termRef.current = null;
-      fitRef.current = null;
-      window.removeEventListener("viper:open-terminal-here", onOpenHere as EventListener);
-    };
   }, []);
 
+  const clearTerminal = useCallback(() => {
+    if (!activeTermId) return;
+    const term = terminalsRef.current.find((t) => t.id === activeTermId);
+    if (term) {
+      term.xterm.clear();
+    }
+  }, [activeTermId]);
+
   useEffect(() => {
-    if (rootRef.current === cwd) return;
-    rootRef.current = cwd;
-    terminalApi.destroy();
+    const unsub = terminalApi.onData((termId: string, data: string) => {
+      const term = terminalsRef.current.find((t) => t.id === termId);
+      if (term) term.xterm.write(data);
+    });
 
-    // Wait for the panel container to have real size so xterm fit() gets valid dimensions.
-    const t = setTimeout(() => {
-      terminalApi
-        .create(cwd)
-        .then((res) => {
-          const term = termRef.current;
-          if (!term) return;
+    const unsubExit = terminalApi.onExit((termId: string) => {
+      destroyTerminal(termId);
+    });
 
-          if (!hasShownBannerRef.current) {
-            term.write(`\x1b[38;5;244m[Terminal] Starting shell in ${cwd || "default directory"}...\x1b[0m\r\n`);
-            hasShownBannerRef.current = true;
+    return () => {
+      if (typeof unsub === "function") unsub();
+      if (typeof unsubExit === "function") unsubExit();
+    };
+  }, [destroyTerminal]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    for (const term of terminalsRef.current) {
+      if (!term.opened && !term.wrapperEl.parentElement) {
+        el.appendChild(term.wrapperEl);
+        term.xterm.open(term.wrapperEl);
+        term.opened = true;
+      }
+
+      if (term.id === activeTermId) {
+        term.wrapperEl.style.display = "block";
+        requestAnimationFrame(() => {
+          term.fit.fit();
+          if (term.xterm.cols && term.xterm.rows) {
+            terminalApi.resize(term.id, term.xterm.cols, term.xterm.rows);
           }
-
-          if (!res?.ok) {
-            const errMsg = (res as { error?: string })?.error ?? "See Electron console for details.";
-            term.write(`\x1b[38;5;203m[Terminal] Failed to start shell. ${errMsg}\x1b[0m\r\n`);
-            return;
-          }
-
-          // Always send valid dimensions so the shell outputs the prompt (backend uses 80x24 by default).
-          const cols = term.cols || 80;
-          const rows = term.rows || 24;
-          terminalApi.resize(cols, rows);
-
-          // After layout, fit and resize again so the pty matches the visible terminal size.
-          requestAnimationFrame(() => {
-            fitRef.current?.fit();
-            const t2 = termRef.current;
-            if (t2?.cols && t2?.rows) terminalApi.resize(t2.cols, t2.rows);
-          });
-          // Force another resize after a short delay so the shell redraws the prompt.
-          setTimeout(() => {
-            fitRef.current?.fit();
-            const t3 = termRef.current;
-            if (t3?.cols && t3?.rows) terminalApi.resize(t3.cols, t3.rows);
-          }, 150);
-        })
-        .catch((err) => {
-          const term = termRef.current;
-          if (!term) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          term.write(`\x1b[38;5;203m[Terminal] Error starting shell. ${msg}\x1b[0m\r\n`);
         });
-    }, 80);
+      } else {
+        term.wrapperEl.style.display = "none";
+      }
+    }
+  }, [activeTermId, terminals]);
 
-    return () => clearTimeout(t);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const resizeObs = new ResizeObserver(() => {
+      if (!activeTermId) return;
+      const term = terminalsRef.current.find((t) => t.id === activeTermId);
+      if (term) {
+        term.fit.fit();
+        if (term.xterm.cols && term.xterm.rows) {
+          terminalApi.resize(activeTermId, term.xterm.cols, term.xterm.rows);
+        }
+      }
+    });
+    resizeObs.observe(el);
+    return () => resizeObs.disconnect();
+  }, [activeTermId]);
+
+  useEffect(() => {
+    if (cwd && terminals.length === 0) {
+      createNewTerminal();
+    }
   }, [cwd]);
+
+  useEffect(() => {
+    const handler = () => {
+      createNewTerminal();
+    };
+    window.addEventListener("viper:open-terminal-here", handler);
+    return () => window.removeEventListener("viper:open-terminal-here", handler);
+  }, [createNewTerminal]);
 
   return (
     <div
-      className="h-full w-full flex flex-col text-xs min-h-0"
+      className="h-full w-full flex flex-col text-xs min-h-0 relative"
       style={{ background: "var(--viper-bg)" }}
     >
       <div
-        className="flex-1 min-h-0 w-full overflow-auto p-[var(--viper-space-1)]"
+        className="flex items-center h-7 flex-shrink-0 border-b overflow-x-auto gap-0"
+        style={{ borderColor: "var(--viper-border)", background: "var(--viper-sidebar)" }}
+      >
+        {terminals.map((term) => (
+          <button
+            key={term.id}
+            type="button"
+            className={`flex items-center gap-1 px-2 h-full text-[11px] border-r transition-colors shrink-0 ${
+              term.id === activeTermId
+                ? "bg-[var(--viper-bg)] text-[#e5e7eb]"
+                : "text-[#6b7280] hover:text-[#9ca3af] hover:bg-white/[0.03]"
+            }`}
+            style={{ borderColor: "var(--viper-border)" }}
+            onClick={() => setActiveTermId(term.id)}
+          >
+            <TerminalSquare size={11} />
+            <span className="truncate max-w-[80px]">{term.label}</span>
+            <span
+              className="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded hover:bg-white/10 text-[#6b7280] hover:text-[#e5e7eb]"
+              onClick={(e) => {
+                e.stopPropagation();
+                destroyTerminal(term.id);
+              }}
+            >
+              <X size={10} />
+            </span>
+          </button>
+        ))}
+
+        <div className="flex items-center ml-auto gap-0.5 px-1">
+          {createError && (
+            <span className="text-[10px] text-red-400 max-w-[220px] truncate" title={createError}>
+              {createError}
+            </span>
+          )}
+          <button
+            type="button"
+            className="p-1 rounded text-[#6b7280] hover:text-[#e5e7eb] hover:bg-white/5"
+            title="New Terminal"
+            onClick={createNewTerminal}
+            disabled={creating}
+          >
+            <Plus size={13} />
+          </button>
+          <button
+            type="button"
+            className="p-1 rounded text-[#6b7280] hover:text-[#e5e7eb] hover:bg-white/5"
+            title="Clear Terminal"
+            onClick={clearTerminal}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="flex-1 min-h-0 w-full overflow-hidden p-[var(--viper-space-1)]"
         ref={containerRef}
       />
+
+      {terminals.length === 0 && (
+        <div className="absolute inset-0 top-7 flex items-center justify-center text-xs text-[#4b5563]">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-[#6b7280] hover:text-[#e5e7eb] hover:border-[var(--viper-accent)] transition-colors"
+            style={{ borderColor: "var(--viper-border)" }}
+            onClick={createNewTerminal}
+            disabled={creating}
+          >
+            <Plus size={13} />
+            New Terminal
+          </button>
+        </div>
+      )}
     </div>
   );
 }

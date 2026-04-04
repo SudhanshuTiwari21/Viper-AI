@@ -111,11 +111,14 @@ export function createOpenAIEmbeddingAdapter(): EmbeddingModelAdapter {
             }
           }
           filled += batch.length;
-        } catch (error) {
-          console.error("[Viper] Embedding provider error", error);
-          throw new Error(
-            "Embedding request failed. Check OPENAI_API_KEY and network.",
-          );
+        } catch (error: unknown) {
+          const err = error as Record<string, unknown>;
+          const openaiMsg = typeof err?.message === "string" ? err.message : "";
+          const openaiStatus = typeof err?.status === "number" ? err.status : err?.status;
+          const openaiError = err?.error != null ? err.error : null;
+          const openaiErrMsg = openaiError && typeof openaiError === "object" && "message" in openaiError ? (openaiError as { message?: string }).message : undefined;
+          console.error("[Viper] Embedding provider error", { message: openaiMsg, status: openaiStatus, errorMessage: openaiErrMsg });
+          throw error;
         }
       }
 

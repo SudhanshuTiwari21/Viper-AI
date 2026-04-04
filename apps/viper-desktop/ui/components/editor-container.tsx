@@ -1,12 +1,15 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { MonacoEditor } from "./monaco-editor";
+import { MonacoDiffEditor, UndoAIBar } from "./monaco-diff-editor";
 import { EditorWelcome } from "./editor-welcome";
 import { useWorkspaceContext } from "../contexts/workspace-context";
 import { useCurrentFile } from "../contexts/current-file-context";
 import { useStatusBar } from "../contexts/status-bar-context";
 import { useDiagnostics } from "../contexts/diagnostics-context";
+import { usePendingEdits } from "../contexts/pending-edits-context";
 import { fsApi } from "../services/filesystem";
 import { useEditorTabs } from "../hooks/useEditor";
+import { fetchInlineEdit } from "../services/agent-api";
 import type { CodePatch } from "../lib/patch-types";
 import {
   applyPatchToContent,
@@ -20,7 +23,26 @@ export function EditorContainer() {
   const { setFileErrors } = useDiagnostics();
   const { tabs, activeId, openTab, closeTab, setActiveId, updateContent, markSaved } =
     useEditorTabs();
+  const {
+    addPendingEdit,
+    getPendingEditForFile,
+    removePendingEdit,
+    pushAccepted,
+    acceptedStack,
+    popAccepted,
+  } = usePendingEdits();
   const [saving, setSaving] = useState(false);
+  const [aiEditInFlight, setAiEditInFlight] = useState(false);
+
+  // G.37: Hold a reference to the active Monaco editor instance (for reading selection).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editorInstanceRef = useRef<any>(null);
+  const aiEditAbortRef = useRef<AbortController | null>(null);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEditorInstance = useCallback((editor: any) => {
+    editorInstanceRef.current = editor;
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -177,6 +199,100 @@ export function EditorContainer() {
     };
   }, [saveAllDirty]);
 
+  // ---------------------------------------------------------------------------
+  // G.37: AI Edit — triggered by keyboard shortcut (Cmd+Shift+E) or command palette
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const handler = async () => {
+      if (aiEditInFlight) return;
+      if (!activeTab) {
+        window.alert("No file is open.");
+        return;
+      }
+      if (!workspace) {
+        window.alert("Open a workspace folder first.");
+        return;
+      }
+
+      // Read selection from the Monaco editor instance
+      const editor = editorInstanceRef.current;
+      let selectionText = "";
+      let selection: { startLine: number; startColumn: number; endLine: number; endColumn: number } | undefined;
+
+      if (editor) {
+        const sel = editor.getSelection?.();
+        if (sel && !sel.isEmpty()) {
+          const model = editor.getModel?.();
+          if (model) {
+            selectionText = model.getValueInRange(sel);
+            selection = {
+              startLine: sel.startLineNumber,
+              startColumn: sel.startColumn,
+              endLine: sel.endLineNumber,
+              endColumn: sel.endColumn,
+            };
+          }
+        }
+      }
+
+      if (!selectionText) {
+        window.alert("Select some code first, then run this command.");
+        return;
+      }
+
+      const instruction = window.prompt(
+        "How should Viper edit the selected code?",
+        "Improve this code",
+      );
+      if (!instruction) return;
+
+      setAiEditInFlight(true);
+      aiEditAbortRef.current?.abort();
+      const abort = new AbortController();
+      aiEditAbortRef.current = abort;
+
+      try {
+        const result = await fetchInlineEdit(
+          {
+            workspacePath: workspace.root,
+            filePath: activeTab.path,
+            languageId: activeTab.language,
+            instruction,
+            fileContent: activeTab.content,
+            selection,
+            selectionText,
+          },
+          abort.signal,
+        );
+
+        if (result.modifiedFileContent && result.modifiedFileContent !== activeTab.content) {
+          addPendingEdit({
+            id: `ai-edit-${Date.now()}`,
+            filePath: activeTab.path,
+            originalContent: activeTab.content,
+            modifiedContent: result.modifiedFileContent,
+            description: `AI edit: ${instruction}`,
+            timestamp: Date.now(),
+          });
+        } else {
+          window.alert("The AI returned no changes for the given instruction.");
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          window.alert(`AI edit failed: ${(err as Error).message}`);
+        }
+      } finally {
+        setAiEditInFlight(false);
+      }
+    };
+
+    window.addEventListener("viper:trigger-ai-edit", handler);
+    return () => {
+      window.removeEventListener("viper:trigger-ai-edit", handler);
+      aiEditAbortRef.current?.abort();
+    };
+  }, [activeTab, workspace, aiEditInFlight, addPendingEdit]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Editor tabs: horizontal scroll, close, active highlight */}
@@ -240,18 +356,72 @@ export function EditorContainer() {
       {/* Editor body or welcome */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {!activeTab && <EditorWelcome />}
-        {activeTab && (
-          <MonacoEditor
-            key={activeTab.id}
-            language={activeTab.language}
-            value={activeTab.content}
-            onChange={(val) => updateContent(activeTab.id, val)}
-            onCursorChange={handleCursorChange}
-            currentFilePath={activeTab.path}
-            onDiagnosticsChange={setFileErrors}
-          />
-        )}
+        {activeTab && (() => {
+          const pendingEdit = getPendingEditForFile(activeTab.path);
+          if (pendingEdit) {
+            return (
+              <MonacoDiffEditor
+                key={`diff-${activeTab.id}-${pendingEdit.id}`}
+                originalContent={pendingEdit.originalContent}
+                modifiedContent={pendingEdit.modifiedContent}
+                language={activeTab.language}
+                filePath={activeTab.path}
+                description={pendingEdit.description}
+                onAccept={() => {
+                  updateContent(activeTab.id, pendingEdit.modifiedContent);
+                  pushAccepted({
+                    id: pendingEdit.id,
+                    filePath: pendingEdit.filePath,
+                    beforeContent: pendingEdit.originalContent,
+                    afterContent: pendingEdit.modifiedContent,
+                    description: pendingEdit.description,
+                    timestamp: Date.now(),
+                  });
+                  removePendingEdit(pendingEdit.id);
+                  if (workspace) {
+                    void fsApi.writeFile(workspace.root, activeTab.path, pendingEdit.modifiedContent)
+                      .then(() => markSaved(activeTab.id));
+                  }
+                }}
+                onReject={() => {
+                  removePendingEdit(pendingEdit.id);
+                }}
+              />
+            );
+          }
+          return (
+            <MonacoEditor
+              key={activeTab.id}
+              language={activeTab.language}
+              value={activeTab.content}
+              onChange={(val) => updateContent(activeTab.id, val)}
+              onCursorChange={handleCursorChange}
+              currentFilePath={activeTab.path}
+              onDiagnosticsChange={setFileErrors}
+              workspacePath={workspace?.root ?? null}
+              onEditorInstance={handleEditorInstance}
+            />
+          );
+        })()}
       </div>
+
+      {acceptedStack.length > 0 && (
+        <UndoAIBar
+          lastFile={acceptedStack[acceptedStack.length - 1]!.filePath}
+          onUndo={() => {
+            const last = popAccepted();
+            if (!last) return;
+            const tab = tabs.find((t) => t.path === last.filePath);
+            if (tab) {
+              updateContent(tab.id, last.beforeContent);
+              if (workspace) {
+                void fsApi.writeFile(workspace.root, last.filePath, last.beforeContent)
+                  .then(() => markSaved(tab.id));
+              }
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

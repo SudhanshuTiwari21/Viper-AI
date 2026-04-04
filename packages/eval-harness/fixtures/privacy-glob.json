@@ -1,0 +1,155 @@
+{
+  "type": "privacy-glob",
+  "cases": [
+    {
+      "id": "priv-001",
+      "description": "top-level .env is blocked by built-in deny",
+      "tier": "offline",
+      "input": { "relativePath": ".env" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-002",
+      "description": "nested .env is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "apps/backend/.env" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-003",
+      "description": ".env.local is blocked (**/.env.* pattern)",
+      "tier": "offline",
+      "input": { "relativePath": ".env.local" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-004",
+      "description": ".env.production is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "apps/backend/.env.production" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-005",
+      "description": ".pem file is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "certs/server.pem" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-006",
+      "description": ".key file is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "certs/server.key" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-007",
+      "description": ".ssh/id_rsa is blocked",
+      "tier": "offline",
+      "input": { "relativePath": ".ssh/id_rsa" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-008",
+      "description": "secrets/db.json is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "secrets/db.json" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-009",
+      "description": "credentials.json is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "credentials.json" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-010",
+      "description": ".npmrc is blocked (may contain auth tokens)",
+      "tier": "offline",
+      "input": { "relativePath": ".npmrc" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-011",
+      "description": "service-account.json is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "service-account.json" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-012",
+      "description": ".aws/credentials is blocked",
+      "tier": "offline",
+      "input": { "relativePath": ".aws/credentials" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-013",
+      "description": "src/index.ts is allowed",
+      "tier": "offline",
+      "input": { "relativePath": "src/index.ts" },
+      "expect": { "allowed": true }
+    },
+    {
+      "id": "priv-014",
+      "description": "README.md is allowed",
+      "tier": "offline",
+      "input": { "relativePath": "README.md" },
+      "expect": { "allowed": true }
+    },
+    {
+      "id": "priv-015",
+      "description": "package.json is allowed",
+      "tier": "offline",
+      "input": { "relativePath": "package.json" },
+      "expect": { "allowed": true }
+    },
+    {
+      "id": "priv-016",
+      "description": "config denyGlobs blocks internal/data.json",
+      "tier": "offline",
+      "input": {
+        "relativePath": "internal/data.json",
+        "configDenyGlobs": ["**/internal/**"]
+      },
+      "expect": { "allowed": false, "blockedByPrefix": "config:" }
+    },
+    {
+      "id": "priv-017",
+      "description": "config allowGlobs overrides config denyGlobs for specific path",
+      "tier": "offline",
+      "input": {
+        "relativePath": "internal/public.json",
+        "configDenyGlobs": ["**/internal/**"],
+        "configAllowGlobs": ["internal/public.json"]
+      },
+      "expect": { "allowed": true }
+    },
+    {
+      "id": "priv-018",
+      "description": "config allowGlobs cannot override built-in .env deny",
+      "tier": "offline",
+      "input": {
+        "relativePath": ".env",
+        "configAllowGlobs": ["**/.env"]
+      },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-019",
+      "description": "deeply nested secrets path is blocked",
+      "tier": "offline",
+      "input": { "relativePath": "apps/backend/config/secrets/db-password.txt" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    },
+    {
+      "id": "priv-020",
+      "description": ".azure directory is blocked",
+      "tier": "offline",
+      "input": { "relativePath": ".azure/credentials.json" },
+      "expect": { "allowed": false, "blockedByPrefix": "builtin:" }
+    }
+  ]
+}

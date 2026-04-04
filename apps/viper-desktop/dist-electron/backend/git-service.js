@@ -37,4 +37,91 @@ function setupGitService() {
             return [];
         }
     });
+    electron_1.ipcMain.handle("git:status", async (_e, root) => {
+        try {
+            const out = await runGit(root, ["status", "--porcelain=v1"]);
+            if (!out)
+                return [];
+            return out.split("\n").filter(Boolean).map((line) => {
+                const status = line.slice(0, 2);
+                const file = line.slice(3);
+                return { status: status.trim(), file };
+            });
+        }
+        catch {
+            return [];
+        }
+    });
+    electron_1.ipcMain.handle("git:diff", async (_e, root, filePath) => {
+        try {
+            const args = ["diff"];
+            if (filePath)
+                args.push("--", filePath);
+            return await runGit(root, args);
+        }
+        catch {
+            return "";
+        }
+    });
+    electron_1.ipcMain.handle("git:stage", async (_e, root, filePath) => {
+        try {
+            await runGit(root, ["add", filePath]);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    });
+    electron_1.ipcMain.handle("git:unstage", async (_e, root, filePath) => {
+        try {
+            await runGit(root, ["reset", "HEAD", filePath]);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    });
+    electron_1.ipcMain.handle("git:commit", async (_e, root, message) => {
+        try {
+            await runGit(root, ["commit", "-m", message]);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    });
+    electron_1.ipcMain.handle("git:discard", async (_e, root, filePath) => {
+        try {
+            await runGit(root, ["checkout", "--", filePath]);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    });
+    // G.39: changed file names for the test assistant
+    electron_1.ipcMain.handle("git:diffNameOnly", async (_e, root) => {
+        try {
+            // Returns unstaged + staged changed files relative to HEAD
+            const out = await runGit(root, ["diff", "--name-only", "HEAD"]);
+            if (!out)
+                return [];
+            return out.split("\n").filter(Boolean);
+        }
+        catch {
+            return [];
+        }
+    });
+    // G.38: staged diff for the commit/PR assistant
+    const MAX_DIFF_BYTES = 256 * 1024; // 256 KiB cap enforced in main process
+    electron_1.ipcMain.handle("git:diffStaged", async (_e, root) => {
+        try {
+            const out = await runGit(root, ["diff", "--cached"]);
+            // Cap output to MAX_DIFF_BYTES before returning to renderer
+            return out.length > MAX_DIFF_BYTES ? out.slice(0, MAX_DIFF_BYTES) : out;
+        }
+        catch {
+            return "";
+        }
+    });
 }

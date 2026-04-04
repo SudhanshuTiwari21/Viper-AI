@@ -1,0 +1,75 @@
+{
+  "type": "schema-validation",
+  "cases": [
+    {
+      "id": "schema-001",
+      "description": "ChatMode 'ask' is valid",
+      "tier": "offline",
+      "input": { "schema": "ChatMode", "value": "ask" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-002",
+      "description": "ChatMode 'plan' is valid",
+      "tier": "offline",
+      "input": { "schema": "ChatMode", "value": "plan" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-003",
+      "description": "ChatMode 'debug' is valid",
+      "tier": "offline",
+      "input": { "schema": "ChatMode", "value": "debug" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-004",
+      "description": "ChatMode 'agent' is valid",
+      "tier": "offline",
+      "input": { "schema": "ChatMode", "value": "agent" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-005",
+      "description": "ChatMode 'unknown' is invalid",
+      "tier": "offline",
+      "input": { "schema": "ChatMode", "value": "unknown" },
+      "expect": { "valid": false }
+    },
+    {
+      "id": "schema-006",
+      "description": "ChatMode null is invalid",
+      "tier": "offline",
+      "input": { "schema": "ChatMode", "value": null },
+      "expect": { "valid": false }
+    },
+    {
+      "id": "schema-007",
+      "description": "ModelTier 'auto' is valid",
+      "tier": "offline",
+      "input": { "schema": "ModelTier", "value": "auto" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-008",
+      "description": "ModelTier 'premium' is valid",
+      "tier": "offline",
+      "input": { "schema": "ModelTier", "value": "premium" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-009",
+      "description": "ModelTier 'fast' is valid",
+      "tier": "offline",
+      "input": { "schema": "ModelTier", "value": "fast" },
+      "expect": { "valid": true }
+    },
+    {
+      "id": "schema-010",
+      "description": "ModelTier 'gold' is invalid",
+      "tier": "offline",
+      "input": { "schema": "ModelTier", "value": "gold" },
+      "expect": { "valid": false }
+    }
+  ]
+}

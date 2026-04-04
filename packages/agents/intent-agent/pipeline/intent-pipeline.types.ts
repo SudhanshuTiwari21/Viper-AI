@@ -11,9 +11,15 @@ export interface IntentPipelineResult {
   normalizedPrompt: NormalizedPrompt;
   intent: IntentClassification;
   entities: EntityExtractionResult;
-  tasks: TaskPlan;
-  contextRequest: ContextRequest;
-  contextBundle: ContextBundle;
-  reasoning: IntentReasoning;
-  response: IntentResponse;
+  /** Present when task planning runs (`skipContextRequest: false`). */
+  tasks?: TaskPlan;
+  /**
+   * @deprecated contextRequest is deprecated — replaced by Planner Agent.
+   * Present only when `skipContextRequest: false`.
+   */
+  contextRequest?: ContextRequest;
+  /** Present when legacy context path runs (`skipContextRequest: false`). */
+  contextBundle?: ContextBundle;
+  reasoning?: IntentReasoning;
+  response?: IntentResponse;
 }

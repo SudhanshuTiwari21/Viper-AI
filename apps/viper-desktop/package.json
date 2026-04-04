@@ -2,17 +2,20 @@
   "name": "viper-desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Viper AI desktop IDE (Electron + Vite)",
+  "author": "Viper AI",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "npm run build:electron && concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "build:electron": "tsc -p electron/tsconfig.json",
     "dev:vite": "vite",
     "dev:electron": "electron .",
-    "build": "vite build && electron-builder",
+    "build": "npm run build:electron && vite build && electron-builder",
     "build:vite": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -37,13 +40,46 @@
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
-    "electron": "^33.2.0",
+    "electron": "33.2.0",
     "electron-builder": "^25.1.8",
-    "postcss": "^8.4.49",
+    "happy-dom": "^20.8.9",
     "node-pty": "^1.0.0",
+    "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.7.2",
     "vite": "^6.0.1",
+    "vitest": "^4.1.2",
     "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "ai.viper.desktop",
+    "productName": "Viper AI",
+    "electronVersion": "33.2.0",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

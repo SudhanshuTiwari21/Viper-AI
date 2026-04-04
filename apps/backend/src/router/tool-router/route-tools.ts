@@ -72,11 +72,27 @@ export function routeTools(
         directLLMResponse: false,
       };
     case "PROJECT_SETUP":
+      // Index + retrieve manifests/README/embeddings, then answer conversationally (no implementation loop).
       return {
         runContextEngine: true,
         runRanking: true,
         runImplementationAgent: false,
-        directLLMResponse: false,
+        directLLMResponse: true,
+      };
+    case "CODE_GUIDANCE":
+      // Next steps / advice — retrieve context, answer with direct LLM (no search→patch execution).
+      return {
+        runContextEngine: true,
+        runRanking: true,
+        runImplementationAgent: false,
+        directLLMResponse: true,
+      };
+    case "GENERIC":
+      return {
+        runContextEngine: false,
+        runRanking: false,
+        runImplementationAgent: false,
+        directLLMResponse: true,
       };
     default:
       return {

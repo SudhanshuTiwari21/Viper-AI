@@ -35,6 +35,16 @@ export function detectReferences(text: string): DetectedReference[] {
     }
   }
 
+  // Also detect simple lowercase identifiers like "login" (not camelCase).
+  const simpleFnMatches = text.match(/\b[a-z]{3,}\b/g);
+  if (simpleFnMatches) {
+    for (const fn of simpleFnMatches) {
+      // Avoid double-adding module keywords as function references.
+      if (MODULE_KEYWORDS.some((k) => k.toLowerCase() === fn.toLowerCase())) continue;
+      references.push({ type: "function", value: fn });
+    }
+  }
+
   // Module keywords
   for (const keyword of MODULE_KEYWORDS) {
     const pattern = new RegExp(`\\b${keyword}\\b`, "i");
