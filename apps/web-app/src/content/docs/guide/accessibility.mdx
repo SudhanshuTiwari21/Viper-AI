@@ -1,0 +1,43 @@
+---
+title: Accessibility
+description: Viper AI is built with accessibility as a first-class concern.
+section: Guide
+prev: installation
+next: mcp
+---
+
+All Viper AI components are built on **Radix UI primitives**, which follow the WAI-ARIA specification. Every interactive element is keyboard navigable and screen-reader friendly out of the box.
+
+---
+
+## Keyboard Navigation
+
+All interactive components support full keyboard navigation:
+
+- **Tab** — Move focus to the next interactive element
+- **Shift + Tab** — Move focus to the previous element
+- **Enter / Space** — Activate buttons and controls
+- **Escape** — Close dialogs, dropdowns, and overlays
+- **Arrow keys** — Navigate within menus and lists
+
+## Screen Reader Support
+
+Every component ships with correct ARIA attributes. Labels, roles, and states are managed automatically by the underlying Radix UI primitives.
+
+## Focus Management
+
+Dialogs and modals trap focus within the overlay while open, and return focus to the trigger element when closed — preventing focus from escaping to background content.
+
+## Color Contrast
+
+All text and interactive elements meet **WCAG 2.1 AA** contrast requirements. The default dark theme is tested against both white and near-white foreground colors.
+
+## Reduced Motion
+
+Components that use animation respect the `prefers-reduced-motion` media query. Animations are disabled or simplified for users who have opted into reduced motion in their OS settings.
+
+```tsx
+import { useReducedMotion } from 'framer-motion'
+
+const shouldReduce = useReducedMotion()
+```

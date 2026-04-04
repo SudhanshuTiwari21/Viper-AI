@@ -1,0 +1,61 @@
+---
+title: Troubleshooting
+description: Common issues and how to fix them.
+section: Guide
+prev: mcp
+next: changelog
+---
+
+A collection of common issues encountered when setting up or using Viper AI, with step-by-step fixes.
+
+---
+
+## CLI not found after install
+
+If `viper` is not recognized after running `npm install @viper-ai/cli -g`, your global npm bin directory may not be in your PATH.
+
+```bash
+# Find your global npm bin
+npm bin -g
+
+# Add it to your PATH (bash/zsh)
+export PATH="$(npm bin -g):$PATH"
+```
+
+## Workspace fails to connect
+
+If `viper connect` hangs or returns an auth error:
+
+1. Check your internet connection
+2. Ensure your GitHub token has `repo` and `read:org` scopes
+3. Try re-authenticating: `viper auth logout && viper auth login`
+
+## Context indexing is slow
+
+For large repositories, initial indexing can take several minutes. You can check progress:
+
+```bash
+viper context status
+```
+
+To speed up indexing, exclude large or generated directories in `viper.config.ts`:
+
+```ts
+export default {
+  context: {
+    exclude: ['node_modules', '.next', 'dist', '*.lock'],
+  },
+}
+```
+
+## Agents not responding
+
+If agents appear online but don't respond to prompts:
+
+1. Restart the agent fleet: `viper agents restart`
+2. Check logs: `viper logs --tail 50`
+3. Verify your workspace config: `viper config validate`
+
+## Getting more help
+
+If your issue isn't listed here, open a GitHub issue or join the Discord community.

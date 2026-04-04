@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, Orbitron } from 'next/font/google'
+import { RootProvider } from 'fumadocs-ui/provider'
 import './globals.css'
 
 const inter = Inter({
@@ -42,9 +43,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body className={`${inter.variable} ${orbitron.variable} font-sans bg-[#09090b] text-white antialiased`}>
-        {children}
+        <RootProvider theme={{ defaultTheme: 'dark', enabled: false }}>
+          {children}
+        </RootProvider>
       </body>
     </html>
   )

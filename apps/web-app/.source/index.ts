@@ -1,0 +1,15 @@
+// @ts-nocheck -- skip type checking
+import * as docs_10 from "../src/content/docs/primitives/index.mdx?collection=docs&hash=1775255337942"
+import * as docs_9 from "../src/content/docs/icons/index.mdx?collection=docs&hash=1775255337942"
+import * as docs_8 from "../src/content/docs/guide/troubleshooting.mdx?collection=docs&hash=1775255337942"
+import * as docs_7 from "../src/content/docs/guide/roadmap.mdx?collection=docs&hash=1775255337942"
+import * as docs_6 from "../src/content/docs/guide/other-distributions.mdx?collection=docs&hash=1775255337942"
+import * as docs_5 from "../src/content/docs/guide/mcp.mdx?collection=docs&hash=1775255337942"
+import * as docs_4 from "../src/content/docs/guide/introduction.mdx?collection=docs&hash=1775255337942"
+import * as docs_3 from "../src/content/docs/guide/installation.mdx?collection=docs&hash=1775255337942"
+import * as docs_2 from "../src/content/docs/guide/changelog.mdx?collection=docs&hash=1775255337942"
+import * as docs_1 from "../src/content/docs/guide/accessibility.mdx?collection=docs&hash=1775255337942"
+import * as docs_0 from "../src/content/docs/components/index.mdx?collection=docs&hash=1775255337942"
+import { _runtime } from "fumadocs-mdx"
+import * as _source from "../source.config"
+export const docs = _runtime.docs<typeof _source.docs>([{ info: {"path":"components\\index.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/components/index.mdx"}, data: docs_0 }, { info: {"path":"guide\\accessibility.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/accessibility.mdx"}, data: docs_1 }, { info: {"path":"guide\\changelog.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/changelog.mdx"}, data: docs_2 }, { info: {"path":"guide\\installation.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/installation.mdx"}, data: docs_3 }, { info: {"path":"guide\\introduction.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/introduction.mdx"}, data: docs_4 }, { info: {"path":"guide\\mcp.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/mcp.mdx"}, data: docs_5 }, { info: {"path":"guide\\other-distributions.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/other-distributions.mdx"}, data: docs_6 }, { info: {"path":"guide\\roadmap.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/roadmap.mdx"}, data: docs_7 }, { info: {"path":"guide\\troubleshooting.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/guide/troubleshooting.mdx"}, data: docs_8 }, { info: {"path":"icons\\index.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/icons/index.mdx"}, data: docs_9 }, { info: {"path":"primitives\\index.mdx","absolutePath":"C:/Users/vinit/Desktop/Viper-AI/apps/web-app/src/content/docs/primitives/index.mdx"}, data: docs_10 }], [])

@@ -1,0 +1,59 @@
+---
+title: Primitives
+description: Accessible, animated UI primitives built on Radix UI.
+section: Menu
+prev: null
+next: null
+---
+
+Primitives are the low-level building blocks of Viper's UI. Each primitive is accessible, keyboard navigable, and animation-ready.
+
+---
+
+## Dialog
+
+A fully accessible modal dialog built on `@radix-ui/react-dialog`.
+
+```tsx
+import * as Dialog from '@radix-ui/react-dialog'
+
+<Dialog.Root>
+  <Dialog.Trigger>Open</Dialog.Trigger>
+  <Dialog.Portal>
+    <Dialog.Overlay className="fixed inset-0 bg-black/60" />
+    <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0a] border border-white/10 rounded-lg p-8">
+      <Dialog.Title>Dialog Title</Dialog.Title>
+      <Dialog.Description>Dialog description.</Dialog.Description>
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
+```
+
+## Tooltip
+
+Lightweight tooltip with smooth fade animation.
+
+```tsx
+import * as Tooltip from '@radix-ui/react-tooltip'
+
+<Tooltip.Provider>
+  <Tooltip.Root>
+    <Tooltip.Trigger>Hover me</Tooltip.Trigger>
+    <Tooltip.Content className="bg-[#111] border border-white/10 rounded px-3 py-1.5 text-xs text-white">
+      Tooltip content
+    </Tooltip.Content>
+  </Tooltip.Root>
+</Tooltip.Provider>
+```
+
+## Dropdown Menu
+
+Context menus and action dropdowns.
+
+## Tabs
+
+Accessible tabbed navigation with animated indicator.
+
+## Accordion
+
+Collapsible content sections with spring animation.
