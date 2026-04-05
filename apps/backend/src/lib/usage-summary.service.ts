@@ -17,7 +17,8 @@
 import {
   getPool,
   getWorkspaceByPathKey,
-  getWorkspaceEntitlements,
+  loadComposedWorkspaceEntitlements,
+  sumCostUnitsForWorkspaceMonth,
 } from "@repo/database";
 import {
   resolvePathKey,
@@ -29,6 +30,50 @@ import {
   getTodayUtc,
   parseQuotaConfig,
 } from "./quota.service.js";
+
+function percentUsedInt(used: bigint, limit: bigint): number {
+  if (limit <= 0n) return 0;
+  return Math.min(100, Math.max(0, Number((used * 100n) / limit)));
+}
+
+/** used/limit ≥ threshold (threshold in (0,1]). */
+function crossesUsageWarningThreshold(used: bigint, limit: bigint, threshold: number): boolean {
+  if (limit <= 0n || threshold <= 0 || threshold > 1) return false;
+  const pct = Math.floor(threshold * 100);
+  if (pct <= 0) return false;
+  return used * 100n >= limit * BigInt(pct);
+}
+
+function buildComposerHint(auto: BucketMeterSnapshot, premium: BucketMeterSnapshot): string | null {
+  const parts: string[] = [];
+  if (auto.showWarning && auto.meter !== "not_applicable" && auto.meter !== "unlimited") {
+    parts.push(`Auto: ~${auto.percentUsed}% of included allowance used this month`);
+  }
+  if (premium.showWarning && premium.meter !== "not_applicable" && premium.meter !== "unlimited") {
+    parts.push(`Premium: ~${premium.percentUsed}% of included allowance used this month`);
+  }
+  if (parts.length === 0) return null;
+  return `${parts.join(" · ")}. Pace usage or upgrade if you need more headroom before reset.`;
+}
+
+function emptyUsageBilling(threshold: number): UsageBillingSummary {
+  const na = (bucket: "auto" | "premium"): BucketMeterSnapshot => ({
+    billingBucket: bucket,
+    meter: "not_applicable",
+    used: "0",
+    limit: null,
+    remaining: null,
+    percentUsed: 0,
+    showWarning: false,
+    exhausted: false,
+  });
+  return {
+    usageWarningThresholdRatio: threshold,
+    showComposerUsageHint: false,
+    composerHint: null,
+    buckets: { auto: na("auto"), premium: na("premium") },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Kill-switch
@@ -55,6 +100,33 @@ export interface StripeLinkage {
   subscriptionId: string | null;
 }
 
+/** Per-bucket meter for Auto vs Premium (credits, monthly requests, or N/A). */
+export interface BucketMeterSnapshot {
+  billingBucket: "auto" | "premium";
+  meter: "credits" | "requests" | "unlimited" | "not_applicable";
+  used: string;
+  limit: string | null;
+  remaining: string | null;
+  /** Whole percent 0–100 of included allowance consumed. */
+  percentUsed: number;
+  /** True when usage ≥ usageWarningThresholdRatio of included (e.g. 40%). */
+  showWarning: boolean;
+  exhausted: boolean;
+}
+
+/** Phase 2 — billing UX: thresholds, composer hint, dual-bucket progress. */
+export interface UsageBillingSummary {
+  usageWarningThresholdRatio: number;
+  /** True if any applicable bucket crossed the warning threshold. */
+  showComposerUsageHint: boolean;
+  /** Short line for under the chat input; null when no warning. */
+  composerHint: string | null;
+  buckets: {
+    auto: BucketMeterSnapshot;
+    premium: BucketMeterSnapshot;
+  };
+}
+
 export interface UsageSummaryResponse {
   pathKey: string;
   month: {
@@ -69,6 +141,8 @@ export interface UsageSummaryResponse {
   remaining: string | null;
   entitlements: EntitlementsSnapshot;
   stripe: StripeLinkage | null;
+  /** Auto/Premium meters and composer warning line (best-effort when DB available). */
+  usageBilling: UsageBillingSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,12 +187,10 @@ export async function getUsageSummary(
         stripeCustomerId = workspace.stripe_customer_id ?? null;
         stripeSubscriptionId = workspace.stripe_subscription_id ?? null;
 
-        const entRow = await getWorkspaceEntitlements(pool, workspace.id);
-        if (entRow) {
-          flags = entRow.flags;
-          allowedModes = entRow.allowed_modes;
-          allowedModelTiers = entRow.allowed_model_tiers;
-        }
+        const composed = await loadComposedWorkspaceEntitlements(pool, workspace);
+        flags = composed.flags;
+        allowedModes = composed.allowed_modes;
+        allowedModelTiers = composed.allowed_model_tiers;
       }
     } catch {
       // DB unavailable — return best-effort (unlimited, no entitlements)
@@ -152,12 +224,130 @@ export async function getUsageSummary(
   // ---------------------------------------------------------------------------
   // Effective limit
   // ---------------------------------------------------------------------------
-  const { monthlyRequestQuota } = parseQuotaConfig(flags);
+  const quotaConfig = parseQuotaConfig(flags);
+  const { monthlyRequestQuota, usageWarningThresholdRatio } = quotaConfig;
   const limit = monthlyRequestQuota;
 
   let remaining: bigint | null = null;
   if (limit !== null) {
     remaining = limit - usedRequests > 0n ? limit - usedRequests : 0n;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 2 — dual-bucket billing snapshot + composer warning
+  // ---------------------------------------------------------------------------
+  let usageBilling = emptyUsageBilling(usageWarningThresholdRatio);
+
+  const premiumEntitled =
+    allowedModelTiers != null && allowedModelTiers.some((t) => t === "premium" || t === "fast");
+
+  if (process.env["DATABASE_URL"]) {
+    try {
+      const pool = getPool();
+      const creditMode =
+        quotaConfig.includedAutoCredits !== null || quotaConfig.includedPremiumCredits !== null;
+
+      let autoUsed = 0n;
+      let premiumUsed = 0n;
+      if (creditMode) {
+        autoUsed = await sumCostUnitsForWorkspaceMonth(pool, pathKey, "auto", today);
+        if (premiumEntitled) {
+          premiumUsed = await sumCostUnitsForWorkspaceMonth(pool, pathKey, "premium", today);
+        }
+      }
+
+      const autoLimit = creditMode ? quotaConfig.includedAutoCredits : quotaConfig.monthlyRequestQuota;
+      const premiumLimit = premiumEntitled ? quotaConfig.includedPremiumCredits : null;
+
+      const buildBucket = (
+        billingBucket: "auto" | "premium",
+        used: bigint,
+        lim: bigint | null,
+        meter: BucketMeterSnapshot["meter"],
+      ): BucketMeterSnapshot => {
+        if (meter === "not_applicable") {
+          return {
+            billingBucket,
+            meter: "not_applicable",
+            used: "0",
+            limit: null,
+            remaining: null,
+            percentUsed: 0,
+            showWarning: false,
+            exhausted: false,
+          };
+        }
+        if (meter === "unlimited" || lim === null) {
+          return {
+            billingBucket,
+            meter: "unlimited",
+            used: used.toString(),
+            limit: null,
+            remaining: null,
+            percentUsed: 0,
+            showWarning: false,
+            exhausted: false,
+          };
+        }
+        const rem = lim > used ? lim - used : 0n;
+        const pct = percentUsedInt(used, lim);
+        const warn = crossesUsageWarningThreshold(used, lim, usageWarningThresholdRatio);
+        return {
+          billingBucket,
+          meter,
+          used: used.toString(),
+          limit: lim.toString(),
+          remaining: rem.toString(),
+          percentUsed: pct,
+          showWarning: warn,
+          exhausted: used >= lim,
+        };
+      };
+
+      let autoSnap: BucketMeterSnapshot;
+      let premiumSnap: BucketMeterSnapshot;
+
+      if (creditMode) {
+        autoSnap = buildBucket(
+          "auto",
+          autoUsed,
+          quotaConfig.includedAutoCredits,
+          quotaConfig.includedAutoCredits === null ? "unlimited" : "credits",
+        );
+        premiumSnap = !premiumEntitled
+          ? buildBucket("premium", 0n, null, "not_applicable")
+          : buildBucket(
+              "premium",
+              premiumUsed,
+              quotaConfig.includedPremiumCredits,
+              quotaConfig.includedPremiumCredits === null ? "unlimited" : "credits",
+            );
+      } else {
+        // Request-quota plan (e.g. free): counts apply to Auto lane only
+        const reqLimit = quotaConfig.monthlyRequestQuota;
+        autoSnap = buildBucket(
+          "auto",
+          usedRequests,
+          reqLimit,
+          reqLimit === null ? "unlimited" : "requests",
+        );
+        premiumSnap = !premiumEntitled
+          ? buildBucket("premium", 0n, null, "not_applicable")
+          : buildBucket("premium", 0n, null, "unlimited");
+      }
+
+      const showComposerUsageHint = autoSnap.showWarning || premiumSnap.showWarning;
+      usageBilling = {
+        usageWarningThresholdRatio,
+        showComposerUsageHint,
+        composerHint: showComposerUsageHint ? buildComposerHint(autoSnap, premiumSnap) : null,
+        buckets: { auto: autoSnap, premium: premiumSnap },
+      };
+    } catch {
+      usageBilling = emptyUsageBilling(usageWarningThresholdRatio);
+    }
+  } else {
+    usageBilling = emptyUsageBilling(usageWarningThresholdRatio);
   }
 
   return {
@@ -175,5 +365,6 @@ export async function getUsageSummary(
       stripeCustomerId
         ? { customerId: stripeCustomerId, subscriptionId: stripeSubscriptionId }
         : null,
+    usageBilling,
   };
 }

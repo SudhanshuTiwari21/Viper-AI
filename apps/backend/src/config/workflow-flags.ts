@@ -11,7 +11,8 @@
  * - VIPER_REQUIRE_ANALYSIS_FOR_EDITS — default false unless lowercase is "true"
  * - VIPER_MIN_FILES_READ_BEFORE_EDIT — int, default 2, Math.max(0, …)
  * - VIPER_MIN_DISCOVERY_TOOLS_BEFORE_EDIT — int, default 1, Math.max(0, …)
- * - OPENAI_MODEL — default gpt-4o-mini
+ * - OPENAI_MODEL — default gpt-4o-mini (OpenAI ids; Anthropic registry ids fall back to fast OpenAI until adapter ships)
+ * - ANTHROPIC_API_KEY / VIPER_ANTHROPIC_CHAT_ENABLED — reserved for upcoming Anthropic Messages API wiring (see docs/ENV.md)
  * - VIPER_MODEL_ROUTE_DEFAULT — `pinned`|`auto`, default **pinned** (D.17).
  * - VIPER_MODEL_FAILOVER_MAX_ATTEMPTS — int **1–5**, default **3**: max **total** model tries (primary + fallbacks, deduped order).
  * - VIPER_MODEL_FAILOVER_ENABLED — optional `true`|`false`|`1`|`0`. Unset ⇒ failover **on** when route default is `auto`, **off** when `pinned`.
@@ -198,7 +199,11 @@ export function parseWorkflowRuntimeConfig(
     parseInt(env.VIPER_MIN_DISCOVERY_TOOLS_BEFORE_EDIT ?? "1", 10),
   );
   const openaiModel = env.OPENAI_MODEL ?? "gpt-4o-mini";
-  const resolved = resolveModelSpec(openaiModel) ?? getDefaultModelForTier("fast");
+  let resolved = resolveModelSpec(openaiModel) ?? getDefaultModelForTier("fast");
+  // Anthropic ids exist in @repo/model-registry for metering/docs; chat is still OpenAI-native.
+  if (resolved.provider === "anthropic") {
+    resolved = getDefaultModelForTier("fast");
+  }
   const modelRouteDefaultRaw = (env.VIPER_MODEL_ROUTE_DEFAULT ?? "pinned").trim().toLowerCase();
   const modelRouteDefault =
     modelRouteDefaultRaw === "auto" ? "auto" : ("pinned" as const);

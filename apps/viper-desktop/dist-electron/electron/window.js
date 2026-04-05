@@ -7,7 +7,13 @@ exports.createMainWindow = createMainWindow;
 const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
+function mainWindowIcon() {
+    const iconPath = path_1.default.join(electron_1.app.getAppPath(), "resources", "icon.png");
+    const image = electron_1.nativeImage.createFromPath(iconPath);
+    return image.isEmpty() ? undefined : image;
+}
 function createMainWindow(isDev) {
+    const icon = mainWindowIcon();
     const win = new electron_1.BrowserWindow({
         width: 1600,
         height: 1000,
@@ -15,6 +21,7 @@ function createMainWindow(isDev) {
         minHeight: 600,
         title: "Viper AI",
         backgroundColor: "#0d0d0d",
+        ...(icon ? { icon } : {}),
         webPreferences: {
             preload: path_1.default.join(__dirname, "preload.js"),
             contextIsolation: true,

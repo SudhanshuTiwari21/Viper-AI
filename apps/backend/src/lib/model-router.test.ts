@@ -7,7 +7,7 @@ import {
   CANDIDATE_POLICY_LABEL,
   VisionNotSupportedError,
 } from "./model-router.js";
-import { getDefaultModelForTier } from "@repo/model-registry";
+import { getDefaultModelForTier, resolveModelSpec } from "@repo/model-registry";
 
 describe("model-router (D.17)", () => {
   it("ask routes to fast", () => {
@@ -276,6 +276,12 @@ describe("model-router fallback chain (D.18)", () => {
     const chain = buildFallbackChainForAuto(premium, 2);
     expect(chain).toHaveLength(1);
     expect(chain[0]!.tier).toBe("fast");
+  });
+
+  it("skips cross-provider fallback (Anthropic primary vs OpenAI default alternate tier)", () => {
+    const sonnet = resolveModelSpec("claude-3-5-sonnet-20241022");
+    expect(sonnet).not.toBeNull();
+    expect(buildFallbackChainForAuto(sonnet!, 2)).toEqual([]);
   });
 });
 

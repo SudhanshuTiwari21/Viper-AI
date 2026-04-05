@@ -657,6 +657,28 @@ export interface UsageSummaryStripe {
   subscriptionId: string | null;
 }
 
+/** Mirrors backend `BucketMeterSnapshot` (Phase 2 billing UX). */
+export interface UsageBucketMeterSnapshot {
+  billingBucket: "auto" | "premium";
+  meter: "credits" | "requests" | "unlimited" | "not_applicable";
+  used: string;
+  limit: string | null;
+  remaining: string | null;
+  percentUsed: number;
+  showWarning: boolean;
+  exhausted: boolean;
+}
+
+export interface UsageBillingSummary {
+  usageWarningThresholdRatio: number;
+  showComposerUsageHint: boolean;
+  composerHint: string | null;
+  buckets: {
+    auto: UsageBucketMeterSnapshot;
+    premium: UsageBucketMeterSnapshot;
+  };
+}
+
 export interface UsageSummaryResponse {
   pathKey: string;
   month: { firstDay: string; lastDay: string };
@@ -668,6 +690,8 @@ export interface UsageSummaryResponse {
   remaining: string | null;
   entitlements: UsageSummaryEntitlements;
   stripe: UsageSummaryStripe | null;
+  /** Present when backend runs Phase 2+ usage summary. */
+  usageBilling?: UsageBillingSummary;
 }
 
 /**

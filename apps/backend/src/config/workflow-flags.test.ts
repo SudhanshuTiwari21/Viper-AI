@@ -56,6 +56,13 @@ describe("parseWorkflowRuntimeConfig", () => {
     expect(unknown.resolvedModelId).toBe("gpt-4o-mini");
   });
 
+  it("OPENAI_MODEL: Anthropic registry id falls back to fast OpenAI (chat stack OpenAI-only for now)", () => {
+    const c = parseWorkflowRuntimeConfig(env({ OPENAI_MODEL: "claude-3-5-sonnet-20241022" }));
+    expect(c.openaiModel).toBe("claude-3-5-sonnet-20241022");
+    expect(c.resolvedModelId).toBe("gpt-4o-mini");
+    expect(c.resolvedModelProvider).toBe("openai");
+  });
+
   it("VIPER_MODEL_ROUTE_DEFAULT supports auto (default pinned)", () => {
     expect(parseWorkflowRuntimeConfig(env({})).modelRouteDefault).toBe("pinned");
     expect(parseWorkflowRuntimeConfig(env({ VIPER_MODEL_ROUTE_DEFAULT: "auto" })).modelRouteDefault).toBe("auto");

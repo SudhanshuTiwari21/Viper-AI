@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useId } from "react";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Lock } from "lucide-react";
 import type { ModelTier } from "../services/agent-api";
 
 const TIERS: { value: ModelTier; label: string }[] = [
@@ -11,9 +11,19 @@ export interface ChatModelTierSelectProps {
   value: ModelTier;
   onChange: (tier: ModelTier) => void;
   disabled?: boolean;
+  /** When true, Premium cannot be selected (workspace plan excludes it). */
+  premiumLocked?: boolean;
+  /** Tooltip/title for the locked Premium option. */
+  premiumLockedTitle?: string;
 }
 
-export function ChatModelTierSelect({ value, onChange, disabled }: ChatModelTierSelectProps) {
+export function ChatModelTierSelect({
+  value,
+  onChange,
+  disabled,
+  premiumLocked = false,
+  premiumLockedTitle = "Premium models are not included on this workspace plan. Upgrade to unlock.",
+}: ChatModelTierSelectProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -147,22 +157,34 @@ export function ChatModelTierSelect({ value, onChange, disabled }: ChatModelTier
         >
           {TIERS.map((t) => {
             const selected = value === t.value;
+            const locked = t.value === "premium" && premiumLocked;
             return (
               <button
                 key={t.value}
                 type="button"
                 role="option"
                 aria-selected={selected}
-                onClick={() => handleSelect(t.value)}
+                aria-disabled={locked}
+                title={locked ? premiumLockedTitle : undefined}
+                disabled={locked}
+                onClick={() => {
+                  if (locked) return;
+                  handleSelect(t.value);
+                }}
                 className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${optionBase} ${
-                  selected
-                    ? "bg-v-accent/15 text-v-accent"
-                    : "text-v-text2 hover:bg-white/[0.06] hover:text-v-text"
+                  locked
+                    ? "cursor-not-allowed opacity-50 text-v-text3"
+                    : selected
+                      ? "bg-v-accent/15 text-v-accent"
+                      : "text-v-text2 hover:bg-white/[0.06] hover:text-v-text"
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                <span className="min-w-0 flex-1 truncate flex items-center gap-1">
+                  {locked ? <Lock size={11} className="shrink-0 text-v-text3" aria-hidden /> : null}
+                  {t.label}
+                </span>
                 <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-                  {selected ? <Check size={12} strokeWidth={2.5} className="text-v-accent" /> : null}
+                  {selected && !locked ? <Check size={12} strokeWidth={2.5} className="text-v-accent" /> : null}
                 </span>
               </button>
             );

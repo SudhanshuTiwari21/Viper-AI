@@ -194,6 +194,25 @@ describe("parseQuotaConfig", () => {
     expect(softThresholdRatio).toBe(0.8);
   });
 
+  it("defaults usageWarningThresholdRatio to 0.4", () => {
+    const { usageWarningThresholdRatio } = parseQuotaConfig({});
+    expect(usageWarningThresholdRatio).toBe(0.4);
+  });
+
+  it("parses usage_warning_threshold_ratio", () => {
+    const { usageWarningThresholdRatio } = parseQuotaConfig({
+      usage_warning_threshold_ratio: 0.5,
+    });
+    expect(usageWarningThresholdRatio).toBe(0.5);
+  });
+
+  it("ignores invalid usage_warning_threshold_ratio", () => {
+    const { usageWarningThresholdRatio } = parseQuotaConfig({
+      usage_warning_threshold_ratio: 1.2,
+    });
+    expect(usageWarningThresholdRatio).toBe(0.4);
+  });
+
   it("parses included_auto_usage_credits_monthly", () => {
     delete process.env["VIPER_QUOTA_DEFAULT_MONTHLY_REQUESTS"];
     const cfg = parseQuotaConfig({ included_auto_usage_credits_monthly: 50_000 });

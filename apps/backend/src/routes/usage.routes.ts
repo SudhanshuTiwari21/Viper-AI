@@ -19,6 +19,9 @@
  * Body: { workspacePath: string, todayUtc?: string }
  *   todayUtc is optional, only accepted for test/debug injection; in production
  *   the server always uses its own UTC clock.
+ *
+ * Response adds `usageBilling` (Phase 2): Auto/Premium meters (`credits` | `requests` | …),
+ * `usageWarningThresholdRatio`, `showComposerUsageHint`, and `composerHint` for UI under the chat input.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";

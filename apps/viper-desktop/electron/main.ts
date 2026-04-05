@@ -1,5 +1,5 @@
 import path from "path";
-import { app, BrowserWindow, Menu, shell, ipcMain, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain, nativeImage, type MenuItemConstructorOptions } from "electron";
 import { createMainWindow } from "./window";
 import { setupWorkspaceService } from "../backend/workspace-service";
 import { setupFileService } from "../backend/file-service";
@@ -15,9 +15,23 @@ let pendingAuthCode: string | null = null;
 
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
-// Ensure the macOS app name (menu bar, Cmd+Tab, etc.) says "Viper AI" instead of "Electron".
+// Internal app name. In dev, Dock hover uses the launched .app bundle (see patch-electron-macos-branding.cjs:
+// clones to Viper.app + unique CFBundleIdentifier so macOS does not keep showing "Electron").
 if (process.platform === "darwin") {
-  app.setName("Viper AI");
+  app.setName("Viper");
+}
+
+function applyMacDockIcon(): void {
+  if (process.platform !== "darwin" || !app.dock) return;
+  const iconPath = path.join(app.getAppPath(), "resources", "icon.png");
+  try {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) {
+      app.dock.setIcon(image);
+    }
+  } catch {
+    /* missing or unreadable icon */
+  }
 }
 
 function parseViperAuthCallbackUrl(raw: string): string | null {
@@ -66,6 +80,8 @@ function flushPendingAuthCode(): void {
 }
 
 function init(): void {
+  applyMacDockIcon();
+
   // Backend services: workspace, files, terminal.
   setupWorkspaceService();
   setupFileService();
@@ -109,11 +125,11 @@ function init(): void {
   }
 
   // macOS application menu – let Electron generate the standard app menu
-  // (it will automatically use app.name, which we've set to "Viper AI").
+  // (it will automatically use app.name, which we've set to "Viper").
   const macAppMenu: MenuItemConstructorOptions | undefined =
     process.platform === "darwin" ? { role: "appMenu" } : undefined;
 
-   // Application menu: VS Code–style, branded for Viper AI
+   // Application menu: VS Code–style, branded for Viper
    const template: MenuItemConstructorOptions[] = [
      // macOS app menu
      ...(macAppMenu ? [macAppMenu] : []),
@@ -284,7 +300,7 @@ function init(): void {
        label: "Help",
        submenu: [
          {
-           label: "Viper AI Documentation",
+           label: "Viper Documentation",
            click: () => {
              if (!mainWindow) return;
              mainWindow.webContents.send("viper:menu-open-docs");

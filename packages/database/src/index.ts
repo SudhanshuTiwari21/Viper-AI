@@ -80,6 +80,8 @@ export {
   getWorkspaceByPathKey,
   upsertWorkspaceByPathKey,
   updateWorkspace,
+  setWorkspaceStripeBilling,
+  clearWorkspacePaidSubscription,
   deleteWorkspace,
   type WorkspaceRow,
   type CreateWorkspaceParams,
@@ -130,3 +132,9 @@ export {
   type WorkspaceMembershipRow,
   type MembershipRole,
 } from "./auth-memberships.repository";
+export {
+  getBillingPlanBySlug,
+  mergeBillingPlanWithWorkspaceEntitlements,
+  loadComposedWorkspaceEntitlements,
+  type BillingPlanRow,
+} from "./billing-plans.repository";

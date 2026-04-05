@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import {
   Plus,
   Clock,
@@ -40,9 +40,11 @@ import {
   ATTACHMENT_MAX_COUNT,
 } from "../services/agent-api";
 import { deriveWorkspaceId } from "../lib/workspace-id";
+import { isPremiumTierEntitled } from "../lib/is-premium-tier-entitled";
 import { filterPatchByHunks, buildInitialHunkStatuses } from "../lib/filter-patch";
 import { buildFileDiffWithHunks } from "../lib/hunk-model";
 import { useSmartScroll } from "../hooks/use-smart-scroll";
+import { useWorkspaceUsageSummary } from "../hooks/use-workspace-usage-summary";
 
 function formatTimeAgo(ts: number): string {
   const d = Date.now() - ts;
@@ -102,6 +104,9 @@ export function ChatPanel() {
     clearPendingAttachments,
   } = useChat();
   const { workspace } = useWorkspaceContext();
+  const { usage, usageEndpointDisabled, refetch: refetchUsage } = useWorkspaceUsageSummary(
+    workspace?.root ?? null,
+  );
   const { addPendingEdit } = usePendingEdits();
   const [streaming, setStreaming] = useState(false);
   const [analysing, setAnalysing] = useState(false);
@@ -121,6 +126,25 @@ export function ChatPanel() {
   const currentModelTier: ModelTier = activeSession?.modelTier ?? "auto";
   const defaultPremiumModelId = String(getDefaultModelForTier("premium").id);
   const currentPremiumModelId = activeSession?.premiumModelId ?? defaultPremiumModelId;
+
+  const premiumKnownFromUsage = Boolean(usage && !usageEndpointDisabled);
+  const premiumLocked =
+    premiumKnownFromUsage && !isPremiumTierEntitled(usage?.entitlements.allowed_model_tiers);
+
+  useLayoutEffect(() => {
+    if (!activeSessionId || !workspace?.root) return;
+    if (!usage || usageEndpointDisabled) return;
+    if (!isPremiumTierEntitled(usage.entitlements.allowed_model_tiers) && currentModelTier === "premium") {
+      setModelTier(activeSessionId, "auto");
+    }
+  }, [
+    activeSessionId,
+    workspace?.root,
+    usage,
+    usageEndpointDisabled,
+    currentModelTier,
+    setModelTier,
+  ]);
 
   useEffect(() => {
     scrollToBottom();
@@ -530,12 +554,14 @@ export function ChatPanel() {
         finalizeTokenBuffer(sid, assistantId);
         streamInFlightRef.current = false;
         setStreaming(false);
+        if (workspacePath) void refetchUsage();
       }
     },
     [
       activeSessionId,
       streaming,
       workspace?.root,
+      refetchUsage,
       messages,
       addMessage,
       updateMessage,
@@ -1054,8 +1080,9 @@ export function ChatPanel() {
               if (activeSessionId) setModelTier(activeSessionId, tier);
             }}
             disabled={streaming}
+            premiumLocked={premiumLocked}
           />
-          {currentModelTier === "premium" && activeSessionId ? (
+          {currentModelTier === "premium" && activeSessionId && !premiumLocked ? (
             <ChatPremiumModelSelect
               value={currentPremiumModelId}
               onChange={(id) => setPremiumModelId(activeSessionId, id)}
@@ -1063,6 +1090,12 @@ export function ChatPanel() {
             />
           ) : null}
         </div>
+
+        {premiumLocked ? (
+          <p className="text-[10px] text-v-text3 leading-snug">
+            Premium models are not included on this workspace plan. Choose a plan with Premium to unlock.
+          </p>
+        ) : null}
 
         {/* E.25 — pending attachment thumbnails */}
         {pendingAttachments.length > 0 && (
@@ -1134,6 +1167,12 @@ export function ChatPanel() {
             <ChatInput onSend={handleSend} disabled={streaming} />
           </div>
         </div>
+
+        {usage?.usageBilling?.showComposerUsageHint && usage.usageBilling.composerHint ? (
+          <p className="text-[11px] text-amber-400/90 leading-snug pl-0.5">
+            {usage.usageBilling.composerHint}
+          </p>
+        ) : null}
       </div>
     </div>
   );

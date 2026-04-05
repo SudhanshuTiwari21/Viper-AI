@@ -17,9 +17,24 @@ let mainWindow = null;
 /** One-time OAuth-style code from viper://auth/callback?code=… before any window is ready. */
 let pendingAuthCode = null;
 const isDev = process.env.NODE_ENV === "development" || !electron_1.app.isPackaged;
-// Ensure the macOS app name (menu bar, Cmd+Tab, etc.) says "Viper AI" instead of "Electron".
+// Internal app name. In dev, Dock hover uses the launched .app bundle (see patch-electron-macos-branding.cjs:
+// clones to Viper.app + unique CFBundleIdentifier so macOS does not keep showing "Electron").
 if (process.platform === "darwin") {
-    electron_1.app.setName("Viper AI");
+    electron_1.app.setName("Viper");
+}
+function applyMacDockIcon() {
+    if (process.platform !== "darwin" || !electron_1.app.dock)
+        return;
+    const iconPath = path_1.default.join(electron_1.app.getAppPath(), "resources", "icon.png");
+    try {
+        const image = electron_1.nativeImage.createFromPath(iconPath);
+        if (!image.isEmpty()) {
+            electron_1.app.dock.setIcon(image);
+        }
+    }
+    catch {
+        /* missing or unreadable icon */
+    }
 }
 function parseViperAuthCallbackUrl(raw) {
     try {
@@ -71,6 +86,7 @@ function flushPendingAuthCode() {
     broadcastAuthHandoff(code);
 }
 function init() {
+    applyMacDockIcon();
     // Backend services: workspace, files, terminal.
     (0, workspace_service_1.setupWorkspaceService)();
     (0, file_service_1.setupFileService)();
@@ -110,9 +126,9 @@ function init() {
         }
     }
     // macOS application menu – let Electron generate the standard app menu
-    // (it will automatically use app.name, which we've set to "Viper AI").
+    // (it will automatically use app.name, which we've set to "Viper").
     const macAppMenu = process.platform === "darwin" ? { role: "appMenu" } : undefined;
-    // Application menu: VS Code–style, branded for Viper AI
+    // Application menu: VS Code–style, branded for Viper
     const template = [
         // macOS app menu
         ...(macAppMenu ? [macAppMenu] : []),
@@ -295,7 +311,7 @@ function init() {
             label: "Help",
             submenu: [
                 {
-                    label: "Viper AI Documentation",
+                    label: "Viper Documentation",
                     click: () => {
                         if (!mainWindow)
                             return;

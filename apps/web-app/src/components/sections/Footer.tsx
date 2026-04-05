@@ -34,6 +34,7 @@ const footerLinks: FooterSection[] = [
       { title: 'Agents', href: '/agents' },
       { title: 'Changelog', href: '/changelog' },
       { title: 'Pricing', href: '/pricing' },
+      { title: 'Account usage', href: '/account/usage' },
       { title: 'Coming soon', href: '/changelog#whats-next' },
     ],
   },

@@ -10,6 +10,7 @@ import { StatusBar } from "./status-bar";
 import { CommandPalette } from "./command-palette";
 import { QuickOpen } from "./quick-open";
 import { useRegisterDefaultCommands } from "../commands/default-commands";
+import { useWorkspaceContext } from "../contexts/workspace-context";
 
 const MIN_LEFT_SIDEBAR_WIDTH = 200;
 const MAX_LEFT_SIDEBAR_WIDTH = 400;
@@ -22,6 +23,8 @@ const CHAT_COLLAPSE_THRESHOLD = 80;
 
 export function IDEContainer() {
   useRegisterDefaultCommands();
+  const { workspace } = useWorkspaceContext();
+  const hasWorkspace = Boolean(workspace?.root);
   const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(DEFAULT_LEFT_SIDEBAR_WIDTH);
@@ -64,6 +67,7 @@ export function IDEContainer() {
       setLeftSidebarOpen(true);
     };
     const onFocusChat = () => {
+      if (!hasWorkspace) return;
       setChatPanelWidth(chatWidthBeforeCollapse.current);
       setChatPanelVisible(true);
     };
@@ -73,7 +77,7 @@ export function IDEContainer() {
       window.removeEventListener("viper:focus-explorer", onFocusExplorer);
       window.removeEventListener("viper:focus-chat", onFocusChat);
     };
-  }, []);
+  }, [hasWorkspace]);
 
   // Cmd+B / Ctrl+B: toggle left explorer sidebar
   useEffect(() => {
@@ -92,13 +96,14 @@ export function IDEContainer() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l") {
         e.preventDefault();
+        if (!hasWorkspace) return;
         setChatPanelWidth(chatWidthBeforeCollapse.current);
         setChatPanelVisible(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [hasWorkspace]);
 
   // Clicking activity bar icon when sidebar is closed opens it
   const handleViewChange = useCallback((view: SidebarView) => {
@@ -141,11 +146,13 @@ export function IDEContainer() {
     window.addEventListener("mouseup", up);
   }, [chatPanelWidth]);
 
+  const chatShown = hasWorkspace && chatPanelVisible;
+
   useEffect(() => {
-    if (chatPanelVisible && chatPanelWidth !== chatWidthBeforeCollapse.current) {
+    if (chatShown && chatPanelWidth !== chatWidthBeforeCollapse.current) {
       chatWidthBeforeCollapse.current = chatPanelWidth;
     }
-  }, [chatPanelVisible, chatPanelWidth]);
+  }, [chatShown, chatPanelWidth]);
 
   useEffect(() => {
     const onFocusSearch = () => setSidebarView("search");
@@ -206,8 +213,8 @@ export function IDEContainer() {
           <EditorContainer />
         </section>
 
-        {/* Right: Resizable chat panel (collapse only by dragging left); when collapsed, show thin tab to reopen */}
-        {chatPanelVisible ? (
+        {/* Right: Chat only after a folder/workspace is open (no strip / shortcut until then). */}
+        {chatShown ? (
           <>
             <div
               className="flex-shrink-0 w-1 cursor-col-resize hover:bg-[var(--viper-accent)] hover:opacity-30 transition-colors"
@@ -230,7 +237,7 @@ export function IDEContainer() {
               <ChatPanel />
             </aside>
           </>
-        ) : (
+        ) : hasWorkspace ? (
           <button
             type="button"
             className="flex-shrink-0 w-8 flex flex-col items-center justify-center border-l py-4 gap-1 hover:bg-white/5 transition-colors"
@@ -244,7 +251,7 @@ export function IDEContainer() {
             <MessageSquare size={18} className="text-[#9ca3af]" />
             <span className="text-[10px] text-[#6b7280] rotate-90 whitespace-nowrap">Chat</span>
           </button>
-        )}
+        ) : null}
       </div>
 
       <PanelContainer />

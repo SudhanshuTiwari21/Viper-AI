@@ -135,6 +135,39 @@ CREATE TABLE IF NOT EXISTS auth_email_verification_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_auth_email_verify_user ON auth_email_verification_tokens (user_id);
 
+-- Plan catalog (see migrations/018_billing_plans.sql)
+CREATE TABLE IF NOT EXISTS billing_plans (
+  slug                    TEXT PRIMARY KEY,
+  display_name            TEXT        NOT NULL,
+  allowed_modes           JSONB       NULL,
+  allowed_model_tiers     JSONB       NOT NULL DEFAULT '["auto","premium"]'::jsonb,
+  flags                   JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  z_ratio_bp              INT         NULL,
+  auto_budget_share_bp    INT         NULL,
+  premium_budget_share_bp INT         NULL
+);
+
+INSERT INTO billing_plans (slug, display_name, allowed_model_tiers, flags, z_ratio_bp, auto_budget_share_bp, premium_budget_share_bp)
+VALUES
+  ('free', 'Free', '["auto"]'::jsonb,
+   jsonb_build_object('monthly_request_quota', 5, 'usage_warning_threshold_ratio', 0.4),
+   NULL, NULL, NULL),
+  ('pro_20', 'Pro ($20)', '["auto","premium"]'::jsonb,
+   jsonb_build_object(
+     'included_auto_usage_credits_monthly', 80000,
+     'included_premium_usage_credits_monthly', 24000,
+     'quota_soft_threshold_ratio', 0.8,
+     'usage_warning_threshold_ratio', 0.4
+   ), 4000, 7500, 2500),
+  ('plus_40', 'Plus ($40)', '["auto","premium"]'::jsonb,
+   jsonb_build_object(
+     'included_auto_usage_credits_monthly', 160000,
+     'included_premium_usage_credits_monthly', 48000,
+     'quota_soft_threshold_ratio', 0.8,
+     'usage_warning_threshold_ratio', 0.4
+   ), 4000, 7500, 2500)
+ON CONFLICT (slug) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS workspaces (
   id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   name                   TEXT        NOT NULL,
@@ -144,6 +177,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
   -- F.34: Stripe billing linkage (nullable until linked)
   stripe_customer_id     TEXT        UNIQUE NULL,
   stripe_subscription_id TEXT        UNIQUE NULL,
+  billing_plan_slug      TEXT        NOT NULL DEFAULT 'free' REFERENCES billing_plans (slug),
   created_by_user_id UUID           REFERENCES users(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -35,19 +35,19 @@ export function EditorWelcome() {
   };
 
   const handleAskViper = () => {
-    window.dispatchEvent(new CustomEvent("viper:focus-chat"));
+    selectWorkspace().catch(console.error);
   };
 
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-[var(--viper-space-3)]">
       <h2 className="text-xl font-semibold text-[#e5e7eb] mb-2">Welcome to Viper AI</h2>
       <p className="text-sm text-[#9ca3af] mb-[var(--viper-space-3)] max-w-sm">
-        Open a file, search your codebase, or ask AI about the project.
+        Open a folder to use Chat and AI; search and files need a workspace too.
       </p>
       <div className="flex flex-wrap justify-center gap-[var(--viper-space-2)]">
         <WelcomeButton label="Open File" onClick={handleOpenFile} />
         <WelcomeButton label="Search Files" onClick={handleSearchFiles} />
-        <WelcomeButton label="Ask Viper AI" onClick={handleAskViper} />
+        <WelcomeButton label="Open Folder for Chat" onClick={handleAskViper} />
       </div>
     </div>
   );

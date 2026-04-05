@@ -37,7 +37,7 @@
 | `VIPER_STRIPE_WEBHOOK_ENABLED` | F.34: `1` or `true` required for `POST /webhooks/stripe` to do anything. When off (default), the endpoint returns **404** — the route appears to not exist to external scanners. | No | off |
 | `STRIPE_WEBHOOK_SECRET` | F.34: Stripe webhook signing secret (starts with `whsec_`). Required when `VIPER_STRIPE_WEBHOOK_ENABLED=1`. Never logged — only referenced during HMAC verification. Alias: `VIPER_STRIPE_WEBHOOK_SECRET`. | Yes (when enabled) | unset |
 | `VIPER_STRIPE_WEBHOOK_SECRET` | F.34: Fallback alias for `STRIPE_WEBHOOK_SECRET`. `STRIPE_WEBHOOK_SECRET` is preferred. | Yes (when enabled) | unset |
-| `VIPER_STRIPE_PRICE_ENTITLEMENTS` | F.34: JSON object mapping **Stripe Price ID → entitlement config** `{ allowed_modes?, allowed_model_tiers?, flags? }`. Example: `{"price_pro":{"allowed_model_tiers":["standard","premium"],"flags":{"monthly_request_quota":1000}}}`. If unset or empty, all price IDs are treated as `ignored` (events are accepted but no entitlements change). | No | unset |
+| `VIPER_STRIPE_PRICE_ENTITLEMENTS` | F.34 + Phase 6: JSON map **Stripe Price ID → config** `{ allowed_modes?, allowed_model_tiers?, flags?, billing_plan_slug? }`. **`billing_plan_slug`** must match a row in `billing_plans` (e.g. `free`, `pro_20`, `plus_40`); on `customer.subscription.updated` / Checkout with expanded `line_items`, the webhook sets `workspaces.billing_plan_slug` and Stripe customer/subscription ids. Example: `{"price_abc":{"billing_plan_slug":"pro_20","allowed_model_tiers":["auto","premium"],"flags":{}}}`. Updates apply only when subscription `status` is `active`, `trialing`, or `past_due`. `customer.subscription.deleted` resets the workspace to `billing_plan_slug = free`, clears `stripe_subscription_id`, and removes the `workspace_entitlements` row. | No | unset |
 | `VIPER_USAGE_UI_ENABLED` | F.35: `1` or `true` enables `POST /usage/summary` endpoint. When off (default), the endpoint returns **404** — hidden from scanners, same pattern as F.34. When on, the endpoint returns month-to-date usage, quota limit, and entitlement snapshot for the supplied `workspacePath`. | No | off |
 | `VIPER_INLINE_COMPLETION_ENABLED` | G.36: `1` or `true` enables `POST /editor/inline-complete` endpoint. When off (default), returns **404**. Controls server-side execution; the desktop also gates on `VITE_INLINE_COMPLETION_ENABLED` at build time. | No | off |
 | `VIPER_INLINE_COMPLETION_MODEL` | G.36: OpenAI model used for inline completions. Defaults to `gpt-4o-mini` (fast, low latency). Override with any chat-completion capable model. | No | `gpt-4o-mini` |
@@ -49,6 +49,15 @@
 | `VIPER_TEST_ASSISTANT_ENABLED` | G.39: `1` or `true` enables `POST /testing/suggest-commands` and `POST /testing/triage-failure` endpoints. When off (default), returns **404** (hidden endpoint). | No | off |
 | `VIPER_TEST_ASSISTANT_MODEL` | G.39: OpenAI model for test command suggestion and failure triage. Defaults to `gpt-4o-mini`. | No | `gpt-4o-mini` |
 | Redis URL      | Not read from env. Pass `options.redisUrl` into `runRepoScanner()` or into `RedisQueueService` in your orchestrator. | No | — |
+
+### LLM providers (`@repo/model-registry` + backend orchestrator)
+
+| Variable | Description | Required | Default |
+|---|---|---|-----|
+| `OPENAI_API_KEY` | OpenAI API key for chat, embeddings, and tool-calling loops. | Yes (for OpenAI-backed chat) | unset |
+| `OPENAI_MODEL` | Pinned **model id** for `VIPER_MODEL_ROUTE_DEFAULT=pinned` auto tier (see `workflow-flags.ts`). Use OpenAI ids from `@repo/model-registry` (e.g. `gpt-4o-mini`, `gpt-4o`). Claude ids in the registry are ignored for pinned resolution until the Anthropic adapter lands — they fall back to the fast OpenAI default. | No | `gpt-4o-mini` |
+| `ANTHROPIC_API_KEY` | Reserved for upcoming Anthropic Messages API support in the agentic loop. | No | unset |
+| `VIPER_ANTHROPIC_CHAT_ENABLED` | Reserved kill-switch for that adapter (`1` / `true` when implemented). | No | off |
 
 ### G.40 Privacy boundary configuration
 
@@ -81,7 +90,10 @@ These JSONB keys are stored per-workspace in the `workspace_entitlements` table 
 | Flag key | Type | Description |
 |---|---|---|
 | `monthly_request_quota` | `number` | Max completed chat requests per UTC calendar month. 0 or absent = unlimited (falls through to env default). |
+| `included_auto_usage_credits_monthly` | `number` | Credit cap for Auto bucket (see F.33 credit mode). |
+| `included_premium_usage_credits_monthly` | `number` | Credit cap for Premium bucket. |
 | `quota_soft_threshold_ratio` | `number` (0, 1] | Fraction of limit at which `workflowLog("quota:check", ..., { status: "soft_warning" })` fires. Default `0.8`. |
+| `usage_warning_threshold_ratio` | `number` (0, 1] | When used ≥ this fraction of included allowance, `POST /usage/summary` sets `usageBilling.showComposerUsageHint` and `composerHint` for in-app messaging. Default `0.4` (40%). Also set on `billing_plans.flags` in Neon. |
 
 ### H.44 Router policy shadow traffic + staged rollout
 

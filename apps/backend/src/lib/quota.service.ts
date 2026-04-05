@@ -15,15 +15,16 @@
  *   included_auto_usage_credits_monthly — positive number; omit/null = unlimited Auto credits
  *   included_premium_usage_credits_monthly — positive number; omit/null = unlimited Premium credits
  *   quota_soft_threshold_ratio — soft warn threshold (default 0.8)
+ *   usage_warning_threshold_ratio — UI hint when included usage ≥ this fraction (default 0.4)
  */
 
 import {
   getPool,
-  getWorkspaceEntitlements,
   getWorkspaceByPathKey,
   listRollupsForWorkspace,
   countUsageEventsForDay,
   sumCostUnitsForWorkspaceMonth,
+  loadComposedWorkspaceEntitlements,
 } from "@repo/database";
 import type { UsageBillingBucket } from "@repo/database";
 import type { ResolvedEntitlements } from "./entitlements.service.js";
@@ -55,6 +56,8 @@ function parsePositiveBigIntFlag(flags: Record<string, unknown>, key: string): b
 export interface QuotaConfig {
   monthlyRequestQuota: bigint | null;
   softThresholdRatio: number;
+  /** When used/limit ≥ this ratio, clients may show a composer hint (e.g. 0.4 → 40%). */
+  usageWarningThresholdRatio: number;
   /** Credit limits; null = unlimited for that bucket. */
   includedAutoCredits: bigint | null;
   includedPremiumCredits: bigint | null;
@@ -83,9 +86,16 @@ export function parseQuotaConfig(flags: Record<string, unknown>): QuotaConfig {
     "included_premium_usage_credits_monthly",
   );
 
+  const warnFlag = flags["usage_warning_threshold_ratio"];
+  let usageWarningThresholdRatio = 0.4;
+  if (typeof warnFlag === "number" && Number.isFinite(warnFlag) && warnFlag > 0 && warnFlag <= 1) {
+    usageWarningThresholdRatio = warnFlag;
+  }
+
   return {
     monthlyRequestQuota,
     softThresholdRatio,
+    usageWarningThresholdRatio,
     includedAutoCredits,
     includedPremiumCredits,
   };
@@ -180,8 +190,8 @@ async function resolveFlagsForQuota(
       const pool = getPool();
       const workspace = await getWorkspaceByPathKey(pool, pathKey);
       if (workspace) {
-        const entRow = await getWorkspaceEntitlements(pool, workspace.id);
-        if (entRow) return entRow.flags;
+        const composed = await loadComposedWorkspaceEntitlements(pool, workspace);
+        return composed.flags;
       }
     } catch {
       return {};

@@ -13,10 +13,10 @@
  *   When off, resolveWorkspaceContext() returns null and all assert* helpers
  *   are no-ops → existing behavior is byte-for-byte unchanged.
  *
- * Composition rule (D.20 ∩ DB):
- *   effective_modes  = DB.allowed_modes  ?? ALL_MODES  ∩ always-allowed-by-env (env has no mode gate today)
- *   effective_tiers  = intersection(DB.allowed_model_tiers ?? ALL_TIERS, D.20 entitledModelTiers)
- *   When no DB row exists for the workspace, treat as "allow-all" (safe default).
+ * Composition rule (D.20 ∩ DB ∩ billing_plans):
+ *   Base row = merge(billing_plans[workspace.billing_plan_slug], workspace_entitlements?)
+ *   effective_modes / tiers from that row, then intersect tiers with D.20 env caps.
+ *   When workspace_entitlements is missing, billing_plans still apply (not unbounded allow-all).
  *
  * Error codes:
  *   401  — no/invalid bearer token (when enforcement is on)
@@ -31,9 +31,7 @@ import {
 import {
   getWorkspaceByPathKey,
   upsertWorkspaceByPathKey,
-} from "@repo/database";
-import {
-  getWorkspaceEntitlements,
+  loadComposedWorkspaceEntitlements,
 } from "@repo/database";
 import {
   getMembership,
@@ -208,21 +206,21 @@ export async function resolveWorkspaceContext(
   }
 
   // ---------------------------------------------------------------------------
-  // 3. Load DB plan (null row = allow-all)
+  // 3. billing_plans ∪ workspace_entitlements → effective entitlement row
   // ---------------------------------------------------------------------------
-  const planRow = await getWorkspaceEntitlements(pool, workspace.id);
+  const composed = await loadComposedWorkspaceEntitlements(pool, workspace);
 
   // ---------------------------------------------------------------------------
-  // 4. Merge DB ∩ D.20 env caps
+  // 4. Merge composed row ∩ D.20 env caps
   // ---------------------------------------------------------------------------
-  const { allowedModes, allowedModelTiers } = mergeEntitlements(planRow, config);
+  const { allowedModes, allowedModelTiers } = mergeEntitlements(composed, config);
 
   return {
     workspaceId: workspace.id,
     pathKey,
     allowedModes,
     allowedModelTiers,
-    flags: planRow?.flags ?? {},
+    flags: composed.flags,
     userId,
   };
 }
@@ -238,7 +236,8 @@ export async function resolveWorkspaceContext(
  *   - modes: DB.allowed_modes ?? ALL_MODES  (env has no mode gate today)
  *   - tiers: DB.allowed_model_tiers ?? ALL_TIERS  ∩  config.entitledModelTiers
  *
- * When planRow is null (no DB row), both sets fall back to ALL_*.
+ * When planRow is null (legacy callers only), both sets fall back to ALL_*.
+ * Normal path passes a composed row from billing_plans + optional workspace_entitlements.
  * D.20 env caps are always applied on top regardless.
  */
 export function mergeEntitlements(
@@ -300,8 +299,11 @@ export function assertModelTierAllowed(
 ): void {
   if (!resolved) return;
   if (!resolved.allowedModelTiers.has(tier)) {
+    const allowed = [...resolved.allowedModelTiers].join(", ");
+    const upgradeHint =
+      tier === "premium" ? " Premium models require a paid plan that includes Premium." : "";
     throw new EntitlementError(
-      `Model tier "${tier}" is not permitted for this workspace. Allowed: ${[...resolved.allowedModelTiers].join(", ")}`,
+      `Model tier "${tier}" is not permitted for this workspace. Allowed: ${allowed}.${upgradeHint}`,
       403,
     );
   }

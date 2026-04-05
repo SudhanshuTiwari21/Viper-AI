@@ -32,13 +32,35 @@ const {
   mockCountToday: vi.fn().mockResolvedValue("0"),
 }));
 
-vi.mock("@repo/database", () => ({
-  getPool: mockGetPool,
-  getWorkspaceByPathKey: mockGetWorkspaceByPathKey,
-  getWorkspaceEntitlements: mockGetWorkspaceEntitlements,
-  listRollupsForWorkspace: mockListRollups,
-  countUsageEventsForDay: mockCountToday,
-}));
+vi.mock("@repo/database", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@repo/database")>();
+  const { mergeBillingPlanWithWorkspaceEntitlements } = actual;
+  const emptyPlan = {
+    slug: "free",
+    display_name: "Free",
+    allowed_modes: null as string[] | null,
+    allowed_model_tiers: ["auto"] as string[],
+    flags: {} as Record<string, unknown>,
+    z_ratio_bp: null as number | null,
+    auto_budget_share_bp: null as number | null,
+    premium_budget_share_bp: null as number | null,
+  };
+  return {
+    ...actual,
+    getPool: mockGetPool,
+    getWorkspaceByPathKey: mockGetWorkspaceByPathKey,
+    getWorkspaceEntitlements: mockGetWorkspaceEntitlements,
+    loadComposedWorkspaceEntitlements: vi.fn(async (_pool: unknown, workspace: { id: string }) => {
+      const entRow = await mockGetWorkspaceEntitlements(
+        _pool as import("pg").Pool,
+        workspace.id,
+      );
+      return mergeBillingPlanWithWorkspaceEntitlements(workspace.id, emptyPlan, entRow);
+    }),
+    listRollupsForWorkspace: mockListRollups,
+    countUsageEventsForDay: mockCountToday,
+  };
+});
 
 // Mock entitlements middleware to no-op (enforcement off in tests)
 vi.mock("../middleware/entitlements.middleware.js", () => ({
@@ -128,10 +150,12 @@ describe("POST /usage/summary — kill-switch on, no DATABASE_URL", () => {
       usedRequests: string;
       limit: string | null;
       remaining: string | null;
+      usageBilling: { showComposerUsageHint: boolean };
     };
     expect(body.usedRequests).toBe("0");
     expect(body.limit).toBeNull();
     expect(body.remaining).toBeNull();
+    expect(body.usageBilling.showComposerUsageHint).toBe(false);
   });
 });
 
@@ -231,6 +255,11 @@ describe("POST /usage/summary — kill-switch on, mocked DB", () => {
     expect(body.entitlements.allowed_modes).toEqual(["ask", "plan"]);
     expect(body.stripe?.customerId).toBe("cus_test");
     expect(body.stripe?.subscriptionId).toBe("sub_test");
+    expect(body.usageBilling.usageWarningThresholdRatio).toBe(0.4);
+    expect(body.usageBilling.buckets.auto.meter).toBe("requests");
+    expect(body.usageBilling.buckets.auto.percentUsed).toBe(30);
+    expect(body.usageBilling.showComposerUsageHint).toBe(false);
+    expect(body.usageBilling.buckets.premium.meter).toBe("not_applicable");
   });
 
   it("remaining is '0' when used exceeds limit", async () => {
@@ -248,8 +277,10 @@ describe("POST /usage/summary — kill-switch on, mocked DB", () => {
       workspacePath: WORKSPACE_PATH,
       todayUtc: "2026-04-15",
     });
-    const body = JSON.parse(res.body) as { remaining: string };
+    const body = JSON.parse(res.body) as { remaining: string; usageBilling: { showComposerUsageHint: boolean; composerHint: string | null } };
     expect(body.remaining).toBe("0");
+    expect(body.usageBilling.showComposerUsageHint).toBe(true);
+    expect(body.usageBilling.composerHint).toMatch(/Auto:/i);
   });
 
   it("stripe is null when no customer linked", async () => {

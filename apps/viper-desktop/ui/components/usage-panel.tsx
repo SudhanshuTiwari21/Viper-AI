@@ -27,6 +27,7 @@ import {
 import {
   fetchUsageSummary,
   type UsageSummaryResponse,
+  type UsageBucketMeterSnapshot,
 } from "../services/agent-api.js";
 
 interface UsagePanelProps {
@@ -52,8 +53,27 @@ function percentage(used: string, limit: string): number {
 
 function usageBarColor(pct: number): string {
   if (pct >= 100) return "#ef4444"; // red
-  if (pct >= 80) return "#f59e0b";  // amber
-  return "var(--viper-accent)";      // green
+  if (pct >= 80) return "#f59e0b"; // amber
+  return "var(--viper-accent)"; // green
+}
+
+function bucketMeterBarColor(bucket: UsageBucketMeterSnapshot): string {
+  if (bucket.exhausted) return "#ef4444";
+  if (bucket.showWarning) return "#f59e0b";
+  return "var(--viper-accent)";
+}
+
+function bucketMeterLabel(meter: UsageBucketMeterSnapshot["meter"]): string {
+  switch (meter) {
+    case "credits":
+      return "credits";
+    case "requests":
+      return "requests";
+    case "unlimited":
+      return "unlimited";
+    default:
+      return "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +250,26 @@ export function UsagePanel({ workspacePath }: UsagePanelProps) {
           )}
         </div>
 
+        {/* Phase 3 — Auto / Premium included allowance (when API provides usageBilling) */}
+        {data.usageBilling ? (
+          <>
+            <div className="border-t" style={{ borderColor: "var(--viper-border)" }} />
+            <div className="flex flex-col gap-2">
+              <span className="text-[10px] font-medium text-[#9ca3af] uppercase tracking-wider">
+                Included allowance
+              </span>
+              <BucketMeterBlock
+                title="Auto"
+                bucket={data.usageBilling.buckets.auto}
+              />
+              <BucketMeterBlock
+                title="Premium"
+                bucket={data.usageBilling.buckets.premium}
+              />
+            </div>
+          </>
+        ) : null}
+
         {/* Divider */}
         <div className="border-t" style={{ borderColor: "var(--viper-border)" }} />
 
@@ -258,6 +298,65 @@ export function UsagePanel({ workspacePath }: UsagePanelProps) {
 // ---------------------------------------------------------------------------
 // Small helper row
 // ---------------------------------------------------------------------------
+
+function BucketMeterBlock({
+  title,
+  bucket,
+}: {
+  title: string;
+  bucket: UsageBucketMeterSnapshot;
+}) {
+  if (bucket.meter === "not_applicable") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[10px] text-[#6b7280]">{title}</span>
+        <span className="text-[10px] text-[#9ca3af]">Not applicable</span>
+      </div>
+    );
+  }
+
+  const unit = bucketMeterLabel(bucket.meter);
+  const showBar = bucket.meter !== "unlimited" && bucket.limit !== null;
+  const pct = showBar ? Math.min(100, bucket.percentUsed) : null;
+  const barColor = bucketMeterBarColor(bucket);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-end justify-between gap-2">
+        <span className="text-[11px] font-semibold text-[#e5e7eb]">
+          {title}
+          <span className="text-[10px] font-normal text-[#6b7280] ml-1">{unit}</span>
+        </span>
+        {bucket.meter === "unlimited" ? (
+          <span className="flex items-center gap-1 text-[10px] text-[#6b7280]">
+            <InfinityIcon size={11} />
+            unlimited
+          </span>
+        ) : bucket.limit ? (
+          <span className="text-[10px] text-[#9ca3af] shrink-0">
+            {formatNumber(bucket.used)} / {formatNumber(bucket.limit)}
+          </span>
+        ) : null}
+      </div>
+      {showBar && pct !== null ? (
+        <div
+          className="w-full h-1 rounded-full overflow-hidden"
+          style={{ background: "rgba(255,255,255,0.06)" }}
+        >
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${pct}%`, background: barColor }}
+          />
+        </div>
+      ) : null}
+      {bucket.remaining !== null && bucket.meter !== "unlimited" ? (
+        <p className="text-[10px] text-[#6b7280]">
+          {formatNumber(bucket.remaining)} remaining
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function EntitlementRow({
   label,

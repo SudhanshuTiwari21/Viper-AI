@@ -45,6 +45,31 @@ const REGISTRY: Record<ModelId, ModelSpec> = {
     selectableInPremiumUi: true,
     usageCreditWeightPer1k: 10,
   },
+  /** Anthropic — metadata + metering; chat path still OpenAI-shaped until adapter ships. */
+  [asModelId("claude-3-5-haiku-20241022")]: {
+    id: asModelId("claude-3-5-haiku-20241022"),
+    provider: "anthropic",
+    displayName: "Claude 3.5 Haiku",
+    tier: "fast",
+    capabilities: { tools: true, vision: true, json: true },
+    limits: { maxOutputTokens: 4096, maxToolCalls: 15, timeoutMs: 300_000 },
+    priceClass: "low",
+    latencyClass: "fast",
+    usageCreditWeightPer1k: 2,
+  },
+  [asModelId("claude-3-5-sonnet-20241022")]: {
+    id: asModelId("claude-3-5-sonnet-20241022"),
+    provider: "anthropic",
+    displayName: "Claude 3.5 Sonnet",
+    tier: "premium",
+    capabilities: { tools: true, vision: true, json: true },
+    limits: { maxOutputTokens: 4096, maxToolCalls: 15, timeoutMs: 300_000 },
+    priceClass: "high",
+    latencyClass: "medium",
+    /** Off until `VIPER_ANTHROPIC_CHAT_ENABLED` + Messages API wiring lands in the backend. */
+    selectableInPremiumUi: false,
+    usageCreditWeightPer1k: 12,
+  },
 } as const;
 
 const DEFAULTS: Record<ModelTier, ModelId> = {

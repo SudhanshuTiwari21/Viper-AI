@@ -23,11 +23,15 @@ const {
   mockInsertWebhookEvent,
   mockUpsertEntitlements,
   mockDeleteEntitlements,
+  mockSetWorkspaceStripeBilling,
+  mockClearWorkspacePaidSubscription,
   mockGetPool,
 } = vi.hoisted(() => ({
   mockInsertWebhookEvent: vi.fn(),
   mockUpsertEntitlements: vi.fn(),
   mockDeleteEntitlements: vi.fn(),
+  mockSetWorkspaceStripeBilling: vi.fn(),
+  mockClearWorkspacePaidSubscription: vi.fn(),
   mockGetPool: vi.fn().mockReturnValue({
     query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
   }),
@@ -38,6 +42,8 @@ vi.mock("@repo/database", () => ({
   insertWebhookEventIfNew: mockInsertWebhookEvent,
   upsertWorkspaceEntitlements: mockUpsertEntitlements,
   deleteWorkspaceEntitlements: mockDeleteEntitlements,
+  setWorkspaceStripeBilling: mockSetWorkspaceStripeBilling,
+  clearWorkspacePaidSubscription: mockClearWorkspacePaidSubscription,
 }));
 
 const { mockWorkflowLog } = vi.hoisted(() => ({ mockWorkflowLog: vi.fn() }));
@@ -71,6 +77,7 @@ function makeSubscriptionEvent(
   type: string,
   workspaceId: string | null,
   priceId = "price_abc",
+  opts?: { status?: string; customer?: string | null },
 ): object {
   return {
     id: `evt_${Math.random().toString(36).slice(2)}`,
@@ -79,6 +86,8 @@ function makeSubscriptionEvent(
       object: {
         id: "sub_test",
         object: "subscription",
+        status: opts?.status ?? "active",
+        customer: opts?.customer === null ? null : (opts?.customer ?? "cus_test"),
         metadata: workspaceId ? { workspace_id: workspaceId } : {},
         items: {
           data: [
@@ -177,10 +186,15 @@ describe("loadPlanEntitlements", () => {
 
   it("parses valid JSON map", () => {
     process.env.VIPER_STRIPE_PRICE_ENTITLEMENTS = JSON.stringify({
-      price_pro: { allowed_model_tiers: ["standard", "premium"], flags: { monthly_request_quota: 1000 } },
+      price_pro: {
+        billing_plan_slug: "pro_20",
+        allowed_model_tiers: ["standard", "premium"],
+        flags: { monthly_request_quota: 1000 },
+      },
     });
     const map = loadPlanEntitlements();
     expect(map["price_pro"]).toBeDefined();
+    expect(map["price_pro"]!.billing_plan_slug).toBe("pro_20");
     expect(map["price_pro"]!.flags?.["monthly_request_quota"]).toBe(1000);
   });
 
@@ -233,6 +247,8 @@ describe("processStripeWebhook", () => {
     mockInsertWebhookEvent.mockResolvedValue({ stripe_event_id: "evt_1" });
     mockUpsertEntitlements.mockResolvedValue({});
     mockDeleteEntitlements.mockResolvedValue(true);
+    mockSetWorkspaceStripeBilling.mockResolvedValue(undefined);
+    mockClearWorkspacePaidSubscription.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -266,6 +282,49 @@ describe("processStripeWebhook", () => {
       expect.anything(),
       expect.objectContaining({ workspace_id: "ws-uuid-abc" }),
     );
+    expect(mockSetWorkspaceStripeBilling).toHaveBeenCalledWith(
+      expect.anything(),
+      "ws-uuid-abc",
+      expect.objectContaining({
+        stripe_customer_id: "cus_test",
+        stripe_subscription_id: "sub_test",
+      }),
+    );
+  });
+
+  it("subscription.updated sets billing_plan_slug when mapped on price", async () => {
+    process.env.VIPER_STRIPE_PRICE_ENTITLEMENTS = JSON.stringify({
+      price_abc: {
+        billing_plan_slug: "pro_20",
+        allowed_model_tiers: ["auto", "premium"],
+        flags: {},
+      },
+    });
+    const event = makeSubscriptionEvent("customer.subscription.updated", "ws-uuid-abc", "price_abc");
+    const result = await processStripeWebhook(event as never);
+    expect(result.status).toBe("applied");
+    expect(mockSetWorkspaceStripeBilling).toHaveBeenCalledWith(
+      expect.anything(),
+      "ws-uuid-abc",
+      expect.objectContaining({
+        billing_plan_slug: "pro_20",
+        stripe_customer_id: "cus_test",
+        stripe_subscription_id: "sub_test",
+      }),
+    );
+  });
+
+  it("ignores subscription.updated when status is not billable", async () => {
+    process.env.VIPER_STRIPE_PRICE_ENTITLEMENTS = JSON.stringify({
+      price_abc: { flags: {} },
+    });
+    const event = makeSubscriptionEvent("customer.subscription.updated", "ws-uuid-abc", "price_abc", {
+      status: "canceled",
+    });
+    const result = await processStripeWebhook(event as never);
+    expect(result.status).toBe("ignored");
+    expect(mockUpsertEntitlements).not.toHaveBeenCalled();
+    expect(mockSetWorkspaceStripeBilling).not.toHaveBeenCalled();
   });
 
   it("ignores subscription.updated when price not in plan map", async () => {
@@ -280,6 +339,7 @@ describe("processStripeWebhook", () => {
     const event = makeSubscriptionEvent("customer.subscription.deleted", "ws-uuid-abc");
     const result = await processStripeWebhook(event as never);
     expect(result.status).toBe("applied");
+    expect(mockClearWorkspacePaidSubscription).toHaveBeenCalledWith(expect.anything(), "ws-uuid-abc");
     expect(mockDeleteEntitlements).toHaveBeenCalledWith(expect.anything(), "ws-uuid-abc");
   });
 

@@ -18,6 +18,8 @@ export interface WorkspaceRow {
   stripe_customer_id: string | null;
   /** F.34: current Stripe Subscription ID. */
   stripe_subscription_id: string | null;
+  /** Default entitlements + quota template; overridable via workspace_entitlements. */
+  billing_plan_slug?: string;
   created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
@@ -112,9 +114,60 @@ export interface UpdateWorkspaceParams {
   path_key?: string | null;
   stripe_customer_id?: string | null;
   stripe_subscription_id?: string | null;
+  billing_plan_slug?: string;
 }
 
 /** Update workspace name or slug. Returns updated row, or null if id not found. */
+/**
+ * Phase 6 — after a paid Stripe subscription is confirmed (webhook).
+ * Updates customer + subscription ids; optionally sets `billing_plan_slug` (must exist in `billing_plans`).
+ */
+export async function setWorkspaceStripeBilling(
+  pool: Pool,
+  workspaceId: string,
+  params: {
+    stripe_customer_id: string;
+    stripe_subscription_id: string;
+    billing_plan_slug?: string;
+  },
+): Promise<void> {
+  if (params.billing_plan_slug !== undefined) {
+    await pool.query(
+      `UPDATE workspaces
+       SET stripe_customer_id     = $2,
+           stripe_subscription_id = $3,
+           billing_plan_slug      = $4,
+           updated_at             = now()
+       WHERE id = $1`,
+      [workspaceId, params.stripe_customer_id, params.stripe_subscription_id, params.billing_plan_slug],
+    );
+  } else {
+    await pool.query(
+      `UPDATE workspaces
+       SET stripe_customer_id     = $2,
+           stripe_subscription_id = $3,
+           updated_at             = now()
+       WHERE id = $1`,
+      [workspaceId, params.stripe_customer_id, params.stripe_subscription_id],
+    );
+  }
+}
+
+/**
+ * Phase 6 — subscription ended: drop subscription id, reset plan to `free`.
+ * Keeps `stripe_customer_id` for re-checkout. Pair with `deleteWorkspaceEntitlements`.
+ */
+export async function clearWorkspacePaidSubscription(pool: Pool, workspaceId: string): Promise<void> {
+  await pool.query(
+    `UPDATE workspaces
+     SET stripe_subscription_id = NULL,
+         billing_plan_slug      = 'free',
+         updated_at             = now()
+     WHERE id = $1`,
+    [workspaceId],
+  );
+}
+
 export async function updateWorkspace(
   pool: Pool,
   id: string,
@@ -127,11 +180,19 @@ export async function updateWorkspace(
          path_key               = COALESCE($4, path_key),
          stripe_customer_id     = COALESCE($5, stripe_customer_id),
          stripe_subscription_id = COALESCE($6, stripe_subscription_id),
+         billing_plan_slug      = COALESCE($7, billing_plan_slug),
          updated_at             = now()
      WHERE id = $1
      RETURNING *`,
-    [id, params.name ?? null, params.slug ?? null, params.path_key ?? null,
-     params.stripe_customer_id ?? null, params.stripe_subscription_id ?? null],
+    [
+      id,
+      params.name ?? null,
+      params.slug ?? null,
+      params.path_key ?? null,
+      params.stripe_customer_id ?? null,
+      params.stripe_subscription_id ?? null,
+      params.billing_plan_slug ?? null,
+    ],
   );
   return result.rows[0] ?? null;
 }

@@ -1,5 +1,10 @@
 import type { ModelSpec, ModelTier } from "@repo/model-registry";
 import { getDefaultModelForTier } from "@repo/model-registry";
+
+/** Failover must stay on the same provider — OpenAI client cannot call Anthropic model ids (and vice versa). */
+function sameProvider(a: ModelSpec, b: ModelSpec): boolean {
+  return a.provider === b.provider;
+}
 import type { ChatMode } from "../validators/request.schemas.js";
 
 // ---------------------------------------------------------------------------
@@ -248,6 +253,7 @@ export function buildFallbackChainForAuto(
   const otherTier: ModelTier = selected.tier === "premium" ? "fast" : "premium";
   const alt = getDefaultModelForTier(otherTier);
   if (alt.id === selected.id) return [];
+  if (!sameProvider(selected, alt)) return [];
 
   return [{ ...alt }].slice(0, cap);
 }

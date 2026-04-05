@@ -1,4 +1,4 @@
-export type ModelProvider = "openai";
+export type ModelProvider = "openai" | "anthropic";
 
 export type ModelTier = "auto" | "premium" | "fast";
 

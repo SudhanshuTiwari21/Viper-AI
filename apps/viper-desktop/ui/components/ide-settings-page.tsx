@@ -7,6 +7,7 @@ import type { LucideIcon } from "lucide-react";
 import { emailToInitials, useAuth } from "../contexts/auth-context";
 import { getWebAppLoginUrl, getWebAppSignupUrl } from "../lib/web-app-auth-url";
 import { useAppRoute } from "../contexts/app-route-context";
+import { useWorkspaceContext } from "../contexts/workspace-context";
 import {
   Sparkles,
   LayoutGrid,
@@ -109,9 +110,9 @@ const ALL_SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: "chat",
-    action: "Focus chat panel",
+    action: "Focus chat panel (after opening a folder)",
     keys: "⌘L · Ctrl+L",
-    keywords: "assistant copilot",
+    keywords: "assistant copilot workspace",
   },
   {
     id: "save",
@@ -195,16 +196,26 @@ function GhostButton({
   children,
   onClick,
   icon: Icon,
+  disabled,
+  title,
 }: {
   children: ReactNode;
   onClick: () => void;
   icon?: LucideIcon;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
+      title={title}
+      disabled={disabled}
       onClick={onClick}
-      className="inline-flex items-center gap-2 text-[12px] font-medium rounded-md px-2.5 py-1.5 transition-colors border border-[var(--viper-border)] bg-white/[0.03] text-[#e5e7eb] hover:bg-white/[0.07] hover:border-[var(--viper-accent)]"
+      className={`inline-flex items-center gap-2 text-[12px] font-medium rounded-md px-2.5 py-1.5 transition-colors border border-[var(--viper-border)] bg-white/[0.03] text-[#e5e7eb] ${
+        disabled
+          ? "opacity-45 cursor-not-allowed"
+          : "hover:bg-white/[0.07] hover:border-[var(--viper-accent)]"
+      }`}
     >
       {Icon ? <Icon size={14} className="text-[var(--viper-accent)] flex-shrink-0" /> : null}
       {children}
@@ -409,6 +420,8 @@ function EditorSection() {
 }
 
 function ChatSection() {
+  const { workspace } = useWorkspaceContext();
+  const hasWorkspace = Boolean(workspace?.root);
   return (
     <Panel
       title="Chat & model tier"
@@ -418,9 +431,18 @@ function ChatSection() {
         Switch <strong className="text-[#d1d5db] font-medium">Ask / Plan / Agent</strong> modes and choose{" "}
         <strong className="text-[#d1d5db] font-medium">Auto vs Premium</strong> (and premium model) from
         the chat header controls. Those values apply per session and are sent with each request.
+        {!hasWorkspace ? (
+          <>
+            {" "}
+            <span className="text-[#d1d5db]">Open a folder first</span> — Chat is unavailable until a
+            workspace is loaded.
+          </>
+        ) : null}
       </p>
       <GhostButton
         icon={MessageSquare}
+        disabled={!hasWorkspace}
+        title={hasWorkspace ? undefined : "Open a folder first to use Chat"}
         onClick={() => window.dispatchEvent(new CustomEvent("viper:focus-chat"))}
       >
         Focus chat panel

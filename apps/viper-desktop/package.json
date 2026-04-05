@@ -2,14 +2,15 @@
   "name": "viper-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Viper AI desktop IDE (Electron + Vite)",
+  "description": "Viper desktop IDE (Electron + Vite)",
   "author": "Viper AI",
   "main": "dist-electron/electron/main.js",
   "scripts": {
-    "dev": "npm run build:electron && concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "postinstall": "node scripts/patch-electron-macos-branding.cjs",
+    "dev": "npm run build:electron && node scripts/patch-electron-macos-branding.cjs && concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "build:electron": "tsc -p electron/tsconfig.json",
     "dev:vite": "vite",
-    "dev:electron": "electron .",
+    "dev:electron": "node scripts/patch-electron-macos-branding.cjs && electron .",
     "build": "npm run build:electron && vite build && electron-builder",
     "build:vite": "vite build",
     "preview": "vite preview",
@@ -54,7 +55,8 @@
   },
   "build": {
     "appId": "ai.viper.desktop",
-    "productName": "Viper AI",
+    "productName": "Viper",
+    "icon": "resources/icon.png",
     "electronVersion": "33.2.0",
     "directories": {
       "output": "release"
@@ -62,6 +64,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "resources/**/*",
       "package.json"
     ],
     "mac": {

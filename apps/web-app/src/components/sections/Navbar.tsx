@@ -7,6 +7,7 @@ import { Logo } from '@/components/ui/Logo'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { MenuToggleIcon } from '@/components/ui/menu-toggle-icon'
 import { cn } from '@/lib/utils'
+import { readAccessToken } from '@/lib/auth-client'
 
 // ── Dropdown spring config (from navbar-menu.tsx) ────────────────────────────
 
@@ -40,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
     dropdown: [
       { label: 'Blog', href: '/blog' },
       { label: 'Support', href: '/support' },
+      { label: 'Account usage', href: '/account/usage' },
     ],
   },
 ]
@@ -51,6 +53,7 @@ const MOBILE_ITEMS: { label: string; href: string }[] = [
   { label: 'Pricing', href: '/pricing' },
   { label: 'Blog', href: '/blog' },
   { label: 'Support', href: '/support' },
+  { label: 'Account usage', href: '/account/usage' },
 ]
 
 // ── Hover dropdown item ───────────────────────────────────────────────────────
@@ -166,6 +169,11 @@ function MobileMenu({ open, children }: MobileMenuProps) {
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [activeDropdown, setActiveDropdown] = React.useState<string | null>(null)
+  const [hasSessionToken, setHasSessionToken] = React.useState(false)
+
+  React.useEffect(() => {
+    setHasSessionToken(Boolean(readAccessToken()))
+  }, [])
 
   // Lock body scroll when mobile menu is open
   React.useEffect(() => {
@@ -214,6 +222,27 @@ export default function Navbar() {
 
         {/* ── Right: Coming soon + Mobile toggle ── */}
         <div className="flex items-center gap-3">
+          {hasSessionToken ? (
+            <Link
+              href="/account/usage"
+              className={cn(
+                buttonVariants({ variant: 'ghost' }),
+                'hidden lg:inline-flex text-[15px] font-normal font-sans text-white/85 hover:text-white hover:bg-white/10 h-8 px-3',
+              )}
+            >
+              Usage
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className={cn(
+                buttonVariants({ variant: 'ghost' }),
+                'hidden lg:inline-flex text-[15px] font-normal font-sans text-white/85 hover:text-white hover:bg-white/10 h-8 px-3',
+              )}
+            >
+              Sign in
+            </Link>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -258,6 +287,29 @@ export default function Navbar() {
             ))}
           </div>
           <div className="flex flex-col gap-2 pb-4">
+            {hasSessionToken ? (
+              <Link
+                href="/account/usage"
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  buttonVariants({ variant: 'ghost' }),
+                  'justify-start text-white text-sm font-medium hover:bg-white/10',
+                )}
+              >
+                Account usage
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  buttonVariants({ variant: 'ghost' }),
+                  'justify-start text-white text-sm font-medium hover:bg-white/10',
+                )}
+              >
+                Sign in
+              </Link>
+            )}
             <Button
               type="button"
               variant="outline"

@@ -5,8 +5,8 @@
  *   verifyStripeEvent      — validates raw body + Stripe-Signature via SDK constructEvent
  *   loadPlanEntitlements   — reads VIPER_STRIPE_PRICE_ENTITLEMENTS env (JSON map) or falls
  *                            back to committed FREE_PLAN_ENTITLEMENTS
- *   handleSubscriptionUpdated  — applies plan from active price id
- *   handleSubscriptionDeleted  — reverts to allow-all (deletes entitlement row)
+ *   handleSubscriptionUpdated  — applies plan from active price id + Stripe ids + optional billing_plan_slug
+ *   handleSubscriptionDeleted  — `free` plan, clear subscription id, delete entitlement row
  *   processStripeWebhook   — orchestrates: idempotency check → dispatch → DB write
  *
  * Workspace routing:
@@ -27,6 +27,8 @@ import {
   insertWebhookEventIfNew,
   upsertWorkspaceEntitlements,
   deleteWorkspaceEntitlements,
+  setWorkspaceStripeBilling,
+  clearWorkspacePaidSubscription,
   type UpsertEntitlementsParams,
 } from "@repo/database";
 import { workflowLog } from "../services/assistant.service.js";
@@ -40,6 +42,11 @@ export interface PriceEntitlementConfig {
   allowed_modes?: string[] | null;
   allowed_model_tiers?: string[] | null;
   flags?: Record<string, unknown>;
+  /**
+   * Phase 6 — `workspaces.billing_plan_slug` (FK to `billing_plans.slug`), e.g. `pro_20`, `plus_40`.
+   * When set, the webhook updates the workspace row after applying `workspace_entitlements`.
+   */
+  billing_plan_slug?: string;
 }
 
 /** Parsed plan entitlement map: priceId → config */
@@ -57,10 +64,10 @@ export interface WebhookResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Fallback "free" plan applied when a subscription is deleted and no explicit
- * free-plan price is configured. Deleting the entitlement row causes F.30
- * to fall back to allow-all, which is the intended "free" behavior.
- * See docs/ENV.md for VIPER_STRIPE_PRICE_ENTITLEMENTS for overriding.
+ * Reference shape for a "free" entitlement overlay (not used directly on delete).
+ * `handleSubscriptionDeleted` sets `workspaces.billing_plan_slug = 'free'`, clears
+ * the subscription id, and deletes `workspace_entitlements` so composed entitlements
+ * come from the `free` billing plan only.
  */
 export const FREE_PLAN_ENTITLEMENTS: PriceEntitlementConfig = {
   allowed_modes: null,    // null = all modes allowed
@@ -126,6 +133,29 @@ function extractWorkspaceId(obj: Record<string, unknown>): string | null {
  * Get the first price ID from a Stripe subscription's items list.
  * Returns null if not found.
  */
+function normalizeBillingPlanSlug(config: PriceEntitlementConfig): string | undefined {
+  const s = config.billing_plan_slug;
+  if (typeof s !== "string") return undefined;
+  const t = s.trim();
+  return t.length > 0 ? t : undefined;
+}
+
+/** Subscription states for which we grant mapped entitlements (not incomplete / canceled). */
+const SUBSCRIPTION_STATUS_GRANTS_ENTITLEMENTS = new Set([
+  "active",
+  "trialing",
+  "past_due",
+]);
+
+function extractStripeCustomerIdFromSubscription(sub: Stripe.Subscription): string | null {
+  const c = sub.customer;
+  if (typeof c === "string" && c.length > 0) return c;
+  if (c && typeof c === "object" && "id" in c && typeof (c as { id?: string }).id === "string") {
+    return (c as { id: string }).id;
+  }
+  return null;
+}
+
 function extractFirstPriceId(subscription: Record<string, unknown>): string | null {
   const items = subscription["items"];
   if (!items || typeof items !== "object") return null;
@@ -165,6 +195,10 @@ async function handleSubscriptionUpdated(
   workspaceId: string,
   planMap: PriceEntitlementMap,
 ): Promise<"applied" | "ignored"> {
+  if (!SUBSCRIPTION_STATUS_GRANTS_ENTITLEMENTS.has(subscription.status)) {
+    return "ignored";
+  }
+
   const priceId = extractFirstPriceId(subscription as unknown as Record<string, unknown>);
 
   if (!priceId) {
@@ -185,6 +219,30 @@ async function handleSubscriptionUpdated(
     flags: config.flags ?? {},
   };
   await upsertWorkspaceEntitlements(pool, params);
+
+  const customerId = extractStripeCustomerIdFromSubscription(subscription);
+  const planSlug = normalizeBillingPlanSlug(config);
+  if (customerId) {
+    try {
+      await setWorkspaceStripeBilling(pool, workspaceId, {
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscription.id,
+        ...(planSlug ? { billing_plan_slug: planSlug } : {}),
+      });
+    } catch {
+      // Unknown workspace id or invalid billing_plan_slug FK — entitlements still stored
+    }
+  } else if (planSlug) {
+    try {
+      await pool.query(
+        `UPDATE workspaces SET billing_plan_slug = $2, updated_at = now() WHERE id = $1`,
+        [workspaceId, planSlug],
+      );
+    } catch {
+      // FK violation on unknown slug — non-fatal; entitlements still applied
+    }
+  }
+
   return "applied";
 }
 
@@ -192,7 +250,7 @@ async function handleSubscriptionDeleted(
   workspaceId: string,
 ): Promise<"applied"> {
   const pool = getPool();
-  // Delete the entitlements row → F.30 allows all (safe default).
+  await clearWorkspacePaidSubscription(pool, workspaceId);
   await deleteWorkspaceEntitlements(pool, workspaceId);
   return "applied";
 }
@@ -209,29 +267,12 @@ async function handleCheckoutSessionCompleted(
 
   if (!subscriptionId) return "ignored";
 
-  // We only have the session here; entitlements will be set when
-  // customer.subscription.updated fires. Optionally link stripe_customer_id.
   const pool = getPool();
   const customerId = typeof session.customer === "string"
     ? session.customer
     : (session.customer as Stripe.Customer | null)?.id;
 
-  if (customerId) {
-    try {
-      await pool.query(
-        `UPDATE workspaces
-         SET stripe_customer_id     = $2,
-             stripe_subscription_id = $3,
-             updated_at             = now()
-         WHERE id = $1`,
-        [workspaceId, customerId, subscriptionId],
-      );
-    } catch {
-      // Non-fatal — workspace linkage is best-effort in F.34
-    }
-  }
-
-  // Eagerly apply entitlement if line items have a known price
+  // Eagerly apply entitlement if line items have a known price (Checkout expanded line_items).
   const lineItems = (session as unknown as Record<string, unknown>)["line_items"];
   if (lineItems && typeof lineItems === "object") {
     const data = (lineItems as Record<string, unknown>)["data"];
@@ -245,8 +286,31 @@ async function handleCheckoutSessionCompleted(
           allowed_model_tiers: config.allowed_model_tiers ?? null,
           flags: config.flags ?? {},
         });
+        if (customerId) {
+          const planSlug = normalizeBillingPlanSlug(config);
+          try {
+            await setWorkspaceStripeBilling(pool, workspaceId, {
+              stripe_customer_id: customerId,
+              stripe_subscription_id: subscriptionId,
+              ...(planSlug ? { billing_plan_slug: planSlug } : {}),
+            });
+          } catch {
+            /* non-fatal */
+          }
+        }
         return "applied";
       }
+    }
+  }
+
+  if (customerId) {
+    try {
+      await setWorkspaceStripeBilling(pool, workspaceId, {
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId,
+      });
+    } catch {
+      // Non-fatal — workspace linkage is best-effort in F.34
     }
   }
 

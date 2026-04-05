@@ -82,6 +82,10 @@ export function useRegisterDefaultCommands() {
       title: "Focus Chat",
       category: "Workbench",
       run: () => {
+        if (!workspace?.root) {
+          window.alert("Open a folder or workspace first to use Chat.");
+          return;
+        }
         window.dispatchEvent(new CustomEvent("viper:focus-chat"));
       },
     });
@@ -349,6 +353,7 @@ export function useRegisterDefaultCommands() {
         const sessionId = chat.activeSessionId ?? chat.createSession();
         chat.addAttachedPath(sessionId, full);
         chat.setActiveSessionId(sessionId);
+        window.dispatchEvent(new CustomEvent("viper:focus-chat"));
       },
     });
 
@@ -361,6 +366,7 @@ export function useRegisterDefaultCommands() {
         const full = `${workspace.root}/${args.target.path}`.replace(/\/+/g, "/");
         const sessionId = chat.addAttachedPathToNewSession(full);
         chat.setActiveSessionId(sessionId);
+        window.dispatchEvent(new CustomEvent("viper:focus-chat"));
       },
     });
 
@@ -377,6 +383,7 @@ export function useRegisterDefaultCommands() {
         const sessionId = chat.activeSessionId ?? chat.createSession();
         chat.addAttachedPath(sessionId, full);
         chat.setActiveSessionId(sessionId);
+        window.dispatchEvent(new CustomEvent("viper:focus-chat"));
       },
     });
 
@@ -392,6 +399,7 @@ export function useRegisterDefaultCommands() {
           : workspace.root;
         const sessionId = chat.addAttachedPathToNewSession(full);
         chat.setActiveSessionId(sessionId);
+        window.dispatchEvent(new CustomEvent("viper:focus-chat"));
       },
     });
 
